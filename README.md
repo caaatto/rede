@@ -223,4 +223,4 @@ Do not lose your passphrase. There is no recovery mechanism.
 
 ## license
 
-ISC
+AGPL-3.0 -- see [LICENSE](LICENSE)
