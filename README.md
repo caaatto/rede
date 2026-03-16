@@ -54,10 +54,7 @@ so an observer cannot infer content from message length.
 ## install
 
 ```
-git clone git@github.com:caaatto/rede.git
-cd rede
-npm install
-cp .env.example .env
+git clone git@github.com:caaatto/rede.git && cd rede && npm install && cp .env.example .env
 ```
 
 Edit `.env` to configure your server connection:
