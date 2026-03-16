@@ -54,9 +54,25 @@ so an observer cannot infer content from message length.
 ## install
 
 ```
-git clone git@github.com:caaatto/rede-client.git
-cd rede-client
+git clone git@github.com:caaatto/rede.git
+cd rede
 npm install
+cp .env.example .env
+```
+
+Edit `.env` to configure your server connection:
+```
+REDE_SERVER=wss://your-server:9377       # or ws://<address>.i2p for I2P
+REDE_TRANSPORT=                          # i2p or tor (leave empty for clearnet)
+REDE_I2P_PROXY=socks5h://127.0.0.1:4447 # only needed for I2P
+REDE_TOR_PROXY=socks5h://127.0.0.1:9050 # only needed for Tor
+```
+
+For WSS/TLS, generate self-signed certs:
+```
+mkdir -p certs
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+  -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes -subj "/CN=rede"
 ```
 
 
