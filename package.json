@@ -14,6 +14,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^17.3.1",
     "socks-proxy-agent": "8.0.5",
     "tweetnacl": "1.0.3",
     "tweetnacl-util": "0.15.1",

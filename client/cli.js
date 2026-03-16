@@ -1,5 +1,7 @@
 'use strict';
 
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
 const { MSG } = require('../shared/protocol');
 const { RedeConnection } = require('./network');
 const { cliBoot } = require('./boot');
@@ -85,6 +87,9 @@ if (!opts.user) {
 }
 
 function getDefaultServer() {
+  // Check .env / REDE_SERVER first
+  if (process.env.REDE_SERVER) return process.env.REDE_SERVER;
+
   if (opts.i2p) {
     // Try to load I2P address from config file
     const fs = require('fs');
@@ -99,11 +104,19 @@ function getDefaultServer() {
         if (addr) return `ws://${addr}`;
       } catch {}
     }
-    console.error('Error: No I2P address found. Set --server or create i2p/rede.i2p.addr');
+    console.error('Error: No I2P address found. Set --server, REDE_SERVER, or create i2p/rede.i2p.addr');
     process.exit(1);
   }
   return 'wss://localhost:9377';
 }
+
+// CLI flag --server > .env REDE_SERVER > getDefaultServer() fallback
+const envTransport = (process.env.REDE_TRANSPORT || '').toLowerCase();
+if (!opts.i2p && envTransport === 'i2p') opts.i2p = true;
+if (!opts.tor && envTransport === 'tor') opts.tor = true;
+if (!opts.torProxy && process.env.REDE_TOR_PROXY) opts.torProxy = process.env.REDE_TOR_PROXY;
+if (!opts.i2pProxy && process.env.REDE_I2P_PROXY) opts.i2pProxy = process.env.REDE_I2P_PROXY;
+
 const serverUrl = opts.server || getDefaultServer();
 
 // --- Passphrase ---

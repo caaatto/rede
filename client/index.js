@@ -1,5 +1,7 @@
 'use strict';
 
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
 const { MSG } = require('../shared/protocol');
 const { RedeConnection } = require('./network');
 const { RedeUI } = require('./ui');
@@ -10,14 +12,15 @@ const { bootSequence } = require('./boot');
 
 // --- Parse CLI args ---
 const args = process.argv.slice(2);
-let serverUrl = 'wss://localhost:9377';
-let useTor = false;
-let useI2P = false;
+const envTransport = (process.env.REDE_TRANSPORT || '').toLowerCase();
+let serverUrl = process.env.REDE_SERVER || 'wss://localhost:9377';
+let useTor = envTransport === 'tor';
+let useI2P = envTransport === 'i2p';
 let userId = null;
 let inviteCode = null;
 let linkCode = null;
-let torProxy = null;
-let i2pProxy = null;
+let torProxy = process.env.REDE_TOR_PROXY || null;
+let i2pProxy = process.env.REDE_I2P_PROXY || null;
 
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
