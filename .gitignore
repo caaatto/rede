@@ -6,7 +6,6 @@ dist/
 
 # Credentials & secrets
 CREDENTIALS.txt
-LOGIN.bat
 *.pem
 *.key
 .env
@@ -19,11 +18,10 @@ LOGIN.bat
 .admin_key
 .server_signing_key
 
-# Utility scripts (not part of the client)
+# Utility / test scripts
 auto-register.js
 auto-register-v2.js
 register-wrapper.js
-chat-with-claude.js
 
 # Windows artifacts
 nul
@@ -41,16 +39,3 @@ desktop.ini
 .vscode/
 .idea/
 *.sublime-*
-
-# Claude / AI tooling
-.claude/
-.claude.*
-CLAUDE.md
-.cursorrules
-.cursor/
-.aider*
-.continue/
-.codeium/
-.tabnine*
-.copilot/
-.github/copilot*
