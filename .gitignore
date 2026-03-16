@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+
+# Build / Distribution
+dist/
+
+# Credentials & secrets
+CREDENTIALS.txt
+LOGIN.bat
+*.pem
+*.key
+.env
+.env.*
+
+# Profile data
+.rede/
+*.enc
+.nonces
+.admin_key
+.server_signing_key
+
+# Utility scripts (not part of the client)
+auto-register.js
+auto-register-v2.js
+register-wrapper.js
+chat-with-claude.js
+
+# Windows artifacts
+nul
+*.bat
+Thumbs.db
+desktop.ini
+
+# OS files
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE / Editor
+.vscode/
+.idea/
+*.sublime-*
+
+# Claude / AI tooling
+.claude/
+.claude.*
+CLAUDE.md
+.cursorrules
+.cursor/
+.aider*
+.continue/
+.codeium/
+.tabnine*
+.copilot/
+.github/copilot*

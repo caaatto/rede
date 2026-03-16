@@ -1,0 +1,22 @@
+{
+  "name": "rede",
+  "version": "1.0.0",
+  "description": "Secure anonymous terminal messenger with E2EE",
+  "main": "server/index.js",
+  "scripts": {
+    "server": "node server/index.js",
+    "client": "node client/index.js",
+    "gen-invite": "node server/index.js --gen-invite",
+    "admin-key": "node server/index.js --show-admin-key",
+    "i2p-test": "bash i2p/test-connection.sh"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "socks-proxy-agent": "8.0.5",
+    "tweetnacl": "1.0.3",
+    "tweetnacl-util": "0.15.1",
+    "ws": "8.19.0"
+  }
+}
