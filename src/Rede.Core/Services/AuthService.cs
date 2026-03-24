@@ -119,6 +119,7 @@ public class AuthService
     {
         if (Profile is null || Passphrase is null) return;
 
+        var oldUserId = Profile.UserId;
         Profile.UserId = ProtocolSerializer.GetString(msg, "userId") ?? Profile.UserId;
         Profile.DisplayName = ProtocolSerializer.GetString(msg, "displayName") ?? Profile.DisplayName;
 
@@ -133,7 +134,12 @@ public class AuthService
             _conn.ServerSigningKey = serverSigKey;
         }
 
+        // Save under the real userId (server-assigned)
         await _store.SaveProfileAsync(Profile, Passphrase);
+
+        // Clean up the temp "pending" profile file
+        if (oldUserId != Profile.UserId)
+            _store.DeleteProfile(oldUserId);
 
         OnSystemMessage?.Invoke("Registration successful!");
         OnSystemMessage?.Invoke($"Your ID: {Profile.UserId}");

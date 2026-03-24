@@ -72,6 +72,20 @@ public class ProfileStore
         return File.Exists(GetProfilePath(userId)) || File.Exists(GetLegacyProfilePath(userId));
     }
 
+    public void DeleteProfile(string userId)
+    {
+        try
+        {
+            var p = GetProfilePath(userId);
+            if (File.Exists(p))
+            {
+                SecureOverwrite(p);
+                File.Delete(p);
+            }
+        }
+        catch { }
+    }
+
     public async Task<Profile?> LoadProfileAsync(string userId, string passphrase)
     {
         EnsureDir();
