@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -8,8 +9,8 @@ public partial class LoginViewModel : ViewModelBase
 {
     [ObservableProperty] private string _userId = "";
     [ObservableProperty] private string _passphrase = "";
-    [ObservableProperty] private string _serverUrl = "wss://localhost:9377";
-    [ObservableProperty] private string _transport = "Direct";
+    [ObservableProperty] private string _serverUrl = "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p";
+    [ObservableProperty] private string _transport = "I2P";
     [ObservableProperty] private string _inviteCode = "";
     [ObservableProperty] private string _errorMessage = "";
     [ObservableProperty] private string _statusMessage = "";
@@ -30,13 +31,21 @@ public partial class LoginViewModel : ViewModelBase
 
     private void LoadEnvDefaults()
     {
-        var envFile = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".env");
-        // Also try project root
-        var altFile = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Rede", "rede-client", ".env");
+        // Try multiple locations for .env
+        string?[] candidates = {
+            // Repo root (when running from source via dotnet run)
+            FindRepoEnv(),
+            // User home ~/Rede/rede-client/.env
+            System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Rede", "rede-client", ".env"),
+            // Installed location
+            System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Rede", ".env"),
+        };
 
-        var path = System.IO.File.Exists(envFile) ? envFile : System.IO.File.Exists(altFile) ? altFile : null;
+        var path = candidates.FirstOrDefault(p => p is not null && System.IO.File.Exists(p));
         if (path is null) return;
 
         foreach (var line in System.IO.File.ReadAllLines(path))
@@ -122,5 +131,19 @@ public partial class LoginViewModel : ViewModelBase
             IsLoading = false;
             IsRegistering = false;
         }
+    }
+
+    private static string? FindRepoEnv()
+    {
+        // Walk up from executable looking for .env in a rede-client dir
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            var envPath = System.IO.Path.Combine(dir, ".env");
+            if (System.IO.File.Exists(envPath))
+                return envPath;
+            dir = System.IO.Directory.GetParent(dir)?.FullName;
+        }
+        return null;
     }
 }
