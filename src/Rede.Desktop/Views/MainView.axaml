@@ -210,12 +210,12 @@
                                                TextWrapping="Wrap"
                                                IsVisible="{Binding IsSystem}" />
 
-                                    <!-- Incoming message (left-aligned) -->
+                                    <!-- Incoming message (left) -->
                                     <StackPanel Spacing="2"
                                                 HorizontalAlignment="Left"
-                                                MaxWidth="600"
+                                                Margin="0,0,80,0"
+                                                MaxWidth="500"
                                                 IsVisible="{Binding !IsOwn}">
-                                        <!-- Hidden when system -->
                                         <StackPanel Orientation="Horizontal" Spacing="8"
                                                     IsVisible="{Binding !IsSystem}">
                                             <TextBlock Text="{Binding From}"
@@ -227,41 +227,46 @@
                                                        FontSize="{StaticResource RedeCaptionSize}"
                                                        VerticalAlignment="Bottom" />
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Spacing="6"
-                                                    IsVisible="{Binding !IsSystem}">
-                                            <TextBlock Text="{Binding Text}"
-                                                       TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding TtlDisplay}"
-                                                       Classes="muted"
-                                                       FontSize="{StaticResource RedeCaptionSize}"
-                                                       VerticalAlignment="Bottom"
-                                                       IsVisible="{Binding HasTtl}" />
-                                        </StackPanel>
+                                        <Border Background="{StaticResource RedeSurfaceBrush}"
+                                                CornerRadius="4,12,12,12"
+                                                Padding="12,8"
+                                                IsVisible="{Binding !IsSystem}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding TtlDisplay}"
+                                                           Classes="muted"
+                                                           FontSize="{StaticResource RedeCaptionSize}"
+                                                           VerticalAlignment="Bottom"
+                                                           IsVisible="{Binding HasTtl}" />
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
 
-                                    <!-- Own message (left-aligned, like standard messengers) -->
+                                    <!-- Own message (right) -->
                                     <StackPanel Spacing="2"
-                                                HorizontalAlignment="Left"
-                                                MaxWidth="600"
+                                                HorizontalAlignment="Right"
+                                                Margin="80,0,0,0"
+                                                MaxWidth="500"
                                                 IsVisible="{Binding IsOwn}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="You"
-                                                       Foreground="{StaticResource RedeAccentTealBrush}"
-                                                       FontWeight="{StaticResource RedeWeightMedium}"
-                                                       FontSize="{StaticResource RedeSmallSize}" />
+                                        <Border Background="{StaticResource RedeSurfaceActiveBrush}"
+                                                CornerRadius="12,4,12,12"
+                                                Padding="12,8">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding TtlDisplay}"
+                                                           Classes="muted"
+                                                           FontSize="{StaticResource RedeCaptionSize}"
+                                                           VerticalAlignment="Bottom"
+                                                           IsVisible="{Binding HasTtl}" />
+                                            </StackPanel>
+                                        </Border>
+                                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                                    HorizontalAlignment="Right">
                                             <TextBlock Text="{Binding TimeString}"
                                                        Classes="muted"
-                                                       FontSize="{StaticResource RedeCaptionSize}"
-                                                       VerticalAlignment="Bottom" />
-                                        </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="{Binding Text}"
-                                                       TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding TtlDisplay}"
-                                                       Classes="muted"
-                                                       FontSize="{StaticResource RedeCaptionSize}"
-                                                       VerticalAlignment="Bottom"
-                                                       IsVisible="{Binding HasTtl}" />
+                                                       FontSize="{StaticResource RedeCaptionSize}" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Grid>
