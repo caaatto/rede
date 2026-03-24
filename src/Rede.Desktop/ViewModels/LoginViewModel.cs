@@ -9,8 +9,7 @@ public partial class LoginViewModel : ViewModelBase
 {
     [ObservableProperty] private string _userId = "";
     [ObservableProperty] private string _passphrase = "";
-    [ObservableProperty] private string _serverUrl = "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p";
-    [ObservableProperty] private string _transport = "I2P";
+    [ObservableProperty] private string _selectedServer = "Nürnberg";
     [ObservableProperty] private string _inviteCode = "";
     [ObservableProperty] private string _errorMessage = "";
     [ObservableProperty] private string _statusMessage = "";
@@ -18,7 +17,18 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private bool _isRegistering;
     [ObservableProperty] private bool _isRegisterMode;
 
-    public string[] TransportOptions { get; } = { "Direct", "Tor", "I2P" };
+    public static readonly (string Name, string Url, string Transport)[] Servers =
+    {
+        ("Nürnberg", "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p", "I2P"),
+    };
+
+    public string[] ServerOptions { get; } = Servers.Select(s => s.Name).ToArray();
+
+    public string ServerUrl => Servers.FirstOrDefault(s => s.Name == SelectedServer).Url
+                               ?? Servers[0].Url;
+
+    public string Transport => Servers.FirstOrDefault(s => s.Name == SelectedServer).Transport
+                               ?? Servers[0].Transport;
 
     public string UserIdWatermark => IsRegisterMode ? "alice" : "alice#a3f1";
 
@@ -39,15 +49,12 @@ public partial class LoginViewModel : ViewModelBase
 
     private void LoadEnvDefaults()
     {
-        // Try multiple locations for .env
+        // .env can override the selected server by name
         string?[] candidates = {
-            // Repo root (when running from source via dotnet run)
             FindRepoEnv(),
-            // User home ~/Rede/rede-client/.env
             System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 "Rede", "rede-client", ".env"),
-            // Installed location
             System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Rede", ".env"),
@@ -64,20 +71,8 @@ public partial class LoginViewModel : ViewModelBase
             var key = trimmed[..eq].Trim();
             var val = trimmed[(eq + 1)..].Trim();
 
-            switch (key)
-            {
-                case "REDE_SERVER":
-                    ServerUrl = val;
-                    break;
-                case "REDE_TRANSPORT":
-                    Transport = val switch
-                    {
-                        "i2p" or "I2P" => "I2P",
-                        "tor" or "Tor" => "Tor",
-                        _ => "Direct",
-                    };
-                    break;
-            }
+            if (key == "REDE_SERVER_NAME" && ServerOptions.Contains(val))
+                SelectedServer = val;
         }
     }
 

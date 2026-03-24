@@ -87,21 +87,12 @@
                              IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
-                <!-- Server URL -->
+                <!-- Server -->
                 <StackPanel Spacing="6">
                     <TextBlock Text="Server" Classes="secondary"
                                FontWeight="{StaticResource RedeWeightMedium}" />
-                    <TextBox Text="{Binding ServerUrl}"
-                             Watermark="wss://localhost:9377"
-                             IsEnabled="{Binding !IsLoading}" />
-                </StackPanel>
-
-                <!-- Transport -->
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Transport" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
-                    <ComboBox ItemsSource="{Binding TransportOptions}"
-                              SelectedItem="{Binding Transport}"
+                    <ComboBox ItemsSource="{Binding ServerOptions}"
+                              SelectedItem="{Binding SelectedServer}"
                               HorizontalAlignment="Stretch"
                               IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
