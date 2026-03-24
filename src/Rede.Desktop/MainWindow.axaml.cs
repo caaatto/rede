@@ -28,6 +28,35 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         ShowLogin();
+        CheckForUpdatesAsync();
+    }
+
+    private async void CheckForUpdatesAsync()
+    {
+        var repoPath = UpdateService.DetectRepoPath();
+        if (repoPath is null) return;
+
+        var updater = new UpdateService(repoPath);
+        var (hasUpdates, local, remote) = await updater.CheckForUpdatesAsync();
+
+        if (hasUpdates)
+        {
+            var changelog = await updater.GetChangelogAsync(local);
+            Dispatcher.UIThread.Post(() =>
+            {
+                _loginVm.StatusMessage = $"Update available ({remote[..8]})";
+            });
+
+            // Auto-pull and rebuild
+            var success = await updater.PullAndBuildAsync();
+            if (success)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _loginVm.StatusMessage = "Updated! Restart to apply.";
+                });
+            }
+        }
     }
 
     private void ShowLogin()

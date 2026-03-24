@@ -12,6 +12,7 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private string _transport = "Direct";
     [ObservableProperty] private string _inviteCode = "";
     [ObservableProperty] private string _errorMessage = "";
+    [ObservableProperty] private string _statusMessage = "";
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private bool _isRegistering;
 

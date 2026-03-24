@@ -109,6 +109,14 @@
                                Foreground="{StaticResource RedeAccentVioletBrush}" />
                 </StackPanel>
 
+                <!-- Update status -->
+                <TextBlock Text="{Binding StatusMessage}"
+                           Classes="secondary"
+                           FontSize="{StaticResource RedeSmallSize}"
+                           HorizontalAlignment="Center"
+                           Foreground="{StaticResource RedeAccentTealBrush}"
+                           IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
             </StackPanel>
         </Border>
     </Grid>
