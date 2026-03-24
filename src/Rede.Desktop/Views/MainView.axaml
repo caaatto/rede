@@ -181,7 +181,8 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           x:Name="MessageScroller">
-                <ItemsControl ItemsSource="{Binding Messages}" Padding="16,8">
+                <ItemsControl ItemsSource="{Binding Messages}" Padding="16,8"
+                              VerticalAlignment="Bottom">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:ChatMessageViewModel">
                             <Border Margin="0,2" Padding="0,4">
@@ -238,22 +239,29 @@
                                         </StackPanel>
                                     </StackPanel>
 
-                                    <!-- Own message (right-aligned) -->
+                                    <!-- Own message (left-aligned, like standard messengers) -->
                                     <StackPanel Spacing="2"
-                                                HorizontalAlignment="Right"
+                                                HorizontalAlignment="Left"
                                                 MaxWidth="600"
                                                 IsVisible="{Binding IsOwn}">
-                                        <TextBlock Text="{Binding Text}"
-                                                   TextWrapping="Wrap" />
-                                        <StackPanel Orientation="Horizontal" Spacing="6"
-                                                    HorizontalAlignment="Right">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Text="You"
+                                                       Foreground="{StaticResource RedeAccentTealBrush}"
+                                                       FontWeight="{StaticResource RedeWeightMedium}"
+                                                       FontSize="{StaticResource RedeSmallSize}" />
+                                            <TextBlock Text="{Binding TimeString}"
+                                                       Classes="muted"
+                                                       FontSize="{StaticResource RedeCaptionSize}"
+                                                       VerticalAlignment="Bottom" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding Text}"
+                                                       TextWrapping="Wrap" />
                                             <TextBlock Text="{Binding TtlDisplay}"
                                                        Classes="muted"
                                                        FontSize="{StaticResource RedeCaptionSize}"
+                                                       VerticalAlignment="Bottom"
                                                        IsVisible="{Binding HasTtl}" />
-                                            <TextBlock Text="{Binding TimeString}"
-                                                       Classes="muted"
-                                                       FontSize="{StaticResource RedeCaptionSize}" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Grid>
