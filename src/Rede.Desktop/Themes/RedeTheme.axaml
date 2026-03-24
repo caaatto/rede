@@ -33,9 +33,9 @@
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
 
-    <!-- TextBox — input fields -->
-    <Style Selector="TextBox.rede">
-        <Setter Property="Background" Value="{DynamicResource RedeSurfaceBrush}" />
+    <!-- TextBox — all input fields -->
+    <Style Selector="TextBox">
+        <Setter Property="Background" Value="{DynamicResource RedeBackgroundBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource RedeBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
@@ -45,8 +45,17 @@
         <Setter Property="CaretBrush" Value="{DynamicResource RedeAccentVioletBrush}" />
     </Style>
 
-    <!-- Button — primary -->
-    <Style Selector="Button.rede">
+    <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource RedeAccentVioletBrush}" />
+        <Setter Property="BorderThickness" Value="1.5" />
+    </Style>
+
+    <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource RedeSurfaceHoverBrush}" />
+    </Style>
+
+    <!-- Button — primary (default for all buttons) -->
+    <Style Selector="Button">
         <Setter Property="Background" Value="{DynamicResource RedeAccentVioletBrush}" />
         <Setter Property="Foreground" Value="White" />
         <Setter Property="BorderThickness" Value="0" />
@@ -55,6 +64,10 @@
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <Style Selector="Button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource RedeAccentVioletDimBrush}" />
     </Style>
 
     <!-- Button — ghost -->
@@ -71,6 +84,22 @@
     <Style Selector="Button.ghost:pointerover">
         <Setter Property="Background" Value="{DynamicResource RedeSurfaceHoverBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+    </Style>
+
+    <!-- ComboBox -->
+    <Style Selector="ComboBox">
+        <Setter Property="Background" Value="{DynamicResource RedeBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource RedeBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="10,8" />
+    </Style>
+
+    <!-- Separator -->
+    <Style Selector="Separator">
+        <Setter Property="Background" Value="{DynamicResource RedeBorderBrush}" />
+        <Setter Property="Height" Value="1" />
     </Style>
 
     <!-- ListBoxItem -->

@@ -38,6 +38,7 @@
     <SolidColorBrush x:Key="RedeTextMutedBrush" Color="{StaticResource RedeTextMuted}" />
 
     <SolidColorBrush x:Key="RedeAccentVioletBrush" Color="{StaticResource RedeAccentViolet}" />
+    <SolidColorBrush x:Key="RedeAccentVioletDimBrush" Color="{StaticResource RedeAccentVioletDim}" />
     <SolidColorBrush x:Key="RedeAccentTealBrush" Color="{StaticResource RedeAccentTeal}" />
 
     <SolidColorBrush x:Key="RedeWarningBrush" Color="{StaticResource RedeWarning}" />

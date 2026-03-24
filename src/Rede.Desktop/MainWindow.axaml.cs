@@ -27,8 +27,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        ShowLogin();
-        CheckForUpdatesAsync();
+        Loaded += (_, _) =>
+        {
+            ShowLogin();
+            CheckForUpdatesAsync();
+        };
     }
 
     private async void CheckForUpdatesAsync()
