@@ -51,10 +51,9 @@ so an observer cannot infer content from message length.
 ## requirements
 
 ### desktop client (v2)
-- .NET 8 SDK
-- libsodium (installed automatically via Sodium.Core NuGet)
-- A running Rede server with an invite code
-- Optional: Tor or I2P for anonymous transport
+- Windows x64 or Linux x64
+- Optional: .NET 8 SDK (only if building from source)
+- Optional: i2pd or Tor for anonymous transport
 
 ### terminal client (v1)
 - Node.js >= 18
@@ -64,10 +63,29 @@ so an observer cannot infer content from message length.
 
 ## install
 
-### desktop client
+### desktop client — standalone executable (recommended)
+
+Download the latest release for your platform from
+[GitHub Releases](https://github.com/caaatto/rede/releases).
+
+**Linux:**
+```
+chmod +x Rede-Desktop-linux-x64
+./Rede-Desktop-linux-x64
+```
+
+**Windows:**
+```
+Rede-Desktop-win-x64.exe
+```
+
+No .NET SDK required — the executable is self-contained.
+The client auto-updates when a new release is published.
+
+### desktop client — from source
 
 ```
-git clone git@github.com:caaatto/rede.git && cd rede/rede-client
+git clone https://github.com/caaatto/rede.git && cd rede/rede-client
 dotnet build Rede.sln
 dotnet run --project src/Rede.Desktop
 ```
@@ -75,7 +93,7 @@ dotnet run --project src/Rede.Desktop
 ### terminal client
 
 ```
-git clone git@github.com:caaatto/rede.git && cd rede && npm install && cp .env.example .env
+git clone https://github.com/caaatto/rede.git && cd rede && npm install && cp .env.example .env
 ```
 
 Edit `.env` to configure your server connection:
@@ -98,19 +116,24 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
 
 ### desktop GUI
 
-Launch the desktop client:
+Launch the desktop client (standalone exe or from source):
 ```
-dotnet run --project src/Rede.Desktop
+./Rede-Desktop-linux-x64          # standalone
+dotnet run --project src/Rede.Desktop   # from source
 ```
 
 The GUI provides login/register, sidebar with contacts and groups,
 chat view with message history, and a settings panel. All slash
 commands from the terminal client also work in the message input.
 
-Configure via `~/.rede/.env` or environment variables:
+Right-click a contact to invite them to a group or view their fingerprint.
+
+Configure via `.env` file or environment variables. The client searches
+for `.env` in the repo root, `~/Rede/rede-client/`, and
+`~/.local/share/Rede/`:
 ```
-REDE_SERVER=wss://your-server:9377
-REDE_TRANSPORT=               # i2p or tor
+REDE_SERVER=ws://your-server.i2p
+REDE_TRANSPORT=i2p              # i2p, tor, or empty for clearnet
 REDE_I2P_PROXY=socks5h://127.0.0.1:4447
 REDE_TOR_PROXY=socks5h://127.0.0.1:9050
 ```
@@ -161,26 +184,35 @@ node client/cli.js link -u <user#id> -s wss://<server> --link <code>
 ```
 
 
-## TUI commands
+## commands
+
+Available in both the desktop GUI message input and the terminal TUI.
 
 ```
   /add <id#xxxx>           add contact
   /confirm <id#xxxx>       accept key change
-  /reset <id#xxxx>         reset ratchet session
   /fingerprint [user]      show fingerprint
   /group <name>            create group
-  /ginvite <grp> <user>    invite to group
+  /ginvite <grp> <user>    invite to group (sends group key via E2EE DM)
   /kick <grp> <user>       remove from group
-  /rekey <group>           rotate sender key
-  /ttl <seconds>           self-destruct timer (0 = off)
-  /contacts                list contacts
-  /groups                  list groups
+  /rekey <group>           rotate group sender key
+  /ttl <days>              auto-delete messages after N days (0 = off)
   /link                    generate device link code
-  /key                     show your public key
+  /devices                 show device info
+  /settings                identity & key info
   /help                    show help
-  /quit                    exit
+```
 
-  tab .................. switch focus (contacts / input)
+### desktop keyboard shortcuts
+```
+  enter ............... send message
+  ctrl+q .............. quit
+  escape .............. toggle sidebar
+```
+
+### TUI keyboard shortcuts
+```
+  tab ................. switch focus (contacts / input)
   ctrl+c .............. quit
 ```
 
@@ -189,7 +221,10 @@ node client/cli.js link -u <user#id> -s wss://<server> --link <code>
 
 You need an invite code from the server admin to register.
 
-First run:
+**Desktop:** enter your display name, passphrase, server address,
+and invite code on the login screen, then click Register.
+
+**Terminal:**
 ```
 node client/index.js -s wss://<server>:9377 -i <invite-code>
 ```
