@@ -16,8 +16,16 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private string _statusMessage = "";
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private bool _isRegistering;
+    [ObservableProperty] private bool _isRegisterMode;
 
     public string[] TransportOptions { get; } = { "Direct", "Tor", "I2P" };
+
+    public string UserIdWatermark => IsRegisterMode ? "alice" : "alice#a3f1";
+
+    partial void OnIsRegisterModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(UserIdWatermark));
+    }
 
     // (userId, passphrase, serverUrl, transport)
     public event Action<string, string, string, string>? OnLoginRequested;
@@ -71,6 +79,13 @@ public partial class LoginViewModel : ViewModelBase
                     break;
             }
         }
+    }
+
+    [RelayCommand]
+    private void ToggleMode()
+    {
+        IsRegisterMode = !IsRegisterMode;
+        ErrorMessage = "";
     }
 
     [RelayCommand]

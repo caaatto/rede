@@ -27,12 +27,44 @@
 
                 <Separator Margin="0,4" />
 
-                <!-- User ID -->
+                <!-- Mode tabs -->
+                <Grid ColumnDefinitions="*,*">
+                    <Border Grid.Column="0"
+                            BorderThickness="0,0,0,2"
+                            Padding="0,0,0,8"
+                            BorderBrush="{Binding !IsRegisterMode, Converter={StaticResource StatusColorConverter}}">
+                        <Button Content="Login"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                Classes="ghost"
+                                BorderThickness="0"
+                                Command="{Binding ToggleModeCommand}"
+                                IsEnabled="{Binding IsRegisterMode}" />
+                    </Border>
+                    <Border Grid.Column="1"
+                            BorderThickness="0,0,0,2"
+                            Padding="0,0,0,8"
+                            BorderBrush="{Binding IsRegisterMode, Converter={StaticResource StatusColorConverter}}">
+                        <Button Content="Register"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                Classes="ghost"
+                                BorderThickness="0"
+                                Command="{Binding ToggleModeCommand}"
+                                IsEnabled="{Binding !IsRegisterMode}" />
+                    </Border>
+                </Grid>
+
+                <!-- User ID (login) / Display Name (register) -->
                 <StackPanel Spacing="6">
                     <TextBlock Text="User ID" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
+                               FontWeight="{StaticResource RedeWeightMedium}"
+                               IsVisible="{Binding !IsRegisterMode}" />
+                    <TextBlock Text="Display Name" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}"
+                               IsVisible="{Binding IsRegisterMode}" />
                     <TextBox Text="{Binding UserId}"
-                             Watermark="alice"
+                             Watermark="{Binding UserIdWatermark}"
                              IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
@@ -43,6 +75,15 @@
                     <TextBox Text="{Binding Passphrase}"
                              PasswordChar="*"
                              Watermark="min 12 characters"
+                             IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
+                <!-- Invite Code (register mode only) -->
+                <StackPanel Spacing="6" IsVisible="{Binding IsRegisterMode}">
+                    <TextBlock Text="Invite Code" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <TextBox Text="{Binding InviteCode}"
+                             Watermark="required for registration"
                              IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
@@ -65,15 +106,6 @@
                               IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
-                <!-- Invite Code (always visible) -->
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Invite Code" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
-                    <TextBox Text="{Binding InviteCode}"
-                             Watermark="required for registration"
-                             IsEnabled="{Binding !IsLoading}" />
-                </StackPanel>
-
                 <!-- Error message -->
                 <TextBlock Text="{Binding ErrorMessage}"
                            Foreground="{StaticResource RedeErrorBrush}"
@@ -81,22 +113,21 @@
                            IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                            TextWrapping="Wrap" />
 
-                <!-- Buttons -->
-                <Grid ColumnDefinitions="*,12,*">
-                    <Button Grid.Column="0"
-                            Content="Login"
-                            Command="{Binding LoginCommand}"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            IsEnabled="{Binding !IsLoading}" />
-                    <Button Grid.Column="2"
-                            Content="Register"
-                            Classes="ghost"
-                            Command="{Binding RegisterCommand}"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            IsEnabled="{Binding !IsLoading}" />
-                </Grid>
+                <!-- Login button (login mode) -->
+                <Button Content="Login"
+                        Command="{Binding LoginCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        IsVisible="{Binding !IsRegisterMode}"
+                        IsEnabled="{Binding !IsLoading}" />
+
+                <!-- Register button (register mode) -->
+                <Button Content="Register"
+                        Command="{Binding RegisterCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        IsVisible="{Binding IsRegisterMode}"
+                        IsEnabled="{Binding !IsLoading}" />
 
                 <!-- Loading indicator -->
                 <StackPanel Orientation="Horizontal"
