@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 
 namespace Rede.Core.Services;
 
@@ -6,6 +9,9 @@ public class UpdateService
 {
     private readonly string _repoPath;
     private readonly string _branch;
+
+    private const string GitHubRepo = "caaatto/rede";
+    private const string CurrentVersion = "2.0.1-beta";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;
@@ -128,6 +134,137 @@ public class UpdateService
         }
 
         return null;
+    }
+
+    // === GitHub Release-based updates (for standalone .exe downloads) ===
+
+    /// <summary>
+    /// Check GitHub Releases API for a newer version.
+    /// Works without git — for standalone exe installations.
+    /// </summary>
+    public static async Task<ReleaseInfo?> CheckGitHubReleaseAsync()
+    {
+        try
+        {
+            using var http = new HttpClient();
+            http.DefaultRequestHeaders.Add("User-Agent", "Rede-Desktop");
+            http.Timeout = TimeSpan.FromSeconds(10);
+
+            var url = $"https://api.github.com/repos/{GitHubRepo}/releases";
+            var json = await http.GetStringAsync(url);
+            var releases = JsonDocument.Parse(json);
+
+            foreach (var release in releases.RootElement.EnumerateArray())
+            {
+                var tag = release.GetProperty("tag_name").GetString();
+                if (tag is null) continue;
+
+                // Only consider beta releases on v2
+                if (!tag.Contains("beta")) continue;
+                if (tag == CurrentVersion || tag == $"v{CurrentVersion}") continue;
+
+                // Newer if tag version is higher
+                var remoteVer = ParseVersion(tag);
+                var localVer = ParseVersion(CurrentVersion);
+                if (remoteVer <= localVer) continue;
+
+                // Find the right asset for this platform
+                string assetName;
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    assetName = "Rede-Desktop-win-x64.exe";
+                else
+                    assetName = "Rede-Desktop-linux-x64";
+
+                string? downloadUrl = null;
+                foreach (var asset in release.GetProperty("assets").EnumerateArray())
+                {
+                    var name = asset.GetProperty("name").GetString();
+                    if (name == assetName)
+                    {
+                        downloadUrl = asset.GetProperty("browser_download_url").GetString();
+                        break;
+                    }
+                }
+
+                return new ReleaseInfo
+                {
+                    Tag = tag,
+                    DownloadUrl = downloadUrl,
+                    AssetName = assetName,
+                };
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Download the new release and replace the current executable.
+    /// </summary>
+    public static async Task<bool> DownloadAndReplaceAsync(ReleaseInfo release, Action<string>? onStatus = null)
+    {
+        if (release.DownloadUrl is null) return false;
+
+        try
+        {
+            onStatus?.Invoke("Downloading update...");
+
+            using var http = new HttpClient();
+            http.DefaultRequestHeaders.Add("User-Agent", "Rede-Desktop");
+            http.Timeout = TimeSpan.FromMinutes(5);
+
+            var bytes = await http.GetByteArrayAsync(release.DownloadUrl);
+
+            var currentExe = Environment.ProcessPath;
+            if (currentExe is null) return false;
+
+            var backupPath = currentExe + ".old";
+            var newPath = currentExe + ".new";
+
+            // Write new binary
+            await File.WriteAllBytesAsync(newPath, bytes);
+
+            // On Linux, set executable permission
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                File.SetUnixFileMode(newPath,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            }
+
+            // Swap: current -> .old, new -> current
+            if (File.Exists(backupPath)) File.Delete(backupPath);
+            File.Move(currentExe, backupPath);
+            File.Move(newPath, currentExe);
+
+            onStatus?.Invoke($"Updated to {release.Tag}. Restart to apply.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            onStatus?.Invoke($"Update failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static int ParseVersion(string tag)
+    {
+        // "v2.0.1-beta" or "2.0.1-beta" -> 201
+        var clean = tag.TrimStart('v').Split('-')[0];
+        var parts = clean.Split('.');
+        var major = parts.Length > 0 && int.TryParse(parts[0], out var a) ? a : 0;
+        var minor = parts.Length > 1 && int.TryParse(parts[1], out var b) ? b : 0;
+        var patch = parts.Length > 2 && int.TryParse(parts[2], out var c) ? c : 0;
+        return major * 10000 + minor * 100 + patch;
+    }
+
+    public class ReleaseInfo
+    {
+        public string Tag { get; set; } = "";
+        public string? DownloadUrl { get; set; }
+        public string AssetName { get; set; } = "";
     }
 
     private async Task<(bool Success, string Output, string Error)> RunGitAsync(string command, string args)

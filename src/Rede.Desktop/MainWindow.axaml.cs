@@ -36,30 +36,44 @@ public partial class MainWindow : Window
 
     private async void CheckForUpdatesAsync()
     {
-        var repoPath = UpdateService.DetectRepoPath();
-        if (repoPath is null) return;
-
-        var updater = new UpdateService(repoPath);
-        var (hasUpdates, local, remote) = await updater.CheckForUpdatesAsync();
-
-        if (hasUpdates)
+        try
         {
-            var changelog = await updater.GetChangelogAsync(local);
-            Dispatcher.UIThread.Post(() =>
+            // Try git-based update first (dev / git clone installs)
+            var repoPath = UpdateService.DetectRepoPath();
+            if (repoPath is not null)
             {
-                _loginVm.StatusMessage = $"Update available ({remote[..8]})";
-            });
+                var updater = new UpdateService(repoPath);
+                var (hasUpdates, local, remote) = await updater.CheckForUpdatesAsync();
 
-            // Auto-pull and rebuild
-            var success = await updater.PullAndBuildAsync();
-            if (success)
+                if (hasUpdates)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                        _loginVm.StatusMessage = $"Update available ({remote[..8]})");
+
+                    var success = await updater.PullAndBuildAsync();
+                    if (success)
+                        Dispatcher.UIThread.Post(() =>
+                            _loginVm.StatusMessage = "Updated! Restart to apply.");
+                }
+                return;
+            }
+
+            // Standalone exe — check GitHub Releases API
+            var release = await UpdateService.CheckGitHubReleaseAsync();
+            if (release is not null)
             {
                 Dispatcher.UIThread.Post(() =>
-                {
-                    _loginVm.StatusMessage = "Updated! Restart to apply.";
-                });
+                    _loginVm.StatusMessage = $"Update available: {release.Tag}");
+
+                var success = await UpdateService.DownloadAndReplaceAsync(release,
+                    status => Dispatcher.UIThread.Post(() => _loginVm.StatusMessage = status));
+
+                if (success)
+                    Dispatcher.UIThread.Post(() =>
+                        _loginVm.StatusMessage = $"Updated to {release.Tag}! Restart to apply.");
             }
         }
+        catch { }
     }
 
     private void ShowLogin()
