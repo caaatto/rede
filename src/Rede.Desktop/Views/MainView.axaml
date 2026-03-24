@@ -57,7 +57,8 @@
                                    VerticalAlignment="Center" />
                         <Button Grid.Column="1" Classes="ghost"
                                 Padding="4" Width="28" Height="28"
-                                ToolTip.Tip="Add contact">
+                                ToolTip.Tip="Add contact"
+                                Click="AddContact_Click">
                             <TextBlock Text="+" FontSize="16" HorizontalAlignment="Center" />
                         </Button>
                     </Grid>
@@ -111,7 +112,8 @@
                                    VerticalAlignment="Center" />
                         <Button Grid.Column="1" Classes="ghost"
                                 Padding="4" Width="28" Height="28"
-                                ToolTip.Tip="Create group">
+                                ToolTip.Tip="Create group"
+                                Click="CreateGroup_Click">
                             <TextBlock Text="+" FontSize="16" HorizontalAlignment="Center" />
                         </Button>
                     </Grid>
