@@ -132,13 +132,30 @@
                                Foreground="{StaticResource RedeAccentVioletBrush}" />
                 </StackPanel>
 
-                <!-- Update status -->
+                <!-- Update status (text, hidden when clickable button is shown instead) -->
                 <TextBlock Text="{Binding StatusMessage}"
                            Classes="secondary"
                            FontSize="{StaticResource RedeSmallSize}"
                            HorizontalAlignment="Center"
-                           Foreground="{StaticResource RedeAccentTealBrush}"
-                           IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                           Foreground="{StaticResource RedeAccentTealBrush}">
+                    <TextBlock.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="StatusMessage" Converter="{x:Static StringConverters.IsNotNullOrEmpty}" />
+                            <Binding Path="!IsUpdateAvailable" />
+                        </MultiBinding>
+                    </TextBlock.IsVisible>
+                </TextBlock>
+
+                <!-- Update button (standalone exe) -->
+                <Button Content="{Binding StatusMessage}"
+                        Command="{Binding TriggerUpdateCommand}"
+                        HorizontalAlignment="Center"
+                        FontSize="{StaticResource RedeSmallSize}"
+                        Background="Transparent"
+                        Foreground="{StaticResource RedeAccentTealBrush}"
+                        Cursor="Hand"
+                        Padding="8,4"
+                        IsVisible="{Binding IsUpdateAvailable}" />
 
             </StackPanel>
         </Border>

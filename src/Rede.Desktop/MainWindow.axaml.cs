@@ -27,6 +27,7 @@ public partial class MainWindow : Window
 
     // Pending new devices awaiting user confirmation: key = "userId:deviceId"
     private readonly System.Collections.Generic.Dictionary<string, (string PublicKey, string SigningKey)> _pendingDevices = new();
+    private UpdateService.ReleaseInfo? _pendingRelease;
 
     public MainWindow()
     {
@@ -58,13 +59,18 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Standalone exe — check GitHub Releases API (notify only)
+            // Standalone exe — check GitHub Releases API
             var release = await UpdateService.CheckGitHubReleaseAsync();
             if (release is not null)
             {
-                // H2: Only notify — user must explicitly trigger update
+                _pendingRelease = release;
                 Dispatcher.UIThread.Post(() =>
-                    _loginVm.StatusMessage = $"Update available: {release.Tag}");
+                {
+                    _loginVm.StatusMessage = release.DownloadUrl is not null
+                        ? $"Update available: {release.Tag} — click to install"
+                        : $"Update available: {release.Tag} (no binary for this platform)";
+                    _loginVm.IsUpdateAvailable = release.DownloadUrl is not null;
+                });
             }
         }
         catch { }
@@ -77,10 +83,23 @@ public partial class MainWindow : Window
         // K1: Unsubscribe before subscribing to prevent duplicate handlers on repeated ShowLogin calls
         _loginVm.OnLoginRequested -= OnLogin;
         _loginVm.OnRegisterRequested -= OnRegister;
+        _loginVm.OnUpdateRequested -= OnUpdateRequested;
         _loginVm.OnLoginRequested += OnLogin;
         _loginVm.OnRegisterRequested += OnRegister;
+        _loginVm.OnUpdateRequested += OnUpdateRequested;
         var loginView = new LoginView { DataContext = _loginVm };
         RootContent.Content = loginView;
+    }
+
+    private async void OnUpdateRequested()
+    {
+        if (_pendingRelease is null) return;
+        _loginVm.IsUpdateAvailable = false;
+        var release = _pendingRelease;
+        var ok = await UpdateService.DownloadAndReplaceAsync(release, status =>
+            Dispatcher.UIThread.Post(() => _loginVm.StatusMessage = status));
+        if (!ok)
+            Dispatcher.UIThread.Post(() => _loginVm.IsUpdateAvailable = true);
     }
 
     private bool _mainVmWired;

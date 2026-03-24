@@ -14,6 +14,7 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private string _errorMessage = "";
     [ObservableProperty] private string _statusMessage = "";
     [ObservableProperty] private bool _isLoading;
+    [ObservableProperty] private bool _isUpdateAvailable;
     [ObservableProperty] private bool _isRegistering;
     [ObservableProperty] private bool _isRegisterMode;
 
@@ -41,6 +42,7 @@ public partial class LoginViewModel : ViewModelBase
     public event Action<string, string, string, string>? OnLoginRequested;
     // (displayName, passphrase, serverUrl, transport, inviteCode)
     public event Action<string, string, string, string, string>? OnRegisterRequested;
+    public event Action? OnUpdateRequested;
 
     public LoginViewModel()
     {
@@ -81,6 +83,12 @@ public partial class LoginViewModel : ViewModelBase
     {
         IsRegisterMode = !IsRegisterMode;
         ErrorMessage = "";
+    }
+
+    [RelayCommand]
+    private void TriggerUpdate()
+    {
+        OnUpdateRequested?.Invoke();
     }
 
     [RelayCommand]
