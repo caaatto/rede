@@ -115,11 +115,11 @@ public class RedeConnection : IDisposable
                 throw new InvalidOperationException("Refusing unencrypted ws:// to remote host. Use wss:// or I2P/Tor.");
         }
 
-        // Check proxy reachability first
+        // Check proxy reachability first (throws with user-friendly message)
         if (_proxySettings.UseI2P || _proxySettings.UseTor)
         {
             var proxyUrl = _proxySettings.UseI2P ? _proxySettings.I2PProxy : _proxySettings.TorProxy;
-            await CheckSocksProxyAsync(proxyUrl);
+            await CheckSocksProxyAsync(proxyUrl); // throws InvalidOperationException if unreachable
         }
 
         _cts = new CancellationTokenSource();
@@ -312,7 +312,7 @@ public class RedeConnection : IDisposable
         {
             var transport = proxyUrl.Contains("4447") ? "i2pd" : "Tor";
             throw new InvalidOperationException(
-                $"SOCKS proxy not reachable at {host}:{port}. Is {transport} running?");
+                $"{transport} läuft nicht. Starte {transport} und versuche es erneut.\n({host}:{port} nicht erreichbar)");
         }
     }
 
