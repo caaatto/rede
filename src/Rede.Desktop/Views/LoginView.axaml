@@ -79,6 +79,16 @@
                              IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
+                <!-- Confirm Passphrase (register mode only) -->
+                <StackPanel Spacing="6" IsVisible="{Binding IsRegisterMode}">
+                    <TextBlock Text="Confirm Passphrase" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <TextBox Text="{Binding PassphraseConfirm}"
+                             PasswordChar="*"
+                             Watermark="repeat passphrase"
+                             IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
                 <!-- Invite Code (register mode only) -->
                 <StackPanel Spacing="6" IsVisible="{Binding IsRegisterMode}">
                     <TextBlock Text="Invite Code" Classes="secondary"

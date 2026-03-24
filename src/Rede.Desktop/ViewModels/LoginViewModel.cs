@@ -9,6 +9,7 @@ public partial class LoginViewModel : ViewModelBase
 {
     [ObservableProperty] private string _userId = "";
     [ObservableProperty] private string _passphrase = "";
+    [ObservableProperty] private string _passphraseConfirm = "";
     [ObservableProperty] private string _selectedServer = "Nürnberg";
     [ObservableProperty] private string _inviteCode = "";
     [ObservableProperty] private string _errorMessage = "";
@@ -141,6 +142,12 @@ public partial class LoginViewModel : ViewModelBase
         if (Passphrase.Length < 12)
         {
             ErrorMessage = "Passphrase must be at least 12 characters.";
+            return;
+        }
+
+        if (Passphrase != PassphraseConfirm)
+        {
+            ErrorMessage = "Passphrases do not match.";
             return;
         }
 
