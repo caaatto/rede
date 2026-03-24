@@ -291,7 +291,7 @@ public class ProfileStore
         {
             var before = profile.ChatHistory[chatId].Count;
             profile.ChatHistory[chatId] = profile.ChatHistory[chatId]
-                .Where(m => m.Ttl == 0 || now - m.Ts < m.Ttl * 1000L)
+                .Where(m => m.Ttl == 0 || now - m.Ts < m.Ttl * 86_400_000L)
                 .ToList();
             if (profile.ChatHistory[chatId].Count != before) changed = true;
         }

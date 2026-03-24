@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -264,6 +265,22 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage(msg);
         });
 
+        _chat.OnGroupKeyReceived += (groupId, name, key, sig) =>
+        {
+            if (_auth?.Profile is null || _auth.Passphrase is null) return;
+            // Verify signature if we know the sender's signing key
+            // Store group with the received key
+            Task.Run(async () =>
+            {
+                await _store.AddGroupAsync(_auth.Profile, groupId, name, key, null, _auth.Passphrase);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _mainVm.AddSystemMessage($"Received group key for \"{name}\"");
+                    RefreshGroups();
+                });
+            });
+        };
+
         // Contact events
         _contacts.OnContactAdded += (userId, displayName, fp) => Dispatcher.UIThread.Post(() =>
         {
@@ -314,6 +331,10 @@ public partial class MainWindow : Window
         if (_contacts is not null) { _contacts.Profile = p; _contacts.Passphrase = pp; }
         if (_groups is not null) { _groups.Profile = p; _groups.Passphrase = pp; }
         if (_devices is not null) { _devices.Profile = p; _devices.Passphrase = pp; }
+
+        // Cleanup expired TTL messages on login
+        if (pp is not null)
+            Task.Run(async () => await _store.CleanupExpiredMessagesAsync(p, pp));
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -366,7 +387,7 @@ public partial class MainWindow : Window
                 break;
 
             case "ginvite" when args.Length >= 2:
-                _groups?.InviteToGroup(args[0], args[1]);
+                _groups?.InviteToGroup(args[0], args[1], _chat);
                 break;
 
             case "kick" when args.Length >= 2:
@@ -375,7 +396,7 @@ public partial class MainWindow : Window
 
             case "ttl" when args.Length >= 1 && int.TryParse(args[0], out var ttl):
                 _mainVm.TtlSeconds = ttl;
-                _mainVm.AddSystemMessage($"TTL set to {ttl}s");
+                _mainVm.AddSystemMessage(ttl > 0 ? $"TTL set to {ttl} day(s) — messages auto-delete after {ttl}d" : "TTL disabled");
                 break;
 
             case "link":
@@ -405,7 +426,7 @@ public partial class MainWindow : Window
                 break;
 
             case "help":
-                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <seconds>, /link, /devices, /settings");
+                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /settings");
                 break;
 
             default:

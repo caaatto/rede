@@ -22,6 +22,7 @@ public class GroupService
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, string, DateTime>? OnGroupMessageReceived; // groupId, from, text, ts
     public event Action? OnGroupsChanged;
+    public event Action<string, string, int>? OnGroupMessageSent; // groupId, text, ttl
 
     public GroupService(RedeConnection conn, ProfileStore store)
     {
@@ -48,12 +49,41 @@ public class GroupService
         ));
     }
 
-    public void InviteToGroup(string groupId, string userId)
+    public void InviteToGroup(string groupId, string userId, ChatService? chatService = null)
     {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Groups.TryGetValue(groupId, out var group))
+        {
+            OnSystemMessage?.Invoke("Group not found.");
+            return;
+        }
+
+        // Send invite via server (adds member on server side)
         _conn.Send(Msg.GroupInvite, ProtocolSerializer.Payload(
             ("groupId", JsonValue.Create(groupId)),
-            ("userId", JsonValue.Create(userId))
+            ("inviteeId", JsonValue.Create(userId))
         ));
+
+        // Send group key to invitee via ratcheted DM
+        if (chatService is not null && Profile.Contacts.ContainsKey(userId))
+        {
+            var sig = CryptoService.SignGroupKey(groupId, group.Name, group.Key, Profile.SigningSecretKey);
+            var keyMsg = JsonSerializer.Serialize(new
+            {
+                __rede_ctrl = "groupkey",
+                groupId,
+                name = group.Name,
+                key = group.Key,
+                sig,
+            });
+            chatService.SendMessage(userId, keyMsg, 120);
+            OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" — group key sent.");
+        }
+        else
+        {
+            OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" (key must be sent manually — add them as contact first).");
+        }
     }
 
     public void KickFromGroup(string groupId, string userId)
@@ -166,6 +196,14 @@ public class GroupService
         if (ttl > 0) payload["ttl"] = ttl;
 
         _conn.Send(Msg.GroupMessage, payload);
+
+        // Persist own group message
+        var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        Task.Run(async () => await _store.AddChatMessageAsync(Profile, groupId, new ChatMessage
+        {
+            From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
+        }, Passphrase));
+        OnGroupMessageSent?.Invoke(groupId, text, ttl);
     }
 
     public IReadOnlyDictionary<string, Group>? GetGroups() => Profile?.Groups;

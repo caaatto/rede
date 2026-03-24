@@ -77,7 +77,8 @@
                                         BorderThickness="0"
                                         CornerRadius="4"
                                         Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
-                                        CommandParameter="{Binding}">
+                                        CommandParameter="{Binding}"
+                                        PointerPressed="Contact_PointerPressed">
                                     <Grid ColumnDefinitions="Auto,8,*,Auto">
                                         <!-- Online dot -->
                                         <Ellipse Grid.Column="0" Width="6" Height="6"

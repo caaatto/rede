@@ -117,6 +117,16 @@ public partial class MainViewModel : ViewModelBase
     public event Action<string>? OnMessageSend;
     public event Action<string, string[]>? OnCommandExecuted;
     public event Action<string>? OnChatHistoryRequested;
+
+    public void InviteContactToGroup(string groupId, string userId)
+    {
+        OnCommandExecuted?.Invoke("ginvite", new[] { groupId, userId });
+    }
+
+    public void ExecuteCommand(string cmd, string[] args)
+    {
+        OnCommandExecuted?.Invoke(cmd, args);
+    }
 }
 
 public partial class ContactItemViewModel : ViewModelBase
@@ -151,5 +161,5 @@ public partial class ChatMessageViewModel : ViewModelBase
 
     public string TimeString => Timestamp.ToString("h:mm tt").ToLowerInvariant();
     public bool HasTtl => Ttl > 0;
-    public string TtlDisplay => Ttl > 0 ? $"\u23f1 {Ttl}s" : "";
+    public string TtlDisplay => Ttl > 0 ? $"\u23f1 {Ttl}d" : "";
 }

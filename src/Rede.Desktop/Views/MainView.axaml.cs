@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Rede.Desktop.ViewModels;
 
 namespace Rede.Desktop.Views;
@@ -50,5 +51,43 @@ public partial class MainView : UserControl
                 vm.ToggleSidebarCommand.Execute(null);
             e.Handled = true;
         }
+    }
+
+    private void Contact_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+        if (sender is not Button btn || btn.DataContext is not ContactItemViewModel contact) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        var menu = new ContextMenu();
+
+        // Add "Invite to group" submenu items for each group
+        if (vm.Groups.Count > 0)
+        {
+            foreach (var group in vm.Groups)
+            {
+                var groupId = group.GroupId;
+                var item = new MenuItem
+                {
+                    Header = $"Invite to #{group.Name}",
+                    Foreground = Brush.Parse("#e0e0e8"),
+                };
+                item.Click += (_, _) => vm.InviteContactToGroup(groupId, contact.UserId);
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new Separator());
+        }
+
+        var fpItem = new MenuItem
+        {
+            Header = "View fingerprint",
+            Foreground = Brush.Parse("#e0e0e8"),
+        };
+        fpItem.Click += (_, _) => vm.ExecuteCommand("fingerprint", new[] { contact.UserId });
+        menu.Items.Add(fpItem);
+
+        btn.ContextMenu = menu;
+        menu.Open(btn);
+        e.Handled = true;
     }
 }

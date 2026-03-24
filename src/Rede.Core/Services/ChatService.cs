@@ -25,7 +25,8 @@ public class ChatService
 
     public event Action<string, string, string, DateTime, bool>? OnMessageReceived; // from, text, chatId, timestamp, isSealed
     public event Action<string>? OnSystemMessage;
-    public event Action<string, string>? OnMessageSent; // chatId, text
+    public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
+    public event Action<string, string, string, string>? OnGroupKeyReceived; // groupId, name, key, sig
 
     public ChatService(RedeConnection conn, ProfileStore store)
     {
@@ -78,9 +79,22 @@ public class ChatService
             haveSessions.Add(null);
 
         // Send to devices with existing sessions
+        bool sentAny = false;
         foreach (var devId in haveSessions)
         {
             SendToDevice(targetId, devId, text, ttl, contact);
+            sentAny = true;
+        }
+
+        // Persist own message if sent via existing sessions
+        if (sentAny)
+        {
+            var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            Task.Run(async () => await _store.AddChatMessageAsync(Profile, targetId, new ChatMessage
+            {
+                From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
+            }, Passphrase));
+            OnMessageSent?.Invoke(targetId, text, ttl);
         }
 
         // Fetch pre-key bundles for devices without sessions
@@ -195,6 +209,9 @@ public class ChatService
         var plaintext = ReceiveRatcheted(msg, from);
         if (plaintext is null) return;
 
+        // Check for control messages (group key distribution)
+        if (TryHandleControlMessage(plaintext, from)) return;
+
         var sanitized = EscapeContent(plaintext);
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var ttl = ProtocolSerializer.GetInt(msg, "ttl");
@@ -233,6 +250,9 @@ public class ChatService
 
         var plaintext = ReceiveRatcheted(innerObj, from);
         if (plaintext is null) return;
+
+        // Check for control messages (group key distribution)
+        if (TryHandleControlMessage(plaintext, from)) return;
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTime.Now;
@@ -526,7 +546,7 @@ public class ChatService
                 From = Profile.UserId, Text = pending.Text, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = pending.Ttl,
             }, Passphrase));
             OnSystemMessage?.Invoke($"Secure session established ({successCount} device(s)).");
-            OnMessageSent?.Invoke(targetUserId, pending.Text);
+            OnMessageSent?.Invoke(targetUserId, pending.Text, pending.Ttl);
         }
         else
         {
@@ -556,6 +576,32 @@ public class ChatService
             else if (type == Msg.SealedMessage)
                 HandleSealedMessage(innerMsg);
         }
+    }
+
+    private bool TryHandleControlMessage(string text, string from)
+    {
+        try
+        {
+            if (!text.Contains("__rede_ctrl")) return false;
+            var doc = JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("__rede_ctrl", out var ctrl)) return false;
+
+            if (ctrl.GetString() == "groupkey")
+            {
+                var groupId = root.GetProperty("groupId").GetString();
+                var name = root.GetProperty("name").GetString();
+                var key = root.GetProperty("key").GetString();
+                var sig = root.GetProperty("sig").GetString();
+                if (groupId is not null && name is not null && key is not null && sig is not null)
+                {
+                    OnGroupKeyReceived?.Invoke(groupId, name, key, sig);
+                    return true;
+                }
+            }
+        }
+        catch { }
+        return false;
     }
 
     /// <summary>Strip ANSI escapes and control characters. Mirrors: escapeContent() in index.js</summary>
