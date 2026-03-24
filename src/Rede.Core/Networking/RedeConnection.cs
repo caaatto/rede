@@ -260,7 +260,7 @@ public class RedeConnection : IDisposable
                             OnError?.Invoke("[SECURITY] Missing server signature! Message dropped.");
                             continue;
                         }
-                        if (!CryptoService.VerifyServerSignature(msg, ServerSigningKey))
+                        if (!CryptoService.VerifyServerSignature(raw, ServerSigningKey))
                         {
                             OnError?.Invoke("[SECURITY] Invalid server signature! Message dropped.");
                             continue;

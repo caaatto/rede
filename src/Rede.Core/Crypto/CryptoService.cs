@@ -258,21 +258,33 @@ public static class CryptoService
     /// Verify server signature on a message. Mirrors: verifyServerSignature(msg, serverSigningKeyB64)
     /// The message JSON has a serverSig field that is removed before verifying.
     /// </summary>
-    public static bool VerifyServerSignature(System.Text.Json.Nodes.JsonObject msg, string serverSigningKeyB64)
+    /// <summary>
+    /// Verify server signature using the raw JSON string.
+    /// The server signs JSON.stringify(msg) WITHOUT the serverSig field,
+    /// then appends serverSig. We must strip serverSig from the raw JSON
+    /// to get the exact bytes the server signed — re-serializing from a
+    /// parsed object won't preserve JS key order / number formatting.
+    /// </summary>
+    public static bool VerifyServerSignature(string rawJson, string serverSigningKeyB64)
     {
-        var sigNode = msg["serverSig"];
-        if (sigNode is null || string.IsNullOrEmpty(serverSigningKeyB64)) return false;
+        if (string.IsNullOrEmpty(serverSigningKeyB64)) return false;
 
         try
         {
-            var sigB64 = sigNode.GetValue<string>();
-            // Remove serverSig from the object for canonical form
-            msg.Remove("serverSig");
-            var canonical = msg.ToJsonString();
-            // Re-add it so we don't mutate the caller's object permanently
-            msg["serverSig"] = sigB64;
+            // Parse to extract the signature value
+            var msg = System.Text.Json.Nodes.JsonNode.Parse(rawJson)?.AsObject();
+            if (msg is null) return false;
 
-            var data = Encoding.UTF8.GetBytes(canonical);
+            var sigNode = msg["serverSig"];
+            if (sigNode is null) return false;
+            var sigB64 = sigNode.GetValue<string>();
+
+            // Strip the serverSig field from the raw JSON string
+            // The server builds: {...fields} then adds "serverSig":"..." at the end
+            // We need to reconstruct the JSON without serverSig
+            var body = StripJsonField(rawJson, "serverSig");
+
+            var data = Encoding.UTF8.GetBytes(body);
             var sig = Convert.FromBase64String(sigB64);
             var pk = Convert.FromBase64String(serverSigningKeyB64);
             return PublicKeyAuth.VerifyDetached(sig, data, pk);
@@ -281,6 +293,25 @@ public static class CryptoService
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Remove a top-level field from a JSON string, preserving the exact
+    /// formatting of all other fields. Handles both middle and last position.
+    /// </summary>
+    private static string StripJsonField(string json, string fieldName)
+    {
+        // Match: ,"fieldName":"value" or "fieldName":"value",
+        // Using regex to handle the exact raw JSON from the server
+        var pattern = $@",\s*""{fieldName}""\s*:\s*""[^""]*""";
+        var result = System.Text.RegularExpressions.Regex.Replace(json, pattern, "");
+        if (result == json)
+        {
+            // Try: "fieldName":"value", (field at start/middle)
+            pattern = $@"""{fieldName}""\s*:\s*""[^""]*""\s*,";
+            result = System.Text.RegularExpressions.Regex.Replace(json, pattern, "");
+        }
+        return result;
     }
 
     // --- Group key signing (legacy) ---
