@@ -64,6 +64,7 @@ public partial class MainView : UserControl
         {
             Watermark = "alice#a3f1",
             Width = 200,
+            MaxLength = 255,
             Background = Brush.Parse("#12121a"),
             Foreground = Brush.Parse("#e0e0e8"),
             BorderBrush = Brush.Parse("#1e1e2e"),
@@ -136,6 +137,7 @@ public partial class MainView : UserControl
         {
             Watermark = "Group name",
             Width = 200,
+            MaxLength = 64,
             Background = Brush.Parse("#12121a"),
             Foreground = Brush.Parse("#e0e0e8"),
             BorderBrush = Brush.Parse("#1e1e2e"),
@@ -214,9 +216,10 @@ public partial class MainView : UserControl
             foreach (var group in vm.Groups)
             {
                 var groupId = group.GroupId;
+                var displayName = group.Name.Length > 32 ? group.Name[..32] + "..." : group.Name;
                 var item = new MenuItem
                 {
-                    Header = $"Invite to #{group.Name}",
+                    Header = $"Invite to #{displayName}",
                     Foreground = Brush.Parse("#e0e0e8"),
                 };
                 item.Click += (_, _) => vm.InviteContactToGroup(groupId, contact.UserId);

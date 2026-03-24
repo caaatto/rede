@@ -25,12 +25,13 @@ public class RedeConnection : IDisposable
     private readonly ProxySettings _proxySettings;
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
-    private readonly Dictionary<string, Action<JsonObject>> _handlers = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Action<JsonObject>> _handlers = new();
     private string? _pinnedCertFingerprint;
 
     public string? ServerSigningKey { get; set; }
     public bool ShouldReconnect { get; set; } = true;
     public int ReconnectDelay { get; set; } = 2000;
+    private int _reconnectAttempts;
 
     public event Action? OnConnected;
     public event Action? OnDisconnected;
@@ -102,7 +103,7 @@ public class RedeConnection : IDisposable
 
     public void On(string messageType, Action<JsonObject> handler)
     {
-        _handlers[messageType] = handler;
+        _handlers.AddOrUpdate(messageType, handler, (_, _) => handler);
     }
 
     public async Task ConnectAsync()
@@ -175,6 +176,7 @@ public class RedeConnection : IDisposable
             }
 
             _isConnected = true;
+            _reconnectAttempts = 0; // M5: Reset backoff on successful connect
             OnConnected?.Invoke();
 
             _ = Task.Run(() => ReceiveLoop(_cts.Token));
@@ -224,6 +226,8 @@ public class RedeConnection : IDisposable
         }
     }
 
+    private const int MaxMessageSize = 1024 * 1024; // H1: 1MB max message size
+
     private async Task ReceiveLoop(CancellationToken ct)
     {
         var buffer = new byte[64 * 1024];
@@ -235,6 +239,7 @@ public class RedeConnection : IDisposable
             {
                 messageBuffer.SetLength(0);
                 WebSocketReceiveResult result;
+                bool oversized = false;
 
                 // Read complete message (may arrive in multiple frames)
                 do
@@ -243,7 +248,20 @@ public class RedeConnection : IDisposable
                     if (result.MessageType == WebSocketMessageType.Close)
                         goto exit;
                     messageBuffer.Write(buffer, 0, result.Count);
+                    // H1: Check message size limit
+                    if (messageBuffer.Length > MaxMessageSize)
+                    {
+                        oversized = true;
+                        break;
+                    }
                 } while (!result.EndOfMessage);
+
+                if (oversized)
+                {
+                    OnError?.Invoke("[SECURITY] Oversized message dropped.");
+                    messageBuffer.SetLength(0);
+                    continue;
+                }
 
                 if (result.MessageType == WebSocketMessageType.Text)
                 {
@@ -286,9 +304,12 @@ public class RedeConnection : IDisposable
         if (ShouldReconnect)
         {
             OnReconnecting?.Invoke();
+            // M5: Exponential backoff — 2s, 4s, 8s, 16s, 32s, cap 60s
+            var delay = Math.Min(ReconnectDelay * (1 << Math.Min(_reconnectAttempts, 5)), 60000);
+            _reconnectAttempts++;
             _ = Task.Run(async () =>
             {
-                await Task.Delay(ReconnectDelay);
+                await Task.Delay(delay);
                 try { await ConnectAsync(); }
                 catch { /* retry on next interval */ }
             });

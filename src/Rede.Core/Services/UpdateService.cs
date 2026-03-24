@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.0.3-beta";
+    private const string CurrentVersion = "2.0.4-beta";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;
@@ -208,13 +208,58 @@ public class UpdateService
 
         try
         {
-            onStatus?.Invoke("Downloading update...");
+            onStatus?.Invoke("Updating...");
 
             using var http = new HttpClient();
             http.DefaultRequestHeaders.Add("User-Agent", "Rede-Desktop");
             http.Timeout = TimeSpan.FromMinutes(5);
 
-            var bytes = await http.GetByteArrayAsync(release.DownloadUrl);
+            // Download with progress tracking
+            using var response = await http.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+
+            var totalBytes = response.Content.Headers.ContentLength ?? -1;
+            using var stream = await response.Content.ReadAsStreamAsync();
+            using var ms = new MemoryStream();
+
+            var buffer = new byte[81920];
+            long downloaded = 0;
+            var startTime = DateTime.UtcNow;
+            int bytesRead;
+
+            while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                ms.Write(buffer, 0, bytesRead);
+                downloaded += bytesRead;
+
+                var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+                var speed = elapsed > 0 ? downloaded / elapsed : 0;
+                var speedStr = speed >= 1048576 ? $"{speed / 1048576:F1} MB/s"
+                             : speed >= 1024 ? $"{speed / 1024:F0} KB/s"
+                             : $"{speed:F0} B/s";
+
+                if (totalBytes > 0)
+                {
+                    var pct = (int)(downloaded * 100 / totalBytes);
+                    onStatus?.Invoke($"Downloading... {pct}% ({speedStr})");
+                }
+                else
+                {
+                    var dlStr = downloaded >= 1048576 ? $"{downloaded / 1048576.0:F1} MB" : $"{downloaded / 1024.0:F0} KB";
+                    onStatus?.Invoke($"Downloading... {dlStr} ({speedStr})");
+                }
+            }
+
+            var bytes = ms.ToArray();
+
+            // H3: Validate downloaded binary (check magic bytes)
+            if (!IsValidExecutable(bytes))
+            {
+                onStatus?.Invoke("Update failed: invalid binary.");
+                return false;
+            }
+
+            onStatus?.Invoke("Installing...");
 
             var currentExe = Environment.ProcessPath;
             if (currentExe is null) return false;
@@ -247,6 +292,18 @@ public class UpdateService
             onStatus?.Invoke($"Update failed: {ex.Message}");
             return false;
         }
+    }
+
+    private static bool IsValidExecutable(byte[] bytes)
+    {
+        if (bytes.Length < 4) return false;
+        // ELF magic: 0x7F 'E' 'L' 'F'
+        if (bytes[0] == 0x7F && bytes[1] == 0x45 && bytes[2] == 0x4C && bytes[3] == 0x46)
+            return true;
+        // PE (Windows) magic: 'M' 'Z'
+        if (bytes[0] == 0x4D && bytes[1] == 0x5A)
+            return true;
+        return false;
     }
 
     private static int ParseVersion(string tag)

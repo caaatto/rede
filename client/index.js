@@ -473,7 +473,8 @@ async function main() {
 
   conn.on(MSG.AUTH_CHALLENGE, (msg) => {
     // Sign the challenge and respond
-    const signature = cryptoMod.sign(msg.challenge, profile.signingSecretKey);
+    // Domain-separated: sign "AUTH_CHALLENGE:<base64>" to prevent cross-protocol signature reuse
+    const signature = cryptoMod.signString('AUTH_CHALLENGE:' + msg.challenge, profile.signingSecretKey);
     conn.send(MSG.AUTH_RESPONSE, { signature });
   });
 

@@ -126,9 +126,9 @@ public class AuthService
         var deviceId = ProtocolSerializer.GetString(msg, "deviceId");
         if (deviceId is not null) Profile.DeviceId = deviceId;
 
-        // TOFU pin server signing key
+        // TOFU pin server signing key (validate 32-byte base64 format)
         var serverSigKey = ProtocolSerializer.GetString(msg, "serverSigningKey");
-        if (serverSigKey is not null)
+        if (serverSigKey is not null && IsValidBase64Key(serverSigKey, 32))
         {
             Profile.ServerSigningKey = serverSigKey;
             _conn.ServerSigningKey = serverSigKey;
@@ -163,7 +163,8 @@ public class AuthService
         var challenge = ProtocolSerializer.GetString(msg, "challenge");
         if (challenge is null) return;
 
-        var signature = CryptoService.Sign(challenge, Profile.SigningSecretKey);
+        // Domain-separated: sign "AUTH_CHALLENGE:<base64>" to prevent cross-protocol signature reuse
+        var signature = CryptoService.SignString("AUTH_CHALLENGE:" + challenge, Profile.SigningSecretKey);
         _conn.Send(Msg.AuthResponse, ProtocolSerializer.Payload(
             ("signature", JsonValue.Create(signature))
         ));
@@ -179,7 +180,7 @@ public class AuthService
 
         // TOFU pin server signing key
         var serverSigKey = ProtocolSerializer.GetString(msg, "serverSigningKey");
-        if (serverSigKey is not null)
+        if (serverSigKey is not null && IsValidBase64Key(serverSigKey, 32))
         {
             if (Profile.ServerSigningKey is null)
             {
@@ -236,6 +237,16 @@ public class AuthService
     {
         var error = ProtocolSerializer.GetString(msg, "error") ?? "Device link failed";
         OnAuthFailed?.Invoke(error);
+    }
+
+    private static bool IsValidBase64Key(string key, int expectedBytes)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(key);
+            return bytes.Length == expectedBytes;
+        }
+        catch { return false; }
     }
 
     private void UploadPreKeysIfNeeded(int prekeyCount)

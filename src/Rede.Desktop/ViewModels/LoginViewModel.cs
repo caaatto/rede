@@ -92,16 +92,22 @@ public partial class LoginViewModel : ViewModelBase
             return;
         }
 
+        if (UserId.Length > 255 || ContainsControlChars(UserId))
+        {
+            ErrorMessage = "Invalid User ID.";
+            return;
+        }
+
         ErrorMessage = "";
         IsLoading = true;
 
         try
         {
-            OnLoginRequested?.Invoke(UserId, Passphrase, ServerUrl, Transport);
+            OnLoginRequested?.Invoke(UserId.Trim(), Passphrase, ServerUrl, Transport);
         }
-        catch (Exception ex)
+        catch
         {
-            ErrorMessage = ex.Message;
+            ErrorMessage = "Login failed. Please try again.";
         }
         finally
         {
@@ -118,6 +124,12 @@ public partial class LoginViewModel : ViewModelBase
             return;
         }
 
+        if (UserId.Length > 64 || ContainsControlChars(UserId))
+        {
+            ErrorMessage = "Display name must be 1-64 characters, no special characters.";
+            return;
+        }
+
         if (Passphrase.Length < 12)
         {
             ErrorMessage = "Passphrase must be at least 12 characters.";
@@ -130,23 +142,36 @@ public partial class LoginViewModel : ViewModelBase
             return;
         }
 
+        if (InviteCode.Length > 128 || ContainsControlChars(InviteCode))
+        {
+            ErrorMessage = "Invalid invite code.";
+            return;
+        }
+
         ErrorMessage = "";
         IsLoading = true;
         IsRegistering = true;
 
         try
         {
-            OnRegisterRequested?.Invoke(UserId, Passphrase, ServerUrl, Transport, InviteCode);
+            OnRegisterRequested?.Invoke(UserId.Trim(), Passphrase, ServerUrl, Transport, InviteCode.Trim());
         }
-        catch (Exception ex)
+        catch
         {
-            ErrorMessage = ex.Message;
+            ErrorMessage = "Registration failed. Please try again.";
         }
         finally
         {
             IsLoading = false;
             IsRegistering = false;
         }
+    }
+
+    private static bool ContainsControlChars(string s)
+    {
+        foreach (var c in s)
+            if (char.IsControl(c)) return true;
+        return false;
     }
 
     private static string? FindRepoEnv()

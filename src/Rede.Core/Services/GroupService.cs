@@ -42,10 +42,9 @@ public class GroupService
     public void CreateGroup(string name)
     {
         if (Profile is null) return;
-        var groupKey = CryptoService.GenerateGroupKey();
+        // M4: Don't send group key to server — server doesn't need it, key is generated locally in HandleGroupCreateOk
         _conn.Send(Msg.GroupCreate, ProtocolSerializer.Payload(
-            ("name", JsonValue.Create(name)),
-            ("key", JsonValue.Create(groupKey))
+            ("name", JsonValue.Create(name))
         ));
     }
 
@@ -77,7 +76,7 @@ public class GroupService
                 key = group.Key,
                 sig,
             });
-            chatService.SendMessage(userId, keyMsg, 120);
+            chatService.SendMessage(userId, keyMsg, 0);
             OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" — group key sent.");
         }
         else
@@ -230,7 +229,10 @@ public class GroupService
         if (Profile is null || Passphrase is null) return;
 
         var groupId = ProtocolSerializer.GetString(msg, "groupId");
-        var name = ProtocolSerializer.GetString(msg, "name") ?? groupId ?? "unnamed";
+        // M3: Sanitize group name from server — strip control chars, cap length
+        var rawName = ProtocolSerializer.GetString(msg, "name") ?? groupId ?? "unnamed";
+        var name = System.Text.RegularExpressions.Regex.Replace(rawName, @"[\x00-\x1f\x7f]", "");
+        if (name.Length > 64) name = name[..64];
         var key = ProtocolSerializer.GetString(msg, "key") ?? CryptoService.GenerateGroupKey();
 
         if (groupId is null) return;
@@ -304,14 +306,35 @@ public class GroupService
         var plaintext = SenderKeys.Decrypt(memberState, encrypted, nonce, messageNumber, signature, signingKey);
         if (plaintext is null) return;
 
+        // H2: Save updated sender key state to prevent replay
+        var fullState = _store.LoadSenderKeyState(Profile, groupId);
+        if (fullState is not null)
+        {
+            var parsed = JsonSerializer.Deserialize<JsonObject>(fullState.Value);
+            if (parsed is not null)
+            {
+                var membersNode = parsed["members"] as JsonObject ?? new JsonObject();
+                membersNode[from] = new JsonObject
+                {
+                    ["chainKey"] = memberState.ChainKey,
+                    ["messageNumber"] = memberState.MessageNumber,
+                };
+                parsed["members"] = membersNode;
+                var elem = JsonSerializer.SerializeToElement(parsed);
+                Task.Run(async () => await _store.SaveSenderKeyStateAsync(Profile, groupId, elem, Passphrase));
+            }
+        }
+
+        // M2: Sanitize group message text (ANSI escape stripping)
+        var sanitized = ChatService.EscapeContent(plaintext);
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
 
         Task.Run(async () => await _store.AddChatMessageAsync(Profile, groupId, new ChatMessage
         {
-            From = from, Text = plaintext, Ts = ProtocolSerializer.GetLong(msg, "ts"),
+            From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"),
             Ttl = ProtocolSerializer.GetInt(msg, "ttl"),
         }, Passphrase));
 
-        OnGroupMessageReceived?.Invoke(groupId, from, plaintext, ts);
+        OnGroupMessageReceived?.Invoke(groupId, from, sanitized, ts);
     }
 }

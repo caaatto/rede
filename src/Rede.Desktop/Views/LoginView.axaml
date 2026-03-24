@@ -65,6 +65,7 @@
                                IsVisible="{Binding IsRegisterMode}" />
                     <TextBox Text="{Binding UserId}"
                              Watermark="{Binding UserIdWatermark}"
+                             MaxLength="255"
                              IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
@@ -84,6 +85,7 @@
                                FontWeight="{StaticResource RedeWeightMedium}" />
                     <TextBox Text="{Binding InviteCode}"
                              Watermark="required for registration"
+                             MaxLength="128"
                              IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 

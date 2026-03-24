@@ -20,13 +20,14 @@ public class ChatService
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
 
-    // Queued while awaiting pre-key bundle
-    private (string Target, string Text, int Ttl)? _pendingOutgoing;
+    // Queued while awaiting pre-key bundle (M2: queue per target to avoid overwrites)
+    private readonly Dictionary<string, (string Text, int Ttl)> _pendingOutgoing = new();
 
     public event Action<string, string, string, DateTime, bool>? OnMessageReceived; // from, text, chatId, timestamp, isSealed
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
-    public event Action<string, string, string, string>? OnGroupKeyReceived; // groupId, name, key, sig
+    public event Action<string, string, string, string, string>? OnGroupKeyReceived; // groupId, name, key, sig, senderId
+    public event Action<string, string, string, string>? OnNewDeviceDetected; // targetUserId, deviceId, publicKey, signingKey
 
     public ChatService(RedeConnection conn, ProfileStore store)
     {
@@ -100,7 +101,7 @@ public class ChatService
         // Fetch pre-key bundles for devices without sessions
         if (needBundle.Count > 0)
         {
-            _pendingOutgoing = (targetId, text, ttl);
+            _pendingOutgoing[targetId] = (text, ttl);
             _conn.Send(Msg.FetchPrekeyBundle, ProtocolSerializer.Payload(
                 ("targetUserId", JsonValue.Create(targetId))
             ));
@@ -232,9 +233,13 @@ public class ChatService
         var sealedNode = msg["sealedPayload"];
         if (sealedNode is null) return;
 
+        // Replay protection for sealed messages (same as normal messages)
+        var sealedNonce = sealedNode["nonce"]?.GetValue<string>();
+        if (sealedNonce is not null && !_nonceTracker.Check(sealedNonce)) return;
+
         var envelope = new SealedSender.SealedEnvelope(
             sealedNode["ephemeralKey"]?.GetValue<string>() ?? "",
-            sealedNode["nonce"]?.GetValue<string>() ?? "",
+            sealedNonce ?? "",
             sealedNode["ciphertext"]?.GetValue<string>() ?? ""
         );
 
@@ -418,13 +423,11 @@ public class ChatService
 
     private void HandlePrekeyBundle(JsonObject msg)
     {
-        if (Profile is null || Passphrase is null || _pendingOutgoing is null) return;
-
-        var pending = _pendingOutgoing.Value;
-        _pendingOutgoing = null;
+        if (Profile is null || Passphrase is null) return;
 
         var targetUserId = ProtocolSerializer.GetString(msg, "targetUserId");
-        if (targetUserId is null || targetUserId != pending.Target) return;
+        if (targetUserId is null || !_pendingOutgoing.TryGetValue(targetUserId, out var pending)) return;
+        _pendingOutgoing.Remove(targetUserId);
 
         if (!Profile.Contacts.TryGetValue(targetUserId, out var contact))
         {
@@ -481,16 +484,12 @@ public class ChatService
             if (!keyValid && contact.PublicKey == bundle.IdentityKey)
                 keyValid = true;
 
-            // New device — verify signed pre-key signature
+            // New device — do NOT auto-accept (server could inject phantom devices).
+            // Notify user and require explicit confirmation before trusting.
             if (!keyValid && devId is not null && bundle.SigningKey is not null)
             {
-                if (CryptoService.Verify(bundle.SignedPreKey, bundle.SignedPreKeySig, bundle.SigningKey))
-                {
-                    contact.Devices[devId] = new DeviceKeys { PublicKey = bundle.IdentityKey, SigningKey = bundle.SigningKey };
-                    Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
-                    keyValid = true;
-                    OnSystemMessage?.Invoke($"[SECURITY] New device {devId} for {targetUserId} accepted (pre-key verified). Verify fingerprint out-of-band!");
-                }
+                OnNewDeviceDetected?.Invoke(targetUserId, devId, bundle.IdentityKey, bundle.SigningKey);
+                OnSystemMessage?.Invoke($"[SECURITY] Unknown device {devId} for {targetUserId}. Use /confirm {targetUserId} to accept new devices.");
             }
 
             if (!keyValid)
@@ -556,9 +555,21 @@ public class ChatService
 
     private void HandlePrekeyBundleFail(JsonObject msg)
     {
-        _pendingOutgoing = null;
-        var error = ProtocolSerializer.GetString(msg, "error") ?? "Failed to fetch pre-key bundle";
+        var targetId = ProtocolSerializer.GetString(msg, "targetUserId");
+        if (targetId is not null) _pendingOutgoing.Remove(targetId);
+        var raw = ProtocolSerializer.GetString(msg, "error") ?? "Failed to fetch pre-key bundle";
+        // H3: Sanitize server error — strip HTML, URLs, control chars, cap length
+        var error = SanitizeServerError(raw);
         OnSystemMessage?.Invoke(error);
+    }
+
+    private static string SanitizeServerError(string msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return "Unknown error.";
+        var s = System.Text.RegularExpressions.Regex.Replace(msg, @"<[^>]+>", "");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"https?://\S+", "[link]");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"[\x00-\x1f\x7f]", "");
+        return s.Length > 200 ? s[..200] + "..." : s;
     }
 
     private void HandlePendingMessages(JsonObject msg)
@@ -582,7 +593,8 @@ public class ChatService
     {
         try
         {
-            if (!text.Contains("__rede_ctrl")) return false;
+            // M7: Only parse if it starts with { and contains the control marker
+            if (!text.StartsWith('{') || !text.Contains("\"__rede_ctrl\"")) return false;
             var doc = JsonDocument.Parse(text);
             var root = doc.RootElement;
             if (!root.TryGetProperty("__rede_ctrl", out var ctrl)) return false;
@@ -595,7 +607,7 @@ public class ChatService
                 var sig = root.GetProperty("sig").GetString();
                 if (groupId is not null && name is not null && key is not null && sig is not null)
                 {
-                    OnGroupKeyReceived?.Invoke(groupId, name, key, sig);
+                    OnGroupKeyReceived?.Invoke(groupId, name, key, sig, from);
                     return true;
                 }
             }
@@ -605,7 +617,7 @@ public class ChatService
     }
 
     /// <summary>Strip ANSI escapes and control characters. Mirrors: escapeContent() in index.js</summary>
-    private static string EscapeContent(string text)
+    internal static string EscapeContent(string text)
     {
         var s = text;
         s = System.Text.RegularExpressions.Regex.Replace(s, @"\x1b\[[0-9;]*[A-Za-z]", "");

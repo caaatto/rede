@@ -56,6 +56,7 @@ public partial class MainViewModel : ViewModelBase
     {
         var text = InputText?.Trim();
         if (string.IsNullOrEmpty(text)) return;
+        if (text.Length > 4096) text = text[..4096];
 
         InputText = "";
 

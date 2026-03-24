@@ -104,7 +104,7 @@ public class ContactService
             return;
         }
 
-        // Parse devices if present
+        // Parse devices if present — M1: validate each device key
         Dictionary<string, DeviceKeys>? devices = null;
         var devicesNode = msg["devices"];
         if (devicesNode is JsonObject devObj)
@@ -114,11 +114,16 @@ public class ContactService
             {
                 if (devData is JsonObject dd)
                 {
-                    devices[devId] = new DeviceKeys
+                    var devPk = dd["publicKey"]?.GetValue<string>() ?? "";
+                    var devSk = dd["signingKey"]?.GetValue<string>();
+                    // Validate device key format (32-byte base64)
+                    try
                     {
-                        PublicKey = dd["publicKey"]?.GetValue<string>() ?? "",
-                        SigningKey = dd["signingKey"]?.GetValue<string>(),
-                    };
+                        if (Convert.FromBase64String(devPk).Length != 32) continue;
+                        if (devSk is not null && Convert.FromBase64String(devSk).Length != 32) continue;
+                    }
+                    catch { continue; }
+                    devices[devId] = new DeviceKeys { PublicKey = devPk, SigningKey = devSk };
                 }
             }
         }
@@ -139,7 +144,18 @@ public class ContactService
 
     private void HandleUserLookupFail(JsonObject msg)
     {
-        var error = ProtocolSerializer.GetString(msg, "error") ?? "User not found";
+        var raw = ProtocolSerializer.GetString(msg, "error") ?? "User not found";
+        // H3: Sanitize server error
+        var error = SanitizeServerError(raw);
         OnSystemMessage?.Invoke(error);
+    }
+
+    private static string SanitizeServerError(string msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return "Unknown error.";
+        var s = System.Text.RegularExpressions.Regex.Replace(msg, @"<[^>]+>", "");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"https?://\S+", "[link]");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"[\x00-\x1f\x7f]", "");
+        return s.Length > 200 ? s[..200] + "..." : s;
     }
 }

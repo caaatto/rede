@@ -25,6 +25,9 @@ public partial class MainWindow : Window
     private GroupService? _groups;
     private DeviceService? _devices;
 
+    // Pending new devices awaiting user confirmation: key = "userId:deviceId"
+    private readonly System.Collections.Generic.Dictionary<string, (string PublicKey, string SigningKey)> _pendingDevices = new();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -48,30 +51,20 @@ public partial class MainWindow : Window
 
                 if (hasUpdates)
                 {
+                    // H2: Only notify — don't auto-apply git updates without user action
                     Dispatcher.UIThread.Post(() =>
-                        _loginVm.StatusMessage = $"Update available ({remote[..8]})");
-
-                    var success = await updater.PullAndBuildAsync();
-                    if (success)
-                        Dispatcher.UIThread.Post(() =>
-                            _loginVm.StatusMessage = "Updated! Restart to apply.");
+                        _loginVm.StatusMessage = $"Update available ({remote[..8]}). Run 'git pull' to update.");
                 }
                 return;
             }
 
-            // Standalone exe — check GitHub Releases API
+            // Standalone exe — check GitHub Releases API (notify only)
             var release = await UpdateService.CheckGitHubReleaseAsync();
             if (release is not null)
             {
+                // H2: Only notify — user must explicitly trigger update
                 Dispatcher.UIThread.Post(() =>
                     _loginVm.StatusMessage = $"Update available: {release.Tag}");
-
-                var success = await UpdateService.DownloadAndReplaceAsync(release,
-                    status => Dispatcher.UIThread.Post(() => _loginVm.StatusMessage = status));
-
-                if (success)
-                    Dispatcher.UIThread.Post(() =>
-                        _loginVm.StatusMessage = $"Updated to {release.Tag}! Restart to apply.");
             }
         }
         catch { }
@@ -81,25 +74,47 @@ public partial class MainWindow : Window
     {
         _loginVm.ErrorMessage = "";
         _loginVm.IsLoading = false;
-        var loginView = new LoginView { DataContext = _loginVm };
+        // K1: Unsubscribe before subscribing to prevent duplicate handlers on repeated ShowLogin calls
+        _loginVm.OnLoginRequested -= OnLogin;
+        _loginVm.OnRegisterRequested -= OnRegister;
         _loginVm.OnLoginRequested += OnLogin;
         _loginVm.OnRegisterRequested += OnRegister;
+        var loginView = new LoginView { DataContext = _loginVm };
         RootContent.Content = loginView;
     }
 
+    private bool _mainVmWired;
+    private DateTime _lastRetryTime;
+
     private void ShowMain()
     {
-        WireMainViewModel();
+        // K1: Only wire once to prevent handler accumulation on reconnect
+        if (!_mainVmWired)
+        {
+            WireMainViewModel();
+            _mainVmWired = true;
+        }
+        var mainView = CreateMainView();
+        RootContent.Content = mainView;
+    }
+
+    private MainView CreateMainView()
+    {
         var mainView = new MainView { DataContext = _mainVm };
         mainView.OnRetryConnection += () =>
         {
+            // H6: Rate-limit retry to once per 3 seconds
+            var now = DateTime.UtcNow;
+            if ((now - _lastRetryTime).TotalSeconds < 3) return;
+            _lastRetryTime = now;
+
             if (_conn is not null)
             {
                 _mainVm.ConnectionStatus = "Reconnecting...";
                 _ = _conn.ConnectAsync();
             }
         };
-        RootContent.Content = mainView;
+        return mainView;
     }
 
     private void OnLogin(string userId, string passphrase, string serverUrl, string transport)
@@ -133,13 +148,15 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // H1: Clear passphrase from login VM after successful auth
+            Dispatcher.UIThread.Post(() => _loginVm.Passphrase = "");
             PropagateProfile();
         }
         catch (Exception ex)
         {
             Dispatcher.UIThread.Post(() =>
             {
-                _loginVm.ErrorMessage = ex.Message;
+                _loginVm.ErrorMessage = SanitizeErrorMessage(ex);
                 _loginVm.IsLoading = false;
             });
         }
@@ -156,12 +173,15 @@ public partial class MainWindow : Window
 
             await _conn!.ConnectAsync();
             await _auth!.RegisterAsync(displayName, passphrase, inviteCode);
+
+            // H1: Clear passphrase from login VM after successful registration
+            Dispatcher.UIThread.Post(() => _loginVm.Passphrase = "");
         }
         catch (Exception ex)
         {
             Dispatcher.UIThread.Post(() =>
             {
-                _loginVm.ErrorMessage = ex.Message;
+                _loginVm.ErrorMessage = SanitizeErrorMessage(ex);
                 _loginVm.IsLoading = false;
             });
         }
@@ -239,7 +259,8 @@ public partial class MainWindow : Window
 
         _auth.OnAuthFailed += err => Dispatcher.UIThread.Post(() =>
         {
-            _loginVm.ErrorMessage = err;
+            // H3: Sanitize server-provided error messages
+            _loginVm.ErrorMessage = SanitizeServerMessage(err);
             _loginVm.IsLoading = false;
         });
 
@@ -265,17 +286,51 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage(msg);
         });
 
-        _chat.OnGroupKeyReceived += (groupId, name, key, sig) =>
+        _chat.OnNewDeviceDetected += (targetUserId, deviceId, publicKey, signingKey) =>
         {
-            if (_auth?.Profile is null || _auth.Passphrase is null) return;
-            // Verify signature if we know the sender's signing key
-            // Store group with the received key
+            // Store pending device for user confirmation
+            _pendingDevices[$"{targetUserId}:{deviceId}"] = (publicKey, signingKey);
+        };
+
+        _chat.OnGroupKeyReceived += (groupId, name, key, sig, senderId) =>
+        {
+            // K4: Snapshot to local variables before async boundary
+            var profile = _auth?.Profile;
+            var passphrase = _auth?.Passphrase;
+            if (profile is null || passphrase is null) return;
+
+            // K3: Validate inputs
+            if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(name) || string.IsNullOrEmpty(key)) return;
+            var safeName = SanitizeDisplayString(name, 64);
+
+            // H1: Require valid signature — reject if unverifiable
+            if (string.IsNullOrEmpty(senderId) || string.IsNullOrEmpty(sig))
+            {
+                Dispatcher.UIThread.Post(() =>
+                    _mainVm.AddSystemMessage($"[SECURITY] Group key without sender/signature — rejected."));
+                return;
+            }
+
+            if (!profile.Contacts.TryGetValue(senderId, out var sender) || sender.SigningKey is null)
+            {
+                Dispatcher.UIThread.Post(() =>
+                    _mainVm.AddSystemMessage($"[SECURITY] Group key from unknown sender {senderId} — rejected."));
+                return;
+            }
+
+            if (!Rede.Core.Crypto.CryptoService.VerifyGroupKey(groupId, name, key, sig, sender.SigningKey))
+            {
+                Dispatcher.UIThread.Post(() =>
+                    _mainVm.AddSystemMessage($"[SECURITY] Invalid group key signature from {senderId}! Key rejected."));
+                return;
+            }
+
             Task.Run(async () =>
             {
-                await _store.AddGroupAsync(_auth.Profile, groupId, name, key, null, _auth.Passphrase);
+                await _store.AddGroupAsync(profile, groupId, safeName, key, null, passphrase);
                 Dispatcher.UIThread.Post(() =>
                 {
-                    _mainVm.AddSystemMessage($"Received group key for \"{name}\"");
+                    _mainVm.AddSystemMessage($"Received group key for \"{safeName}\"");
                     RefreshGroups();
                 });
             });
@@ -366,13 +421,24 @@ public partial class MainWindow : Window
 
     private void HandleCommand(string cmd, string[] args)
     {
+        // K3: Validate command arguments
+        for (int i = 0; i < args.Length; i++)
+            args[i] = SanitizeDisplayString(args[i], 255);
+
         switch (cmd.ToLowerInvariant())
         {
             case "add" when args.Length >= 1:
+                if (!IsValidUserId(args[0]))
+                {
+                    _mainVm.AddSystemMessage("Invalid user ID format.");
+                    break;
+                }
                 _contacts?.AddContact(args[0]);
                 break;
 
             case "confirm" when args.Length >= 1:
+                // Accept pending new devices for this contact
+                AcceptPendingDevices(args[0]);
                 _ = _contacts?.ConfirmKeyChange(args[0]);
                 break;
 
@@ -395,6 +461,8 @@ public partial class MainWindow : Window
                 break;
 
             case "ttl" when args.Length >= 1 && int.TryParse(args[0], out var ttl):
+                // K3: Clamp TTL to valid range (0=off, 1-365 days)
+                ttl = Math.Clamp(ttl, 0, 365);
                 _mainVm.TtlSeconds = ttl;
                 _mainVm.AddSystemMessage(ttl > 0 ? $"TTL set to {ttl} day(s) — messages auto-delete after {ttl}d" : "TTL disabled");
                 break;
@@ -443,10 +511,11 @@ public partial class MainWindow : Window
         _mainVm.Contacts.Clear();
         foreach (var (id, c) in contacts)
         {
+            // M3: Sanitize server-provided display names
             _mainVm.Contacts.Add(new ContactItemViewModel
             {
                 UserId = id,
-                DisplayName = c.DisplayName ?? id,
+                DisplayName = SanitizeDisplayString(c.DisplayName ?? id, 64),
             });
         }
     }
@@ -535,8 +604,8 @@ public partial class MainWindow : Window
         };
         vm.OnBackRequested += () =>
         {
-            var mainView = new MainView { DataContext = _mainVm };
-            RootContent.Content = mainView;
+            // H5: Re-wire retry handler when returning from settings
+            RootContent.Content = CreateMainView();
         };
         var settingsView = new SettingsView { DataContext = vm };
         RootContent.Content = settingsView;
@@ -549,5 +618,85 @@ public partial class MainWindow : Window
             _conn?.Dispose();
             Close();
         }
+    }
+
+    // K2: Strip file paths, stack traces, and internal details from error messages
+    private static string SanitizeErrorMessage(Exception ex)
+    {
+        var msg = ex.Message;
+        // Known user-facing messages — pass through
+        if (msg.Contains("läuft nicht") || msg.Contains("nicht erreichbar") ||
+            msg.Contains("Connection failed") || msg.Contains("Refusing unencrypted"))
+            return msg;
+        // If it looks like a raw exception, show generic message
+        if (msg.Contains("Exception") || msg.Contains("StackTrace") || msg.Contains("   at "))
+            return "Connection failed. Check your network and try again.";
+        // Strip file paths (M6: more targeted regex)
+        msg = System.Text.RegularExpressions.Regex.Replace(msg, @"[A-Za-z]:\\[^\s""']+", "[path]");
+        msg = System.Text.RegularExpressions.Regex.Replace(msg, @"(?<!\w)/(?:home|usr|tmp|var|etc)/[\w./\-]+", "[path]");
+        // Truncate
+        if (msg.Length > 200) msg = msg[..200] + "...";
+        return msg;
+    }
+
+    // H3: Sanitize server-provided messages — strip HTML, limit length, no URLs
+    private static string SanitizeServerMessage(string msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return "Unknown error.";
+        // Strip HTML tags
+        var s = System.Text.RegularExpressions.Regex.Replace(msg, @"<[^>]+>", "");
+        // Strip URLs that could be phishing
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"https?://\S+", "[link removed]");
+        // Strip control chars
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"[\x00-\x1f\x7f]", "");
+        if (s.Length > 200) s = s[..200] + "...";
+        return s;
+    }
+
+    // K3/H2: Sanitize display strings — strip control chars, limit length
+    private static string SanitizeDisplayString(string input, int maxLength = 255)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        // Strip control characters
+        var s = System.Text.RegularExpressions.Regex.Replace(input, @"[\x00-\x1f\x7f]", "");
+        if (s.Length > maxLength) s = s[..maxLength];
+        return s.Trim();
+    }
+
+    // Accept pending new devices for a contact after user confirmation
+    private void AcceptPendingDevices(string userId)
+    {
+        var profile = _auth?.Profile;
+        var passphrase = _auth?.Passphrase;
+        if (profile is null || passphrase is null) return;
+
+        if (!profile.Contacts.TryGetValue(userId, out var contact)) return;
+
+        var prefix = $"{userId}:";
+        var accepted = new System.Collections.Generic.List<string>();
+        foreach (var (key, (publicKey, signingKey)) in _pendingDevices)
+        {
+            if (!key.StartsWith(prefix)) continue;
+            var deviceId = key[prefix.Length..];
+            contact.Devices[deviceId] = new DeviceKeys { PublicKey = publicKey, SigningKey = signingKey };
+            accepted.Add(key);
+            _mainVm.AddSystemMessage($"Device {deviceId} for {userId} accepted. Verify fingerprint out-of-band!");
+        }
+
+        foreach (var key in accepted)
+            _pendingDevices.Remove(key);
+
+        if (accepted.Count > 0)
+            Task.Run(async () => await _store.SaveProfileAsync(profile, passphrase));
+    }
+
+    // K3: Validate user ID format (name#hash, max 255 chars, no control chars)
+    private static bool IsValidUserId(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 255) return false;
+        // Must not contain control characters
+        foreach (var c in id)
+            if (char.IsControl(c)) return false;
+        return true;
     }
 }

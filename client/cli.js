@@ -179,7 +179,8 @@ async function connectAndAuth(profile, passphrase) {
     }, opts.i2p ? 120000 : 30000);
 
     conn.on(MSG.AUTH_CHALLENGE, (msg) => {
-      const signature = cryptoMod.sign(msg.challenge, profile.signingSecretKey);
+      // Domain-separated: sign "AUTH_CHALLENGE:<base64>" to prevent cross-protocol signature reuse
+      const signature = cryptoMod.signString('AUTH_CHALLENGE:' + msg.challenge, profile.signingSecretKey);
       conn.send(MSG.AUTH_RESPONSE, { signature, deviceId: profile.deviceId });
     });
 

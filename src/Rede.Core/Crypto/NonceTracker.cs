@@ -3,6 +3,7 @@ namespace Rede.Core.Crypto;
 /// <summary>
 /// Client-side nonce deduplication to prevent replay attacks.
 /// Mirrors: checkClientNonce, _seenNonces in crypto.js
+/// Thread-safe via lock for concurrent handler access.
 /// </summary>
 public class NonceTracker
 {
@@ -10,6 +11,7 @@ public class NonceTracker
     private const int NonceMaxSize = 10000;
 
     private readonly Dictionary<string, long> _seenNonces = new();
+    private readonly object _lock = new();
 
     /// <summary>
     /// Check if a nonce is fresh (not seen before). Returns true if fresh, false if replay.
@@ -17,18 +19,21 @@ public class NonceTracker
     /// </summary>
     public bool Check(string nonceB64)
     {
-        if (_seenNonces.Count > NonceMaxSize)
+        lock (_lock)
         {
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var stale = _seenNonces.Where(kv => now - kv.Value > NonceMaxAge).Select(kv => kv.Key).ToList();
-            foreach (var k in stale)
-                _seenNonces.Remove(k);
+            if (_seenNonces.Count > NonceMaxSize)
+            {
+                var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var stale = _seenNonces.Where(kv => now - kv.Value > NonceMaxAge).Select(kv => kv.Key).ToList();
+                foreach (var k in stale)
+                    _seenNonces.Remove(k);
+            }
+
+            if (_seenNonces.ContainsKey(nonceB64))
+                return false;
+
+            _seenNonces[nonceB64] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            return true;
         }
-
-        if (_seenNonces.ContainsKey(nonceB64))
-            return false;
-
-        _seenNonces[nonceB64] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        return true;
     }
 }
