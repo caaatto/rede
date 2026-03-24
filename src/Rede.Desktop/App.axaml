@@ -1,0 +1,23 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:Rede.Desktop.Converters"
+             x:Class="Rede.Desktop.App"
+             RequestedThemeVariant="Dark">
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="/Themes/Colors.axaml" />
+                <ResourceInclude Source="/Themes/Typography.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <conv:SidebarWidthConverter x:Key="SidebarWidthConverter" />
+            <conv:StatusColorConverter x:Key="StatusColorConverter" />
+            <conv:CollapseIconConverter x:Key="CollapseIconConverter" />
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="/Themes/RedeTheme.axaml" />
+    </Application.Styles>
+</Application>

@@ -1,0 +1,91 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Window style -->
+    <Style Selector="Window">
+        <Setter Property="Background" Value="{DynamicResource RedeBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <!-- TextBlock defaults -->
+    <Style Selector="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style Selector="TextBlock.secondary">
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="11" />
+    </Style>
+
+    <Style Selector="TextBlock.muted">
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextMutedBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.header">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.title">
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+
+    <!-- TextBox — input fields -->
+    <Style Selector="TextBox.rede">
+        <Setter Property="Background" Value="{DynamicResource RedeSurfaceBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource RedeBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="CaretBrush" Value="{DynamicResource RedeAccentVioletBrush}" />
+    </Style>
+
+    <!-- Button — primary -->
+    <Style Selector="Button.rede">
+        <Setter Property="Background" Value="{DynamicResource RedeAccentVioletBrush}" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <!-- Button — ghost -->
+    <Style Selector="Button.ghost">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource RedeBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <Style Selector="Button.ghost:pointerover">
+        <Setter Property="Background" Value="{DynamicResource RedeSurfaceHoverBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+    </Style>
+
+    <!-- ListBoxItem -->
+    <Style Selector="ListBoxItem">
+        <Setter Property="Padding" Value="12,8" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Margin" Value="2,1" />
+    </Style>
+
+    <Style Selector="ListBoxItem:pointerover">
+        <Setter Property="Background" Value="{DynamicResource RedeSurfaceHoverBrush}" />
+    </Style>
+
+    <Style Selector="ListBoxItem:selected">
+        <Setter Property="Background" Value="{DynamicResource RedeSurfaceActiveBrush}" />
+    </Style>
+
+</Styles>

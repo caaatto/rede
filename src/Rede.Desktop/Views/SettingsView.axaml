@@ -1,0 +1,90 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Rede.Desktop.ViewModels"
+             x:Class="Rede.Desktop.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+    <Border Background="{StaticResource RedeSurfaceBrush}"
+            Padding="32">
+        <StackPanel Spacing="24" MaxWidth="480" HorizontalAlignment="Center">
+
+            <!-- Header -->
+            <Grid ColumnDefinitions="Auto,*">
+                <Button Grid.Column="0" Classes="ghost"
+                        Content="← Back"
+                        Command="{Binding BackCommand}"
+                        Padding="8,4" />
+                <TextBlock Grid.Column="1"
+                           Text="Settings"
+                           Classes="title"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+            </Grid>
+
+            <Separator />
+
+            <!-- Identity section -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Identity" Classes="header" />
+
+                <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="User ID" Classes="secondary" VerticalAlignment="Center" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding UserId}" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Display Name" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DisplayName}" Margin="0,8,0,0" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Device ID" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DeviceId}" Margin="0,8,0,0" />
+                </Grid>
+            </StackPanel>
+
+            <Separator />
+
+            <!-- Fingerprint section -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Fingerprint" Classes="header" />
+                <TextBlock Text="Verify this fingerprint out-of-band to ensure secure communication."
+                           Classes="secondary" TextWrapping="Wrap" />
+                <Border Background="{StaticResource RedeBackgroundBrush}"
+                        CornerRadius="8"
+                        Padding="16,12">
+                    <Grid RowDefinitions="Auto,8,Auto">
+                        <TextBlock Grid.Row="0"
+                                   Text="{Binding Fingerprint}"
+                                   FontFamily="Courier New, monospace"
+                                   FontSize="15"
+                                   Foreground="{StaticResource RedeAccentVioletBrush}"
+                                   HorizontalAlignment="Center"
+                                   TextWrapping="Wrap" />
+                        <Button Grid.Row="2"
+                                Classes="ghost"
+                                Content="Copy"
+                                HorizontalAlignment="Center"
+                                Padding="16,4"
+                                FontSize="{StaticResource RedeSmallSize}"
+                                Click="CopyFingerprint_Click" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <Separator />
+
+            <!-- Public Key section -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Public Key" Classes="header" />
+                <Border Background="{StaticResource RedeBackgroundBrush}"
+                        CornerRadius="8"
+                        Padding="16,12">
+                    <TextBlock Text="{Binding PublicKey}"
+                               FontFamily="Courier New, monospace"
+                               FontSize="11"
+                               Classes="secondary"
+                               HorizontalAlignment="Center"
+                               TextWrapping="Wrap" />
+                </Border>
+            </StackPanel>
+
+        </StackPanel>
+    </Border>
+</UserControl>

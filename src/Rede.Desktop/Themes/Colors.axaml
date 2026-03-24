@@ -1,0 +1,49 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Rede Dark Cinematic Palette -->
+    <Color x:Key="RedeBackground">#0a0a0f</Color>
+    <Color x:Key="RedeSurface">#12121a</Color>
+    <Color x:Key="RedeSurfaceHover">#1a1a28</Color>
+    <Color x:Key="RedeSurfaceActive">#222236</Color>
+    <Color x:Key="RedeBorder">#1e1e2e</Color>
+    <Color x:Key="RedeBorderSubtle">#16161f</Color>
+
+    <Color x:Key="RedeTextPrimary">#e0e0e8</Color>
+    <Color x:Key="RedeTextSecondary">#6b6b80</Color>
+    <Color x:Key="RedeTextMuted">#44445a</Color>
+
+    <Color x:Key="RedeAccentViolet">#8b5cf6</Color>
+    <Color x:Key="RedeAccentVioletDim">#6d3ff0</Color>
+    <Color x:Key="RedeAccentTeal">#2dd4bf</Color>
+    <Color x:Key="RedeAccentTealDim">#1a9e8f</Color>
+
+    <Color x:Key="RedeWarning">#f59e0b</Color>
+    <Color x:Key="RedeError">#ef4444</Color>
+    <Color x:Key="RedeSuccess">#22c55e</Color>
+
+    <Color x:Key="RedeGlowViolet">#408b5cf6</Color>
+    <Color x:Key="RedeGlowTeal">#402dd4bf</Color>
+
+    <!-- SolidColorBrush resources -->
+    <SolidColorBrush x:Key="RedeBackgroundBrush" Color="{StaticResource RedeBackground}" />
+    <SolidColorBrush x:Key="RedeSurfaceBrush" Color="{StaticResource RedeSurface}" />
+    <SolidColorBrush x:Key="RedeSurfaceHoverBrush" Color="{StaticResource RedeSurfaceHover}" />
+    <SolidColorBrush x:Key="RedeSurfaceActiveBrush" Color="{StaticResource RedeSurfaceActive}" />
+    <SolidColorBrush x:Key="RedeBorderBrush" Color="{StaticResource RedeBorder}" />
+    <SolidColorBrush x:Key="RedeBorderSubtleBrush" Color="{StaticResource RedeBorderSubtle}" />
+
+    <SolidColorBrush x:Key="RedeTextPrimaryBrush" Color="{StaticResource RedeTextPrimary}" />
+    <SolidColorBrush x:Key="RedeTextSecondaryBrush" Color="{StaticResource RedeTextSecondary}" />
+    <SolidColorBrush x:Key="RedeTextMutedBrush" Color="{StaticResource RedeTextMuted}" />
+
+    <SolidColorBrush x:Key="RedeAccentVioletBrush" Color="{StaticResource RedeAccentViolet}" />
+    <SolidColorBrush x:Key="RedeAccentTealBrush" Color="{StaticResource RedeAccentTeal}" />
+
+    <SolidColorBrush x:Key="RedeWarningBrush" Color="{StaticResource RedeWarning}" />
+    <SolidColorBrush x:Key="RedeErrorBrush" Color="{StaticResource RedeError}" />
+    <SolidColorBrush x:Key="RedeSuccessBrush" Color="{StaticResource RedeSuccess}" />
+
+    <SolidColorBrush x:Key="RedeGlowVioletBrush" Color="{StaticResource RedeGlowViolet}" />
+
+</ResourceDictionary>

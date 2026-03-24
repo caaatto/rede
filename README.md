@@ -11,12 +11,16 @@
 
 ---
 
-R3D3 is an end-to-end encrypted terminal messenger.
+Rede is an end-to-end encrypted messenger.
 No phone number. No email. No metadata. Just keys.
 
 All messages are encrypted on the sender's device and decrypted
 on the recipient's device. The server never sees plaintext, never
 knows who is talking to whom, and stores nothing it doesn't have to.
+
+Two client modes:
+- **Desktop** (v2) — Avalonia 11 native GUI (.NET 8, cross-platform)
+- **Terminal** (v1) — Node.js TUI + CLI
 
 
 ## protocol
@@ -46,12 +50,29 @@ so an observer cannot infer content from message length.
 
 ## requirements
 
+### desktop client (v2)
+- .NET 8 SDK
+- libsodium (installed automatically via Sodium.Core NuGet)
+- A running Rede server with an invite code
+- Optional: Tor or I2P for anonymous transport
+
+### terminal client (v1)
 - Node.js >= 18
-- A running R3D3 server with an invite code
+- A running Rede server with an invite code
 - Optional: Tor or I2P for anonymous transport
 
 
 ## install
+
+### desktop client
+
+```
+git clone git@github.com:caaatto/rede.git && cd rede/rede-client
+dotnet build Rede.sln
+dotnet run --project src/Rede.Desktop
+```
+
+### terminal client
 
 ```
 git clone git@github.com:caaatto/rede.git && cd rede && npm install && cp .env.example .env
@@ -74,6 +95,25 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
 
 
 ## usage
+
+### desktop GUI
+
+Launch the desktop client:
+```
+dotnet run --project src/Rede.Desktop
+```
+
+The GUI provides login/register, sidebar with contacts and groups,
+chat view with message history, and a settings panel. All slash
+commands from the terminal client also work in the message input.
+
+Configure via `~/.rede/.env` or environment variables:
+```
+REDE_SERVER=wss://your-server:9377
+REDE_TRANSPORT=               # i2p or tor
+REDE_I2P_PROXY=socks5h://127.0.0.1:4447
+REDE_TOR_PROXY=socks5h://127.0.0.1:9050
+```
 
 ### TUI mode (interactive)
 

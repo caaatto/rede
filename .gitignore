@@ -42,5 +42,12 @@ desktop.ini
 .idea/
 *.sublime-*
 
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+*.DotSettings.user
+
 # AI tooling
 .claude/

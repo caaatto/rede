@@ -1,0 +1,269 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Rede.Desktop.ViewModels"
+             x:Class="Rede.Desktop.Views.MainView"
+             x:DataType="vm:MainViewModel">
+
+    <Grid ColumnDefinitions="Auto,*">
+
+        <!-- ===== SIDEBAR ===== -->
+        <Border Grid.Column="0"
+                Width="{Binding IsSidebarCollapsed, Converter={StaticResource SidebarWidthConverter}}"
+                Background="{StaticResource RedeSurfaceBrush}"
+                BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                BorderThickness="0,0,1,0">
+            <DockPanel>
+
+                <!-- Connection status strip -->
+                <Border DockPanel.Dock="Top" Padding="12,10" Background="{StaticResource RedeSurfaceBrush}">
+                    <Grid ColumnDefinitions="Auto,8,*,Auto">
+                        <!-- Status dot -->
+                        <Ellipse Grid.Column="0" Width="8" Height="8"
+                                 Fill="{Binding IsConnected, Converter={StaticResource StatusColorConverter}}" />
+                        <!-- Status text + reconnect -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6"
+                                    IsVisible="{Binding !IsSidebarCollapsed}">
+                            <TextBlock Text="{Binding ConnectionStatus}"
+                                       Classes="secondary"
+                                       VerticalAlignment="Center" />
+                            <Button Classes="ghost"
+                                    Content="Retry"
+                                    Padding="4,2"
+                                    FontSize="{StaticResource RedeSmallSize}"
+                                    Foreground="{StaticResource RedeAccentVioletBrush}"
+                                    IsVisible="{Binding !IsConnected}"
+                                    Click="RetryConnection_Click" />
+                        </StackPanel>
+                        <!-- Collapse toggle -->
+                        <Button Grid.Column="3" Classes="ghost"
+                                Command="{Binding ToggleSidebarCommand}"
+                                Padding="4" Margin="0"
+                                Width="28" Height="28">
+                            <TextBlock Text="{Binding IsSidebarCollapsed, Converter={StaticResource CollapseIconConverter}}"
+                                       FontSize="14" HorizontalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Separator DockPanel.Dock="Top" />
+
+                <!-- Contacts header -->
+                <Border DockPanel.Dock="Top" Padding="12,8"
+                        IsVisible="{Binding !IsSidebarCollapsed}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="Contacts" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightSemiBold}"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="ghost"
+                                Padding="4" Width="28" Height="28"
+                                ToolTip.Tip="Add contact">
+                            <TextBlock Text="+" FontSize="16" HorizontalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!-- Contact list -->
+                <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
+                              MaxHeight="300">
+                    <ItemsControl ItemsSource="{Binding Contacts}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ContactItemViewModel">
+                                <Button Classes="ghost"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Padding="12,8"
+                                        Margin="2,1"
+                                        BorderThickness="0"
+                                        CornerRadius="4"
+                                        Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
+                                        CommandParameter="{Binding}">
+                                    <Grid ColumnDefinitions="Auto,8,*,Auto">
+                                        <!-- Online dot -->
+                                        <Ellipse Grid.Column="0" Width="6" Height="6"
+                                                 VerticalAlignment="Center"
+                                                 Fill="{Binding IsOnline, Converter={StaticResource StatusColorConverter}}" />
+                                        <!-- Name -->
+                                        <TextBlock Grid.Column="2" Text="{Binding DisplayName}"
+                                                   VerticalAlignment="Center"
+                                                   IsVisible="{Binding !$parent[Border].((vm:MainViewModel)DataContext).IsSidebarCollapsed, FallbackValue=True}" />
+                                        <!-- Unread dot -->
+                                        <Ellipse Grid.Column="3" Width="8" Height="8"
+                                                 Fill="{StaticResource RedeAccentVioletBrush}"
+                                                 VerticalAlignment="Center"
+                                                 IsVisible="{Binding HasUnread}" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <Separator DockPanel.Dock="Top" />
+
+                <!-- Groups header -->
+                <Border DockPanel.Dock="Top" Padding="12,8"
+                        IsVisible="{Binding !IsSidebarCollapsed}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="Groups" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightSemiBold}"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="ghost"
+                                Padding="4" Width="28" Height="28"
+                                ToolTip.Tip="Create group">
+                            <TextBlock Text="+" FontSize="16" HorizontalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!-- Group list -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Groups}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:GroupItemViewModel">
+                                <Button Classes="ghost"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Padding="12,8"
+                                        Margin="2,1"
+                                        BorderThickness="0"
+                                        CornerRadius="4"
+                                        Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
+                                        CommandParameter="{Binding}">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0">
+                                            <Run Text="#" Foreground="{StaticResource RedeTextMutedBrush}" />
+                                            <Run Text="{Binding Name}" />
+                                        </TextBlock>
+                                        <Ellipse Grid.Column="1" Width="8" Height="8"
+                                                 Fill="{StaticResource RedeAccentVioletBrush}"
+                                                 VerticalAlignment="Center"
+                                                 IsVisible="{Binding HasUnread}" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+            </DockPanel>
+        </Border>
+
+        <!-- ===== CHAT AREA ===== -->
+        <DockPanel Grid.Column="1">
+
+            <!-- Chat header -->
+            <Border DockPanel.Dock="Top" Padding="16,12"
+                    Background="{StaticResource RedeSurfaceBrush}"
+                    BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                    BorderThickness="0,0,0,1">
+                <TextBlock Text="{Binding ChatTitle}"
+                           Classes="header"
+                           IsVisible="{Binding ChatTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </Border>
+
+            <!-- Message input bar -->
+            <Border DockPanel.Dock="Bottom" Padding="16,12"
+                    Background="{StaticResource RedeSurfaceBrush}"
+                    BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                    BorderThickness="0,1,0,0">
+                <Grid ColumnDefinitions="*,8,Auto">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding InputText}"
+                             Watermark="Type a message or /command..."
+                             KeyDown="InputBox_KeyDown" />
+                    <Button Grid.Column="2"
+                            Content="Send"
+                            Command="{Binding SendMessageCommand}" />
+                </Grid>
+            </Border>
+
+            <!-- Messages area -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          x:Name="MessageScroller">
+                <ItemsControl ItemsSource="{Binding Messages}" Padding="16,8">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ChatMessageViewModel">
+                            <Border Margin="0,2" Padding="0,4">
+                                <Grid>
+                                    <!-- Security alert (centered, warning color) -->
+                                    <Border Background="#1af59e0b"
+                                            CornerRadius="6"
+                                            Padding="12,8"
+                                            HorizontalAlignment="Center"
+                                            MaxWidth="500"
+                                            IsVisible="{Binding IsSecurityAlert}">
+                                        <TextBlock Text="{Binding Text}"
+                                                   Foreground="{StaticResource RedeWarningBrush}"
+                                                   FontSize="{StaticResource RedeSmallSize}"
+                                                   TextWrapping="Wrap"
+                                                   HorizontalAlignment="Center" />
+                                    </Border>
+
+                                    <!-- System message (centered) -->
+                                    <TextBlock Text="{Binding Text}"
+                                               Foreground="{StaticResource RedeTextSecondaryBrush}"
+                                               FontStyle="Italic"
+                                               FontSize="{StaticResource RedeSmallSize}"
+                                               HorizontalAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               IsVisible="{Binding IsSystem}" />
+
+                                    <!-- Incoming message (left-aligned) -->
+                                    <StackPanel Spacing="2"
+                                                HorizontalAlignment="Left"
+                                                MaxWidth="600"
+                                                IsVisible="{Binding !IsOwn}">
+                                        <!-- Hidden when system -->
+                                        <StackPanel Orientation="Horizontal" Spacing="8"
+                                                    IsVisible="{Binding !IsSystem}">
+                                            <TextBlock Text="{Binding From}"
+                                                       Foreground="{StaticResource RedeAccentVioletBrush}"
+                                                       FontWeight="{StaticResource RedeWeightMedium}"
+                                                       FontSize="{StaticResource RedeSmallSize}" />
+                                            <TextBlock Text="{Binding TimeString}"
+                                                       Classes="muted"
+                                                       FontSize="{StaticResource RedeCaptionSize}"
+                                                       VerticalAlignment="Bottom" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                                    IsVisible="{Binding !IsSystem}">
+                                            <TextBlock Text="{Binding Text}"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding TtlDisplay}"
+                                                       Classes="muted"
+                                                       FontSize="{StaticResource RedeCaptionSize}"
+                                                       VerticalAlignment="Bottom"
+                                                       IsVisible="{Binding HasTtl}" />
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <!-- Own message (right-aligned) -->
+                                    <StackPanel Spacing="2"
+                                                HorizontalAlignment="Right"
+                                                MaxWidth="600"
+                                                IsVisible="{Binding IsOwn}">
+                                        <TextBlock Text="{Binding Text}"
+                                                   TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                                    HorizontalAlignment="Right">
+                                            <TextBlock Text="{Binding TtlDisplay}"
+                                                       Classes="muted"
+                                                       FontSize="{StaticResource RedeCaptionSize}"
+                                                       IsVisible="{Binding HasTtl}" />
+                                            <TextBlock Text="{Binding TimeString}"
+                                                       Classes="muted"
+                                                       FontSize="{StaticResource RedeCaptionSize}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+        </DockPanel>
+
+    </Grid>
+</UserControl>

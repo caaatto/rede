@@ -1,0 +1,115 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Rede.Desktop.ViewModels"
+             x:Class="Rede.Desktop.Views.LoginView"
+             x:DataType="vm:LoginViewModel">
+
+    <!-- Centered login panel on dark background -->
+    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="360">
+        <Border Background="{StaticResource RedeSurfaceBrush}"
+                BorderBrush="{StaticResource RedeBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="32,28"
+                BoxShadow="0 8 32 0 #20000000">
+            <StackPanel Spacing="20">
+
+                <!-- Logo / Title -->
+                <StackPanel Spacing="4" HorizontalAlignment="Center">
+                    <TextBlock Text="rede"
+                               Classes="title"
+                               HorizontalAlignment="Center"
+                               Foreground="{StaticResource RedeAccentVioletBrush}" />
+                    <TextBlock Text="secure messenger"
+                               Classes="secondary"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <Separator Margin="0,4" />
+
+                <!-- User ID -->
+                <StackPanel Spacing="6">
+                    <TextBlock Text="User ID" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <TextBox Text="{Binding UserId}"
+                             Watermark="alice"
+                             IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
+                <!-- Passphrase -->
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Passphrase" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <TextBox Text="{Binding Passphrase}"
+                             PasswordChar="*"
+                             Watermark="min 12 characters"
+                             IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
+                <!-- Server URL -->
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Server" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <TextBox Text="{Binding ServerUrl}"
+                             Watermark="wss://localhost:9377"
+                             IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
+                <!-- Transport -->
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Transport" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <ComboBox ItemsSource="{Binding TransportOptions}"
+                              SelectedItem="{Binding Transport}"
+                              HorizontalAlignment="Stretch"
+                              IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
+                <!-- Invite Code (for registration) -->
+                <StackPanel Spacing="6"
+                            IsVisible="{Binding IsRegistering}">
+                    <TextBlock Text="Invite Code" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <TextBox Text="{Binding InviteCode}"
+                             Watermark="optional"
+                             IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
+                <!-- Error message -->
+                <TextBlock Text="{Binding ErrorMessage}"
+                           Foreground="{StaticResource RedeErrorBrush}"
+                           FontSize="{StaticResource RedeSmallSize}"
+                           IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           TextWrapping="Wrap" />
+
+                <!-- Buttons -->
+                <Grid ColumnDefinitions="*,12,*">
+                    <Button Grid.Column="0"
+                            Content="Login"
+                            Command="{Binding LoginCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            IsEnabled="{Binding !IsLoading}" />
+                    <Button Grid.Column="2"
+                            Content="Register"
+                            Classes="ghost"
+                            Command="{Binding RegisterCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            IsEnabled="{Binding !IsLoading}" />
+                </Grid>
+
+                <!-- Loading indicator -->
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            Spacing="8"
+                            IsVisible="{Binding IsLoading}">
+                    <TextBlock Text="Connecting..."
+                               Classes="secondary"
+                               Foreground="{StaticResource RedeAccentVioletBrush}" />
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
