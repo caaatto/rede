@@ -65,13 +65,12 @@
                               IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
-                <!-- Invite Code (for registration) -->
-                <StackPanel Spacing="6"
-                            IsVisible="{Binding IsRegistering}">
+                <!-- Invite Code (always visible) -->
+                <StackPanel Spacing="6">
                     <TextBlock Text="Invite Code" Classes="secondary"
                                FontWeight="{StaticResource RedeWeightMedium}" />
                     <TextBox Text="{Binding InviteCode}"
-                             Watermark="optional"
+                             Watermark="required for registration"
                              IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 

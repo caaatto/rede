@@ -114,6 +114,12 @@ public partial class LoginViewModel : ViewModelBase
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(InviteCode))
+        {
+            ErrorMessage = "Invite code is required for registration.";
+            return;
+        }
+
         ErrorMessage = "";
         IsLoading = true;
         IsRegistering = true;
