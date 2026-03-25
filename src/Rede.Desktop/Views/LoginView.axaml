@@ -107,6 +107,11 @@
                               SelectedItem="{Binding SelectedServer}"
                               HorizontalAlignment="Stretch"
                               IsEnabled="{Binding !IsLoading}" />
+                    <TextBlock Text="Deine IP-Adresse ist bei direkter Verbindung für den Server sichtbar."
+                               Foreground="{StaticResource RedeWarningBrush}"
+                               FontSize="{StaticResource RedeSmallSize}"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding IsDirectTransport}" />
                 </StackPanel>
 
                 <!-- Error message -->

@@ -22,6 +22,7 @@ public partial class LoginViewModel : ViewModelBase
     public static readonly (string Name, string Url, string Transport)[] Servers =
     {
         ("Nürnberg", "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p", "I2P"),
+        ("Direct (WSS)", "wss://203.0.113.1:9377", "Direct"),
     };
 
     public string[] ServerOptions { get; } = Servers.Select(s => s.Name).ToArray();
@@ -33,6 +34,15 @@ public partial class LoginViewModel : ViewModelBase
                                ?? Servers[0].Transport;
 
     public string UserIdWatermark => IsRegisterMode ? "alice" : "alice#a3f1";
+
+    public bool IsDirectTransport => Transport == "Direct";
+
+    partial void OnSelectedServerChanged(string value)
+    {
+        OnPropertyChanged(nameof(ServerUrl));
+        OnPropertyChanged(nameof(Transport));
+        OnPropertyChanged(nameof(IsDirectTransport));
+    }
 
     partial void OnIsRegisterModeChanged(bool value)
     {
@@ -117,9 +127,6 @@ public partial class LoginViewModel : ViewModelBase
         catch
         {
             ErrorMessage = "Login failed. Please try again.";
-        }
-        finally
-        {
             IsLoading = false;
         }
     }
@@ -174,9 +181,6 @@ public partial class LoginViewModel : ViewModelBase
         catch
         {
             ErrorMessage = "Registration failed. Please try again.";
-        }
-        finally
-        {
             IsLoading = false;
             IsRegistering = false;
         }
