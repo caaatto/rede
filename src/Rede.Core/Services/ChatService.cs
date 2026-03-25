@@ -20,13 +20,14 @@ public class ChatService
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
 
-    // Queued while awaiting pre-key bundle (M2: queue per target to avoid overwrites)
-    private readonly Dictionary<string, (string Text, int Ttl)> _pendingOutgoing = new();
+    // H7: Queue per target — multiple messages can be pending before bundle arrives
+    private readonly Dictionary<string, List<(string Text, int Ttl)>> _pendingOutgoing = new();
 
     public event Action<string, string, string, DateTime, bool>? OnMessageReceived; // from, text, chatId, timestamp, isSealed
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
     public event Action<string, string, string, string, string>? OnGroupKeyReceived; // groupId, name, key, sig, senderId
+    public event Action<string, string, string, string>? OnPlaceKeyReceived; // placeId, metadataKey, encryptedMetadata, senderId
     public event Action<string, string, string, string>? OnNewDeviceDetected; // targetUserId, deviceId, publicKey, signingKey
 
     public ChatService(RedeConnection conn, ProfileStore store)
@@ -101,7 +102,9 @@ public class ChatService
         // Fetch pre-key bundles for devices without sessions
         if (needBundle.Count > 0)
         {
-            _pendingOutgoing[targetId] = (text, ttl);
+            if (!_pendingOutgoing.ContainsKey(targetId))
+                _pendingOutgoing[targetId] = new();
+            _pendingOutgoing[targetId].Add((text, ttl));
             _conn.Send(Msg.FetchPrekeyBundle, ProtocolSerializer.Payload(
                 ("targetUserId", JsonValue.Create(targetId))
             ));
@@ -204,8 +207,10 @@ public class ChatService
         var from = ProtocolSerializer.GetString(msg, "from");
         if (from is null) return;
 
+        // H5: Nonce is required — reject messages without it
         var nonce = ProtocolSerializer.GetString(msg, "nonce");
-        if (nonce is not null && !_nonceTracker.Check(nonce)) return; // Replay
+        if (nonce is null) return;
+        if (!_nonceTracker.Check(nonce)) return; // Replay
 
         var plaintext = ReceiveRatcheted(msg, from);
         if (plaintext is null) return;
@@ -233,9 +238,10 @@ public class ChatService
         var sealedNode = msg["sealedPayload"];
         if (sealedNode is null) return;
 
-        // Replay protection for sealed messages (same as normal messages)
+        // H6: Nonce required for sealed messages — reject without it
         var sealedNonce = sealedNode["nonce"]?.GetValue<string>();
-        if (sealedNonce is not null && !_nonceTracker.Check(sealedNonce)) return;
+        if (sealedNonce is null) return;
+        if (!_nonceTracker.Check(sealedNonce)) return;
 
         var envelope = new SealedSender.SealedEnvelope(
             sealedNode["ephemeralKey"]?.GetValue<string>() ?? "",
@@ -349,6 +355,8 @@ public class ChatService
             {
                 var x3dhResult = X3dh.Respond(
                     Profile.SecretKey, spk.SecretKey, otpk, identityKey, ephemeralKey);
+                // H5: Respond() now returns null on invalid key lengths
+                if (x3dhResult is null) continue;
 
                 var ratchetState = DoubleRatchet.InitReceiver(
                     x3dhResult.SharedSecret,
@@ -426,8 +434,10 @@ public class ChatService
         if (Profile is null || Passphrase is null) return;
 
         var targetUserId = ProtocolSerializer.GetString(msg, "targetUserId");
-        if (targetUserId is null || !_pendingOutgoing.TryGetValue(targetUserId, out var pending)) return;
+        if (targetUserId is null || !_pendingOutgoing.TryGetValue(targetUserId, out var pendingList) || pendingList.Count == 0) return;
         _pendingOutgoing.Remove(targetUserId);
+        // H7: Use first message for session establishment, send rest via existing session after
+        var pending = pendingList[0];
 
         if (!Profile.Contacts.TryGetValue(targetUserId, out var contact))
         {
@@ -546,6 +556,13 @@ public class ChatService
             }, Passphrase));
             OnSystemMessage?.Invoke($"Secure session established ({successCount} device(s)).");
             OnMessageSent?.Invoke(targetUserId, pending.Text, pending.Ttl);
+
+            // H7: Send remaining queued messages via the now-established session
+            for (int i = 1; i < pendingList.Count; i++)
+            {
+                var queued = pendingList[i];
+                SendMessage(targetUserId, queued.Text, queued.Ttl);
+            }
         }
         else
         {
@@ -608,6 +625,18 @@ public class ChatService
                 if (groupId is not null && name is not null && key is not null && sig is not null)
                 {
                     OnGroupKeyReceived?.Invoke(groupId, name, key, sig, from);
+                    return true;
+                }
+            }
+
+            if (ctrl.GetString() == "placekey")
+            {
+                var placeId = root.GetProperty("placeId").GetString();
+                var metadataKey = root.GetProperty("metadataKey").GetString();
+                var encryptedMetadata = root.GetProperty("metadata").GetString();
+                if (placeId is not null && metadataKey is not null && encryptedMetadata is not null)
+                {
+                    OnPlaceKeyReceived?.Invoke(placeId, metadataKey, encryptedMetadata, from);
                     return true;
                 }
             }

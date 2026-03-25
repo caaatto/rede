@@ -59,6 +59,20 @@ public static class Msg
     public const string SealedMessage = "sealed_message";
     public const string SealedMessageAck = "sealed_message_ack";
 
+    // Places (Discord-like servers with channels)
+    public const string PlaceCreate = "place_create";
+    public const string PlaceCreateOk = "place_create_ok";
+    public const string PlaceInvite = "place_invite";
+    public const string PlaceKick = "place_kick";
+    public const string PlaceKickOk = "place_kick_ok";
+    public const string PlaceLeave = "place_leave";
+    public const string PlaceLeaveOk = "place_leave_ok";
+    public const string PlaceChannelAdd = "place_channel_add";
+    public const string PlaceChannelAddOk = "place_channel_add_ok";
+    public const string PlaceChannelRemove = "place_channel_remove";
+    public const string PlaceChannelRemoveOk = "place_channel_remove_ok";
+    public const string PlaceMessage = "place_message";
+
     // System
     public const string Error = "error";
     public const string PendingMessages = "pending_messages";

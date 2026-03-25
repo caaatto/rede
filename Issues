@@ -1,4 +1,0 @@
-[x] Own messages now saved to chat history (both 1:1 and group)
-[x] TTL is in days — /ttl 10 deletes messages after 10 days, cleanup runs on login for both sender & receiver
-[x] Right-click contact shows context menu with "Invite to #group" for each group + "View fingerprint"
-[x] Group invite now sends group key to invitee via ratcheted DM (E2EE key distribution)

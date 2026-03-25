@@ -183,6 +183,8 @@ public class DoubleRatchet
     /// </summary>
     public static string? Decrypt(RatchetState state, RatchetHeader header, string ciphertextB64, string nonceB64)
     {
+        // C1: Backup state before any mutation — restore on failure
+        var backup = state.DeepClone();
         try
         {
             var ciphertext = Convert.FromBase64String(ciphertextB64);
@@ -194,10 +196,20 @@ public class DoubleRatchet
             {
                 state.MKSKIPPED.Remove(skippedKey);
                 var skippedMk = Convert.FromBase64String(skippedMkB64);
-                var decryptedSkipped = SecretBox.Open(ciphertext, nonce, skippedMk);
-                CryptoService.ZeroOut(skippedMk);
-                var result = MessagePadding.Unpad(decryptedSkipped);
-                return result ?? System.Text.Encoding.UTF8.GetString(decryptedSkipped);
+                try
+                {
+                    var decryptedSkipped = SecretBox.Open(ciphertext, nonce, skippedMk);
+                    CryptoService.ZeroOut(skippedMk);
+                    var result = MessagePadding.Unpad(decryptedSkipped);
+                    return result ?? System.Text.Encoding.UTF8.GetString(decryptedSkipped);
+                }
+                catch
+                {
+                    // Restore skipped key on failed decrypt
+                    CryptoService.ZeroOut(skippedMk);
+                    RestoreState(state, backup);
+                    return null;
+                }
             }
 
             // DH ratchet step if new DH key
@@ -227,8 +239,24 @@ public class DoubleRatchet
         }
         catch
         {
+            // C1: Rollback all state mutations on any failure
+            RestoreState(state, backup);
             return null;
         }
+    }
+
+    /// <summary>Restore state from backup (C1: rollback on failed decrypt).</summary>
+    private static void RestoreState(RatchetState target, RatchetState source)
+    {
+        target.DHs = source.DHs;
+        target.DHr = source.DHr;
+        target.RK = source.RK;
+        target.CKs = source.CKs;
+        target.CKr = source.CKr;
+        target.Ns = source.Ns;
+        target.Nr = source.Nr;
+        target.PN = source.PN;
+        target.MKSKIPPED = source.MKSKIPPED;
     }
 
     /// <summary>

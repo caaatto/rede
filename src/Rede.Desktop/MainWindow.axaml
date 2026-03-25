@@ -8,6 +8,7 @@
         MinWidth="480" MinHeight="400"
         Background="{StaticResource RedeBackgroundBrush}"
         WindowStartupLocation="CenterScreen"
+        Icon="avares://Rede.Desktop/Assets/icon.png"
         KeyDown="Window_KeyDown">
 
     <ContentControl x:Name="RootContent" />

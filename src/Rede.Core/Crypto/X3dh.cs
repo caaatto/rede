@@ -79,6 +79,17 @@ public static class X3dh
     /// </summary>
     public static X3dhInitiateResult? Initiate(string senderIdentitySecretB64, RecipientBundle recipientBundle)
     {
+        // M1: Validate key lengths before use
+        try
+        {
+            if (Convert.FromBase64String(recipientBundle.IdentityKey).Length != 32) return null;
+            if (Convert.FromBase64String(recipientBundle.SignedPreKey).Length != 32) return null;
+            if (Convert.FromBase64String(recipientBundle.SigningKey).Length != 32) return null;
+            if (recipientBundle.OneTimePreKey is not null &&
+                Convert.FromBase64String(recipientBundle.OneTimePreKey.Key).Length != 32) return null;
+        }
+        catch { return null; }
+
         // Verify signed pre-key signature
         var spkBytes = Convert.FromBase64String(recipientBundle.SignedPreKey);
         if (!CryptoService.VerifyBytes(spkBytes, recipientBundle.SignedPreKeySig, recipientBundle.SigningKey))
@@ -142,13 +153,21 @@ public static class X3dh
     /// Responder side of X3DH (Bob receiving first message from Alice).
     /// Mirrors: x3dhRespond(...) in crypto.js
     /// </summary>
-    public static X3dhRespondResult Respond(
+    public static X3dhRespondResult? Respond(
         string recipientIdentitySecretB64,
         string signedPreKeySecretB64,
         string? oneTimePreKeySecretB64,
         string senderIdentityKeyB64,
         string senderEphemeralKeyB64)
     {
+        // H5: Validate sender key lengths before use
+        try
+        {
+            if (Convert.FromBase64String(senderIdentityKeyB64).Length != 32) return null;
+            if (Convert.FromBase64String(senderEphemeralKeyB64).Length != 32) return null;
+        }
+        catch { return null; }
+
         var ikB = Convert.FromBase64String(recipientIdentitySecretB64);
         var spkB = Convert.FromBase64String(signedPreKeySecretB64);
         var ikA = Convert.FromBase64String(senderIdentityKeyB64);

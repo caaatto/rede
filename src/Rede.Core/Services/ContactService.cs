@@ -44,17 +44,30 @@ public class ContactService
         ));
     }
 
+    // H3: Store pending key changes so ConfirmKeyChange can apply them
+    private readonly Dictionary<string, (string PublicKey, string? SigningKey, string? DisplayName, Dictionary<string, DeviceKeys>? Devices)> _pendingKeyChanges = new();
+
     /// <summary>Confirm key change for a contact (after security warning).</summary>
     public async Task ConfirmKeyChange(string userId)
     {
         if (Profile is null || Passphrase is null) return;
 
-        // The pending key change data should have been stored
-        // For now, re-accept the contact with current known keys
-        if (Profile.Contacts.TryGetValue(userId, out var contact))
+        if (_pendingKeyChanges.TryGetValue(userId, out var pending))
         {
+            _pendingKeyChanges.Remove(userId);
+            await _store.ConfirmContactKeyChangeAsync(
+                Profile, userId, pending.PublicKey, pending.SigningKey,
+                pending.DisplayName, Passphrase, pending.Devices);
             OnSystemMessage?.Invoke($"Key change accepted for {userId}.");
             OnContactsChanged?.Invoke();
+        }
+        else if (Profile.Contacts.ContainsKey(userId))
+        {
+            OnSystemMessage?.Invoke($"No pending key change for {userId}.");
+        }
+        else
+        {
+            OnSystemMessage?.Invoke($"Contact {userId} not found.");
         }
     }
 
@@ -132,6 +145,8 @@ public class ContactService
 
         if (result.Warning)
         {
+            // H3: Store pending key change for later confirmation
+            _pendingKeyChanges[userId] = (publicKey, signingKey, displayName, devices);
             OnKeyChangeWarning?.Invoke(userId, result.OldFingerprint!, result.NewFingerprint!);
         }
         else

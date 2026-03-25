@@ -22,6 +22,11 @@ public static class MessagePadding
 
     public static byte[] Pad(byte[] msgBytes)
     {
+        // M5: Validate message size — ushort length prefix caps at 65535,
+        // but largest bucket is 16384 so max content is 16382 (16384 - 2 byte prefix)
+        if (msgBytes.Length > 16382)
+            throw new ArgumentException($"Message too large ({msgBytes.Length} bytes, max 16382).");
+
         int needed = 2 + msgBytes.Length; // 2-byte length prefix + content
         int bucket = PadBuckets[^1];
         foreach (var b in PadBuckets)

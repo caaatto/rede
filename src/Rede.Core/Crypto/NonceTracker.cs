@@ -21,18 +21,25 @@ public class NonceTracker
     {
         lock (_lock)
         {
-            if (_seenNonces.Count > NonceMaxSize)
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // H4: Always evict stale entries (not just when over max)
+            // This prevents memory growth from accumulating expired nonces
+            if (_seenNonces.Count > NonceMaxSize / 2)
             {
-                var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 var stale = _seenNonces.Where(kv => now - kv.Value > NonceMaxAge).Select(kv => kv.Key).ToList();
                 foreach (var k in stale)
                     _seenNonces.Remove(k);
             }
 
+            // H7: Hard cap — if still over limit after eviction, reject to prevent DoS
+            if (_seenNonces.Count >= NonceMaxSize)
+                return false;
+
             if (_seenNonces.ContainsKey(nonceB64))
                 return false;
 
-            _seenNonces[nonceB64] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _seenNonces[nonceB64] = now;
             return true;
         }
     }

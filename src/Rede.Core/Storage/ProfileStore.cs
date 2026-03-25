@@ -59,7 +59,10 @@ public class ProfileStore
                 if (size > 0)
                 {
                     var random = RandomNumberGenerator.GetBytes((int)Math.Min(size, int.MaxValue));
-                    File.WriteAllBytes(filePath, random);
+                    // L2: Use FileStream with flush to ensure overwrite hits disk
+                    using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Write, FileShare.None);
+                    fs.Write(random);
+                    fs.Flush(flushToDisk: true);
                 }
             }
         }
@@ -124,9 +127,15 @@ public class ProfileStore
             var envelope = ProfileEncryption.Encrypt(profile, passphrase);
             var json = JsonSerializer.Serialize(envelope, JsonOpts);
 
-            // Atomic write: temp file then rename
+            // Atomic write: temp file, fsync, then rename
             var tmpFile = p + ".tmp";
-            await File.WriteAllTextAsync(tmpFile, json);
+            // L2: Write via FileStream and flush to disk before rename
+            await using (var fs = new FileStream(tmpFile, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+                await fs.WriteAsync(bytes);
+                fs.Flush(flushToDisk: true);
+            }
             SecureOverwrite(p);
             File.Move(tmpFile, p, overwrite: true);
         }
@@ -179,6 +188,17 @@ public class ProfileStore
         {
             profile.DeviceId = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
             changed = true;
+        }
+
+        // L5: Expire archived signed pre-keys older than 30 days
+        if (profile.PreviousSignedPreKeys is not null)
+        {
+            var thirtyDaysAgo = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeMilliseconds();
+            var before = profile.PreviousSignedPreKeys.Count;
+            profile.PreviousSignedPreKeys = profile.PreviousSignedPreKeys
+                .Where(k => k.ArchivedAt == 0 || k.ArchivedAt > thirtyDaysAgo)
+                .ToList();
+            if (profile.PreviousSignedPreKeys.Count != before) changed = true;
         }
 
         // Migrate contacts: add devices map if flat keys
@@ -241,6 +261,13 @@ public class ProfileStore
             ["primary"] = new() { PublicKey = publicKey, SigningKey = signingKey }
         };
 
+        // M10: Clear old ratchet states for this contact (old keys are compromised/changed)
+        var keysToRemove = profile.RatchetStates.Keys
+            .Where(k => k == internalId || k.StartsWith(internalId + ":"))
+            .ToList();
+        foreach (var k in keysToRemove)
+            profile.RatchetStates.Remove(k);
+
         profile.Contacts[internalId] = new Contact
         {
             PublicKey = publicKey,
@@ -264,6 +291,14 @@ public class ProfileStore
             Key = groupKey,
             Members = members ?? new(),
         };
+        await SaveProfileAsync(profile, passphrase);
+    }
+
+    // --- Place operations ---
+
+    public async Task SavePlaceAsync(Profile profile, string placeId, Place place, string passphrase)
+    {
+        profile.Places[placeId] = place;
         await SaveProfileAsync(profile, passphrase);
     }
 

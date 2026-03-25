@@ -120,7 +120,8 @@
                 </Border>
 
                 <!-- Group list -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
+                              MaxHeight="200">
                     <ItemsControl ItemsSource="{Binding Groups}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:GroupItemViewModel">
@@ -144,6 +145,83 @@
                                                  IsVisible="{Binding HasUnread}" />
                                     </Grid>
                                 </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <Separator DockPanel.Dock="Top" />
+
+                <!-- Places header -->
+                <Border DockPanel.Dock="Top" Padding="12,8"
+                        IsVisible="{Binding !IsSidebarCollapsed}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="Places" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightSemiBold}"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="ghost"
+                                Padding="4" Width="28" Height="28"
+                                ToolTip.Tip="Create place"
+                                Click="CreatePlace_Click">
+                            <TextBlock Text="+" FontSize="16" HorizontalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!-- Place list with nested channels -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Places}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PlaceItemViewModel">
+                                <StackPanel>
+                                    <!-- Place header -->
+                                    <Button Classes="ghost"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Padding="12,6"
+                                            Margin="2,1"
+                                            BorderThickness="0"
+                                            CornerRadius="4"
+                                            Click="PlaceHeader_Click">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       FontWeight="{StaticResource RedeWeightMedium}">
+                                                <Run Text="{Binding Name}" />
+                                            </TextBlock>
+                                            <Ellipse Grid.Column="1" Width="8" Height="8"
+                                                     Fill="{StaticResource RedeAccentVioletBrush}"
+                                                     VerticalAlignment="Center"
+                                                     IsVisible="{Binding HasUnread}" />
+                                        </Grid>
+                                    </Button>
+                                    <!-- Channels (visible when expanded) -->
+                                    <ItemsControl ItemsSource="{Binding Channels}"
+                                                  IsVisible="{Binding IsExpanded}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:ChannelItemViewModel">
+                                                <Button Classes="ghost"
+                                                        HorizontalAlignment="Stretch"
+                                                        HorizontalContentAlignment="Left"
+                                                        Padding="24,6,12,6"
+                                                        Margin="2,0"
+                                                        BorderThickness="0"
+                                                        CornerRadius="4"
+                                                        Click="Channel_Click">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Grid.Column="0">
+                                                            <Run Text="#" Foreground="{StaticResource RedeTextMutedBrush}" />
+                                                            <Run Text="{Binding Name}" />
+                                                        </TextBlock>
+                                                        <Ellipse Grid.Column="1" Width="8" Height="8"
+                                                                 Fill="{StaticResource RedeAccentVioletBrush}"
+                                                                 VerticalAlignment="Center"
+                                                                 IsVisible="{Binding HasUnread}" />
+                                                    </Grid>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

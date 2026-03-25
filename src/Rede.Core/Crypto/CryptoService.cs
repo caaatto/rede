@@ -235,11 +235,39 @@ public static class CryptoService
     // --- Raw X25519 DH ---
 
     /// <summary>
+    /// Known Curve25519 low-order points that produce all-zeros shared secrets.
+    /// </summary>
+    private static readonly byte[][] LowOrderPoints = {
+        new byte[32], // all zeros
+        new byte[] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    };
+
+    /// <summary>
+    /// H1: Validate that a DH public key is not a known low-order point.
+    /// </summary>
+    public static bool IsValidDhPublicKey(byte[] publicKey)
+    {
+        if (publicKey.Length != 32) return false;
+        foreach (var lop in LowOrderPoints)
+        {
+            if (CryptographicOperations.FixedTimeEquals(publicKey, lop))
+                return false;
+        }
+        // Also reject if DH output would be all zeros
+        return true;
+    }
+
+    /// <summary>
     /// Raw X25519 scalar multiplication. Mirrors: dh(secretKey, publicKey) using nacl.scalarMult
+    /// H1: Validates public key and checks for all-zeros output.
     /// </summary>
     public static byte[] Dh(byte[] secretKey, byte[] publicKey)
     {
-        return Sodium.ScalarMult.Mult(secretKey, publicKey);
+        var result = Sodium.ScalarMult.Mult(secretKey, publicKey);
+        // H1: Reject if DH output is all zeros (low-order point attack)
+        if (result.All(b => b == 0))
+            throw new System.Security.Cryptography.CryptographicException("DH produced all-zeros output — invalid public key.");
+        return result;
     }
 
     // --- Derive public key from secret key ---
@@ -301,14 +329,13 @@ public static class CryptoService
     /// </summary>
     private static string StripJsonField(string json, string fieldName)
     {
-        // Match: ,"fieldName":"value" or "fieldName":"value",
-        // Using regex to handle the exact raw JSON from the server
-        var pattern = $@",\s*""{fieldName}""\s*:\s*""[^""]*""";
+        // H4: Handle escaped quotes in field values — use [^"\\]*(?:\\.[^"\\]*)* pattern
+        var pattern = $@",\s*""{fieldName}""\s*:\s*""[^""\\]*(?:\\.[^""\\]*)*""";
         var result = System.Text.RegularExpressions.Regex.Replace(json, pattern, "");
         if (result == json)
         {
             // Try: "fieldName":"value", (field at start/middle)
-            pattern = $@"""{fieldName}""\s*:\s*""[^""]*""\s*,";
+            pattern = $@"""{fieldName}""\s*:\s*""[^""\\]*(?:\\.[^""\\]*)*""\s*,";
             result = System.Text.RegularExpressions.Regex.Replace(json, pattern, "");
         }
         return result;

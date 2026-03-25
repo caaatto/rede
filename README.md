@@ -29,10 +29,11 @@ Two client modes:
   CRYPTO ....... X3DH + Double Ratchet + XSalsa20-Poly1305
   SIGNING ...... Ed25519
   KEY STORE .... scrypt(N=2^20, r=8, p=1) + NaCl secretbox
-  PFS .......... per-message (1:1) / Sender Keys (groups)
+  PFS .......... per-message (1:1) / Sender Keys (groups + places)
   TRANSPORT .... WSS/TLS, Tor (.onion), I2P (.i2p garlic)
   SEALED ....... sender identity hidden from server (nacl.box envelope)
   PADDING ...... fixed-size buckets (256/1024/4096/16384 bytes)
+  PLACES ....... E2EE channel metadata, server sees only opaque IDs
 ```
 
 The cryptographic design follows the Signal Protocol. X3DH handles
@@ -122,9 +123,10 @@ Launch the desktop client (standalone exe or from source):
 dotnet run --project src/Rede.Desktop   # from source
 ```
 
-The GUI provides login/register, sidebar with contacts and groups,
-chat view with message history, and a settings panel. All slash
-commands from the terminal client also work in the message input.
+The GUI provides login/register, sidebar with contacts, groups, and
+places (Discord-like servers with channels), chat view with message
+history, and a settings panel. All slash commands from the terminal
+client also work in the message input.
 
 Right-click a contact to invite them to a group or view their fingerprint.
 
@@ -196,6 +198,12 @@ Available in both the desktop GUI message input and the terminal TUI.
   /ginvite <grp> <user>    invite to group (sends group key via E2EE DM)
   /kick <grp> <user>       remove from group
   /rekey <group>           rotate group sender key
+  /place <name>            create a place (server with channels)
+  /pchannel <place> <name> create channel in a place
+  /pinvite <place> <user>  invite user to place
+  /pkick <place> <user>    remove user from place
+  /pleave <place>          leave a place
+  /prekey <place>          rotate place metadata key
   /ttl <days>              auto-delete messages after N days (0 = off)
   /link                    generate device link code
   /devices                 show device info
@@ -281,6 +289,8 @@ To link a new device:
   message timing ......... YES (when a message arrives)
   message size ........... NO  (fixed-size padding buckets)
   group membership ....... YES (server manages group state)
+  place membership ....... YES (server manages roster)
+  place channel names .... NO  (E2EE metadata, server sees opaque IDs)
   IP address ............. NO  (if using Tor/I2P; YES for direct WSS)
   user public keys ....... YES (required for key exchange)
 ```
@@ -293,6 +303,7 @@ To link a new device:
   pending messages ........ encrypted blobs, no sender for sealed
   pre-key bundles ......... for X3DH key agreement
   group membership ........ member lists
+  place membership ........ member lists + opaque channel IDs
   nonce replay cache ...... hashed, no cleartext identity
 ```
 
