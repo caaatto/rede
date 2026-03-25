@@ -42,10 +42,15 @@ public static class SealedSender
         try
         {
             var ephPub = Convert.FromBase64String(envelope.EphemeralKey);
+            // M6: Validate ephemeral key length
+            if (ephPub.Length != 32) return null;
             var nonce = Convert.FromBase64String(envelope.Nonce);
+            if (nonce.Length != 24) return null;
             var ciphertext = Convert.FromBase64String(envelope.Ciphertext);
+            if (ciphertext.Length == 0) return null;
             var secretKey = Convert.FromBase64String(recipientIdentitySecretKeyB64);
             var decrypted = PublicKeyBox.Open(ciphertext, nonce, secretKey, ephPub);
+            CryptoService.ZeroOut(secretKey); // M7: Zero secret key after use
             var json = Encoding.UTF8.GetString(decrypted);
             return JsonSerializer.Deserialize<JsonElement>(json);
         }

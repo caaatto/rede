@@ -81,6 +81,12 @@ public class RedeConnection : IDisposable
             var dir = Path.GetDirectoryName(CertPinFile)!;
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
             File.WriteAllText(CertPinFile, JsonSerializer.Serialize(pins, new JsonSerializerOptions { WriteIndented = true }));
+            // M6: Restrict cert pin file permissions on Unix
+            if (!OperatingSystem.IsWindows())
+            {
+                try { File.SetUnixFileMode(CertPinFile, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+                catch { }
+            }
         }
         catch { }
     }
@@ -129,7 +135,9 @@ public class RedeConnection : IDisposable
         // TLS cert validation via TOFU pinning
         bool TofuValidation(object sender, X509Certificate? cert, X509Chain? chain, SslPolicyErrors errors)
         {
-            if (cert is null) return true; // No cert (ws:// or proxy)
+            // M7: Only accept null cert for non-TLS or proxied connections
+            if (cert is null)
+                return !_serverUrl.StartsWith("wss://") || _proxySettings.UseI2P || _proxySettings.UseTor;
             var fp = cert.GetCertHashString(HashAlgorithmName.SHA256);
             if (_pinnedCertFingerprint is null)
             {
@@ -188,6 +196,8 @@ public class RedeConnection : IDisposable
         }
     }
 
+    private const int MaxOutgoingSize = 512 * 1024; // L3: 512KB outgoing limit
+
     public bool Send(string type, JsonObject? payload = null)
     {
         if (_ws?.State != WebSocketState.Open)
@@ -195,10 +205,21 @@ public class RedeConnection : IDisposable
 
         var msg = ProtocolSerializer.CreateClientMessage(type, payload);
         var bytes = Encoding.UTF8.GetBytes(msg);
+
+        // L3: Reject oversized outgoing messages
+        if (bytes.Length > MaxOutgoingSize)
+        {
+            OnError?.Invoke("[WARNING] Outgoing message too large — dropped.");
+            return false;
+        }
+
         try
         {
-            _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None)
-                .GetAwaiter().GetResult();
+            // M7: Use Task.Run to avoid sync-over-async deadlock on UI thread
+            Task.Run(async () =>
+                await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true,
+                    _cts?.Token ?? CancellationToken.None)
+            ).GetAwaiter().GetResult();
             return true;
         }
         catch

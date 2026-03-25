@@ -16,6 +16,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _isSidebarCollapsed;
     [ObservableProperty] private ObservableCollection<ContactItemViewModel> _contacts = new();
     [ObservableProperty] private ObservableCollection<GroupItemViewModel> _groups = new();
+    [ObservableProperty] private ObservableCollection<PlaceItemViewModel> _places = new();
     [ObservableProperty] private object? _selectedConversation;
 
     // Chat state
@@ -48,6 +49,11 @@ public partial class MainViewModel : ViewModelBase
         {
             ChatTitle = $"# {group.Name}";
             LoadChatHistory(group.GroupId);
+        }
+        else if (item is ChannelItemViewModel channel)
+        {
+            ChatTitle = $"# {channel.Name}";
+            LoadChatHistory($"place:{channel.PlaceId}:{channel.ChannelId}");
         }
     }
 
@@ -148,6 +154,24 @@ public partial class GroupItemViewModel : ViewModelBase
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private int _memberCount;
+}
+
+public partial class PlaceItemViewModel : ViewModelBase
+{
+    [ObservableProperty] private string _placeId = "";
+    [ObservableProperty] private string _name = "";
+    [ObservableProperty] private bool _isExpanded = true;
+    [ObservableProperty] private ObservableCollection<ChannelItemViewModel> _channels = new();
+    [ObservableProperty] private bool _hasUnread;
+    [ObservableProperty] private int _memberCount;
+}
+
+public partial class ChannelItemViewModel : ViewModelBase
+{
+    [ObservableProperty] private string _placeId = "";
+    [ObservableProperty] private string _channelId = "";
+    [ObservableProperty] private string _name = "";
+    [ObservableProperty] private bool _hasUnread;
 }
 
 public partial class ChatMessageViewModel : ViewModelBase

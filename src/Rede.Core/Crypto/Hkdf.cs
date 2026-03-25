@@ -16,6 +16,12 @@ public static class Hkdf
 
     public static byte[] Expand(byte[] prk, byte[] info, int length)
     {
+        // M4: HKDF-SHA256 can produce at most 255 * 32 = 8160 bytes
+        if (length > 255 * 32)
+            throw new ArgumentException($"HKDF output length {length} exceeds maximum (8160 bytes).");
+        if (length <= 0)
+            throw new ArgumentException("HKDF output length must be positive.");
+
         var okm = new byte[length];
         var t = Array.Empty<byte>();
         int offset = 0;
@@ -38,7 +44,10 @@ public static class Hkdf
     public static byte[] DeriveKey(byte[] ikm, byte[] salt, byte[] info, int length)
     {
         var prk = Extract(salt, ikm);
-        return Expand(prk, info, length);
+        var result = Expand(prk, info, length);
+        // L1: Zero intermediate PRK
+        CryptoService.ZeroOut(prk);
+        return result;
     }
 
     public static byte[] DeriveKey(byte[] ikm, byte[] salt, string info, int length)

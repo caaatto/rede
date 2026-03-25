@@ -15,6 +15,7 @@ public class GroupService
 {
     private readonly RedeConnection _conn;
     private readonly ProfileStore _store;
+    private readonly NonceTracker _nonceTracker = new(); // H3: Replay protection for group messages
 
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
@@ -128,7 +129,8 @@ public class GroupService
                     key = newKey,
                     sig,
                 });
-                chatService.SendMessage(memberId, keyMsg, 120);
+                // M9: Group key distribution must not expire — offline members need it
+                chatService.SendMessage(memberId, keyMsg, 0);
                 sent++;
             }
         }
@@ -233,7 +235,9 @@ public class GroupService
         var rawName = ProtocolSerializer.GetString(msg, "name") ?? groupId ?? "unnamed";
         var name = System.Text.RegularExpressions.Regex.Replace(rawName, @"[\x00-\x1f\x7f]", "");
         if (name.Length > 64) name = name[..64];
-        var key = ProtocolSerializer.GetString(msg, "key") ?? CryptoService.GenerateGroupKey();
+        // H2: Never accept group key from server — always generate locally.
+        // Real key comes via signed ratcheted DM from the group creator.
+        var key = CryptoService.GenerateGroupKey();
 
         if (groupId is null) return;
 
@@ -244,8 +248,19 @@ public class GroupService
 
     private void HandleGroupKickOk(JsonObject msg)
     {
+        if (Profile is null || Passphrase is null) return;
+
         var groupId = ProtocolSerializer.GetString(msg, "groupId");
         var userId = ProtocolSerializer.GetString(msg, "userId");
+        if (groupId is null || userId is null) return;
+
+        // M8: Update local member list on kick
+        if (Profile.Groups.TryGetValue(groupId, out var group) && group.Members is not null)
+        {
+            group.Members.Remove(userId);
+            Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        }
+
         OnSystemMessage?.Invoke($"Removed {userId} from group {groupId}");
     }
 
@@ -258,9 +273,25 @@ public class GroupService
         if (groupId is null || from is null) return;
         if (from == Profile.UserId) return; // Skip own messages
 
+        // C4: Verify group exists and sender is a member
+        if (!Profile.Groups.TryGetValue(groupId, out var group))
+        {
+            OnSystemMessage?.Invoke($"Message for unknown group {groupId} — dropped.");
+            return;
+        }
+        // M5: Also reject if member list is empty (not yet populated)
+        if (group.Members is null || group.Members.Count == 0 || !group.Members.Contains(from))
+        {
+            OnSystemMessage?.Invoke($"[SECURITY] Non-member {from} sent to group {groupId} — dropped.");
+            return;
+        }
+
         var encrypted = ProtocolSerializer.GetString(msg, "encrypted");
         var nonce = ProtocolSerializer.GetString(msg, "nonce");
         if (encrypted is null || nonce is null) return;
+
+        // H3: Replay protection for group messages
+        if (!_nonceTracker.Check(nonce)) return;
 
         var skHeader = msg["senderKeyHeader"];
         if (skHeader is null) return;
@@ -306,11 +337,9 @@ public class GroupService
         var plaintext = SenderKeys.Decrypt(memberState, encrypted, nonce, messageNumber, signature, signingKey);
         if (plaintext is null) return;
 
-        // H2: Save updated sender key state to prevent replay
-        var fullState = _store.LoadSenderKeyState(Profile, groupId);
-        if (fullState is not null)
+        // M6: Save updated sender key state without re-loading (use already-parsed state)
         {
-            var parsed = JsonSerializer.Deserialize<JsonObject>(fullState.Value);
+            var parsed = JsonSerializer.Deserialize<JsonObject>(skStateJson.Value);
             if (parsed is not null)
             {
                 var membersNode = parsed["members"] as JsonObject ?? new JsonObject();

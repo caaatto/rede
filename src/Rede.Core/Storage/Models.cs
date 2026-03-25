@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Rede.Core.Storage;
@@ -34,6 +35,9 @@ public class Profile
 
     [JsonPropertyName("groups")]
     public Dictionary<string, Group> Groups { get; set; } = new();
+
+    [JsonPropertyName("places")]
+    public Dictionary<string, Place> Places { get; set; } = new();
 
     [JsonPropertyName("chatHistory")]
     public Dictionary<string, List<ChatMessage>> ChatHistory { get; set; } = new();
@@ -117,6 +121,47 @@ public class Group
 
     [JsonPropertyName("members")]
     public List<string> Members { get; set; } = new();
+}
+
+public class Place
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("metadataKey")]
+    public string MetadataKey { get; set; } = "";
+
+    [JsonPropertyName("channels")]
+    public Dictionary<string, PlaceChannel> Channels { get; set; } = new();
+
+    [JsonPropertyName("members")]
+    public List<string> Members { get; set; } = new();
+
+    [JsonPropertyName("roles")]
+    public Dictionary<string, PlaceRole> Roles { get; set; } = new();
+
+    [JsonPropertyName("creatorId")]
+    public string CreatorId { get; set; } = "";
+}
+
+public class PlaceChannel
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("topic")]
+    public string Topic { get; set; } = "";
+
+    [JsonPropertyName("createdAt")]
+    public long CreatedAt { get; set; }
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum PlaceRole
+{
+    Member = 0,
+    Admin = 1,
+    Owner = 2,
 }
 
 public class ChatMessage

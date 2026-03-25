@@ -16,6 +16,13 @@ public static class SenderKeys
     {
         public string ChainKey { get; set; } = "";  // base64
         public int MessageNumber { get; set; }
+
+        /// <summary>Deep clone for backup/restore on failed decrypt (C2 fix).</summary>
+        public SenderKeyState DeepClone() => new()
+        {
+            ChainKey = ChainKey,
+            MessageNumber = MessageNumber,
+        };
     }
 
     public record EncryptResult(string Ciphertext, string Nonce, int MessageNumber, string Signature);
@@ -59,6 +66,9 @@ public static class SenderKeys
         var signature = CryptoService.SignBytes(sigData, signingSecretKeyB64);
 
         var messageNumber = state.MessageNumber;
+        // M5: Bounds check — trigger rekey before receivers reject
+        if (messageNumber >= MaxMessageNumber)
+            throw new InvalidOperationException("Sender key message limit reached — rekey required.");
         state.MessageNumber++;
 
         return new EncryptResult(
@@ -80,8 +90,14 @@ public static class SenderKeys
         string signature,
         string signingKeyB64)
     {
+        // C2: Backup state before mutation — restore on failure
+        var backup = state.DeepClone();
         try
         {
+            // Validate messageNumber range
+            if (messageNumber < 0 || messageNumber > MaxMessageNumber)
+                return null;
+
             var ciphertext = Convert.FromBase64String(ciphertextB64);
             var nonce = Convert.FromBase64String(nonceB64);
 
@@ -127,6 +143,9 @@ public static class SenderKeys
         }
         catch
         {
+            // C2: Rollback state on any failure
+            state.ChainKey = backup.ChainKey;
+            state.MessageNumber = backup.MessageNumber;
             return null;
         }
     }

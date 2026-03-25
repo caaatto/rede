@@ -153,8 +153,9 @@ public class AuthService
 
     private void HandleRegisterFail(JsonObject msg)
     {
-        var error = ProtocolSerializer.GetString(msg, "error") ?? "Unknown error";
-        OnAuthFailed?.Invoke($"Registration failed: {error}");
+        var raw = ProtocolSerializer.GetString(msg, "error") ?? "Unknown error";
+        // H9: Sanitize server error messages
+        OnAuthFailed?.Invoke($"Registration failed: {SanitizeServerError(raw)}");
     }
 
     private void HandleAuthChallenge(JsonObject msg)
@@ -215,8 +216,18 @@ public class AuthService
 
     private void HandleAuthFail(JsonObject msg)
     {
-        var error = ProtocolSerializer.GetString(msg, "error") ?? "Authentication failed";
-        OnAuthFailed?.Invoke(error);
+        var raw = ProtocolSerializer.GetString(msg, "error") ?? "Authentication failed";
+        // H9: Sanitize server error messages
+        OnAuthFailed?.Invoke(SanitizeServerError(raw));
+    }
+
+    private static string SanitizeServerError(string msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return "Unknown error.";
+        var s = System.Text.RegularExpressions.Regex.Replace(msg, @"<[^>]+>", "");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"https?://\S+", "[link]");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"[\x00-\x1f\x7f]", "");
+        return s.Length > 200 ? s[..200] + "..." : s;
     }
 
     private void HandleDeviceLinkOk(JsonObject msg)

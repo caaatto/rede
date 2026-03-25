@@ -23,10 +23,11 @@ public partial class MainWindow : Window
     private ChatService? _chat;
     private ContactService? _contacts;
     private GroupService? _groups;
+    private PlaceService? _places;
     private DeviceService? _devices;
 
-    // Pending new devices awaiting user confirmation: key = "userId:deviceId"
-    private readonly System.Collections.Generic.Dictionary<string, (string PublicKey, string SigningKey)> _pendingDevices = new();
+    // H10: Thread-safe pending devices (accessed from connection handler threads)
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string PublicKey, string SigningKey)> _pendingDevices = new();
     private UpdateService.ReleaseInfo? _pendingRelease;
 
     public MainWindow()
@@ -193,8 +194,13 @@ public partial class MainWindow : Window
             await _conn!.ConnectAsync();
             await _auth!.RegisterAsync(displayName, passphrase, inviteCode);
 
-            // H1: Clear passphrase from login VM after successful registration
-            Dispatcher.UIThread.Post(() => _loginVm.Passphrase = "");
+            // H1: Clear sensitive fields from login VM after successful registration
+            Dispatcher.UIThread.Post(() =>
+            {
+                _loginVm.Passphrase = "";
+                _loginVm.PassphraseConfirm = "";
+                _loginVm.InviteCode = ""; // M13: Clear invite code
+            });
         }
         catch (Exception ex)
         {
@@ -238,6 +244,7 @@ public partial class MainWindow : Window
         _chat = new ChatService(_conn, _store);
         _contacts = new ContactService(_conn, _store);
         _groups = new GroupService(_conn, _store);
+        _places = new PlaceService(_conn, _store);
         _devices = new DeviceService(_conn, _store);
 
         // Connection events
@@ -307,8 +314,8 @@ public partial class MainWindow : Window
 
         _chat.OnNewDeviceDetected += (targetUserId, deviceId, publicKey, signingKey) =>
         {
-            // Store pending device for user confirmation
-            _pendingDevices[$"{targetUserId}:{deviceId}"] = (publicKey, signingKey);
+            // H10: Thread-safe store of pending device for user confirmation
+            _pendingDevices.TryAdd($"{targetUserId}:{deviceId}", (publicKey, signingKey));
         };
 
         _chat.OnGroupKeyReceived += (groupId, name, key, sig, senderId) =>
@@ -388,6 +395,32 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage(msg);
         });
 
+        // Place events
+        _places.OnChannelMessageReceived += (placeId, channelId, from, text, ts) => Dispatcher.UIThread.Post(() =>
+        {
+            _mainVm.AddIncomingMessage(from, text, ts);
+            MarkChannelUnread(placeId, channelId);
+        });
+
+        _places.OnPlacesChanged += () => Dispatcher.UIThread.Post(RefreshPlaces);
+
+        _places.OnSystemMessage += msg => Dispatcher.UIThread.Post(() =>
+        {
+            _mainVm.AddSystemMessage(msg);
+        });
+
+        _chat.OnPlaceKeyReceived += (placeId, metadataKey, encryptedMetadata, senderId) =>
+        {
+            Task.Run(async () =>
+            {
+                if (_places is not null)
+                {
+                    await _places.HandlePlaceKeyReceived(placeId, metadataKey, encryptedMetadata, senderId);
+                    Dispatcher.UIThread.Post(RefreshPlaces);
+                }
+            });
+        };
+
         // Device events
         _devices.OnSystemMessage += msg => Dispatcher.UIThread.Post(() =>
         {
@@ -404,6 +437,7 @@ public partial class MainWindow : Window
         if (_chat is not null) { _chat.Profile = p; _chat.Passphrase = pp; }
         if (_contacts is not null) { _contacts.Profile = p; _contacts.Passphrase = pp; }
         if (_groups is not null) { _groups.Profile = p; _groups.Passphrase = pp; }
+        if (_places is not null) { _places.Profile = p; _places.Passphrase = pp; }
         if (_devices is not null) { _devices.Profile = p; _devices.Passphrase = pp; }
 
         // Cleanup expired TTL messages on login
@@ -414,6 +448,7 @@ public partial class MainWindow : Window
         {
             RefreshContacts();
             RefreshGroups();
+            RefreshPlaces();
         });
     }
 
@@ -425,6 +460,8 @@ public partial class MainWindow : Window
                 _chat?.SendMessage(contact.UserId, text, _mainVm.TtlSeconds);
             else if (_mainVm.SelectedConversation is GroupItemViewModel group)
                 _groups?.SendGroupMessage(group.GroupId, text, _mainVm.TtlSeconds);
+            else if (_mainVm.SelectedConversation is ChannelItemViewModel channel)
+                _places?.SendChannelMessage(channel.PlaceId, channel.ChannelId, text, _mainVm.TtlSeconds);
         };
 
         _mainVm.OnCommandExecuted += (cmd, args) =>
@@ -508,12 +545,59 @@ public partial class MainWindow : Window
                     _mainVm.AddSystemMessage("Group not found.");
                 break;
 
+            case "place" when args.Length >= 1:
+                _places?.CreatePlace(string.Join(" ", args));
+                break;
+
+            case "pchannel" when args.Length >= 2:
+                var pcPlaceId = FindPlaceId(args[0]);
+                if (pcPlaceId is not null)
+                    _places?.CreateChannel(pcPlaceId, string.Join(" ", args[1..]), _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "pinvite" when args.Length >= 2:
+                var piPlaceId = FindPlaceId(args[0]);
+                if (piPlaceId is not null)
+                    _places?.InviteToPlace(piPlaceId, args[1], _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "pkick" when args.Length >= 2:
+                var pkPlaceId = FindPlaceId(args[0]);
+                if (pkPlaceId is not null)
+                {
+                    _places?.KickFromPlace(pkPlaceId, args[1]);
+                    _places?.RekeyPlace(pkPlaceId, _chat);
+                }
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "pleave" when args.Length >= 1:
+                var plPlaceId = FindPlaceId(args[0]);
+                if (plPlaceId is not null)
+                    _places?.LeavePlace(plPlaceId);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "prekey" when args.Length >= 1:
+                var prPlaceId = FindPlaceId(args[0]);
+                if (prPlaceId is not null)
+                    _places?.RekeyPlace(prPlaceId, _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
             case "settings" or "key":
                 ShowSettings();
                 break;
 
             case "help":
-                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /settings");
+                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pleave <place>, /prekey <place>");
                 break;
 
             default:
@@ -550,9 +634,64 @@ public partial class MainWindow : Window
             _mainVm.Groups.Add(new GroupItemViewModel
             {
                 GroupId = id,
-                Name = g.Name,
+                // M14: Sanitize group names consistently with contacts
+                Name = SanitizeDisplayString(g.Name, 64),
                 MemberCount = g.Members?.Count ?? 0,
             });
+        }
+    }
+
+    private void RefreshPlaces()
+    {
+        var places = _places?.GetPlaces();
+        if (places is null) return;
+
+        _mainVm.Places.Clear();
+        foreach (var (id, p) in places)
+        {
+            var channels = new System.Collections.ObjectModel.ObservableCollection<ChannelItemViewModel>();
+            foreach (var (chId, ch) in p.Channels)
+            {
+                channels.Add(new ChannelItemViewModel
+                {
+                    PlaceId = id,
+                    ChannelId = chId,
+                    Name = SanitizeDisplayString(ch.Name, 64),
+                });
+            }
+            _mainVm.Places.Add(new PlaceItemViewModel
+            {
+                PlaceId = id,
+                Name = SanitizeDisplayString(p.Name, 64),
+                MemberCount = p.Members?.Count ?? 0,
+                Channels = channels,
+            });
+        }
+    }
+
+    private string? FindPlaceId(string nameOrId)
+    {
+        var places = _places?.GetPlaces();
+        if (places is null) return null;
+        foreach (var (pid, p) in places)
+        {
+            if (p.Name == nameOrId || pid == nameOrId) return pid;
+        }
+        return null;
+    }
+
+    private void MarkChannelUnread(string placeId, string channelId)
+    {
+        foreach (var place in _mainVm.Places)
+        {
+            if (place.PlaceId != placeId) continue;
+            var ch = place.Channels.FirstOrDefault(c => c.ChannelId == channelId);
+            if (ch is not null && _mainVm.SelectedConversation != ch)
+            {
+                ch.HasUnread = true;
+                place.HasUnread = true;
+            }
+            break;
         }
     }
 
@@ -593,6 +732,8 @@ public partial class MainWindow : Window
             contact.HasUnread = false;
         else if (_mainVm.SelectedConversation is GroupItemViewModel group)
             group.HasUnread = false;
+        else if (_mainVm.SelectedConversation is ChannelItemViewModel ch)
+            ch.HasUnread = false;
     }
 
     private void MarkContactUnread(string userId)
@@ -703,7 +844,7 @@ public partial class MainWindow : Window
         }
 
         foreach (var key in accepted)
-            _pendingDevices.Remove(key);
+            _pendingDevices.TryRemove(key, out _);
 
         if (accepted.Count > 0)
             Task.Run(async () => await _store.SaveProfileAsync(profile, passphrase));

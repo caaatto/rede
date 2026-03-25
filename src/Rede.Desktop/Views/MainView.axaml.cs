@@ -18,6 +18,8 @@ public partial class MainView : UserControl
         InitializeComponent();
     }
 
+    private NotifyCollectionChangedEventHandler? _scrollHandler;
+
     protected override void OnLoaded(Avalonia.Interactivity.RoutedEventArgs e)
     {
         base.OnLoaded(e);
@@ -25,11 +27,24 @@ public partial class MainView : UserControl
         // Auto-scroll when new messages arrive
         if (DataContext is MainViewModel vm)
         {
-            vm.Messages.CollectionChanged += (_, args) =>
+            // M4: Store handler reference for cleanup in OnUnloaded
+            _scrollHandler = (_, args) =>
             {
                 if (args.Action == NotifyCollectionChangedAction.Add)
                     MessageScroller.ScrollToEnd();
             };
+            vm.Messages.CollectionChanged += _scrollHandler;
+        }
+    }
+
+    protected override void OnUnloaded(Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        base.OnUnloaded(e);
+        // M4: Unsubscribe to prevent memory leak
+        if (DataContext is MainViewModel vm && _scrollHandler is not null)
+        {
+            vm.Messages.CollectionChanged -= _scrollHandler;
+            _scrollHandler = null;
         }
     }
 
@@ -200,6 +215,96 @@ public partial class MainView : UserControl
         };
 
         flyout.ShowAt(btn);
+    }
+
+    private void CreatePlace_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || DataContext is not MainViewModel vm) return;
+
+        var input = new TextBox
+        {
+            Watermark = "Place name",
+            Width = 200,
+            MaxLength = 64,
+            Background = Brush.Parse("#12121a"),
+            Foreground = Brush.Parse("#e0e0e8"),
+            BorderBrush = Brush.Parse("#1e1e2e"),
+        };
+
+        var createBtn = new Button
+        {
+            Content = "Create",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+
+        var panel = new StackPanel
+        {
+            Spacing = 4,
+            Width = 210,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "Create Place",
+                    Foreground = Brush.Parse("#e0e0e8"),
+                    FontWeight = FontWeight.SemiBold,
+                    FontSize = 13,
+                },
+                input,
+                createBtn,
+            }
+        };
+
+        var flyout = new Flyout
+        {
+            Content = panel,
+            Placement = PlacementMode.BottomEdgeAlignedLeft,
+        };
+
+        createBtn.Click += (_, _) =>
+        {
+            var name = input.Text?.Trim();
+            if (!string.IsNullOrEmpty(name))
+            {
+                vm.ExecuteCommand("place", new[] { name });
+                flyout.Hide();
+            }
+        };
+
+        input.KeyDown += (_, ke) =>
+        {
+            if (ke.Key == Key.Enter)
+            {
+                var name = input.Text?.Trim();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    vm.ExecuteCommand("place", new[] { name });
+                    flyout.Hide();
+                }
+                ke.Handled = true;
+            }
+        };
+
+        flyout.ShowAt(btn);
+    }
+
+    private void PlaceHeader_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is PlaceItemViewModel place)
+        {
+            place.IsExpanded = !place.IsExpanded;
+        }
+    }
+
+    private void Channel_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is ChannelItemViewModel channel
+            && DataContext is MainViewModel vm)
+        {
+            vm.SelectConversationCommand.Execute(channel);
+        }
     }
 
     private void Contact_PointerPressed(object? sender, PointerPressedEventArgs e)

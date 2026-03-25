@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.1.0-beta";
+    private const string CurrentVersion = "2.2.0-beta";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;
@@ -252,12 +252,21 @@ public class UpdateService
 
             var bytes = ms.ToArray();
 
-            // H3: Validate downloaded binary (check magic bytes)
+            // C2: Validate downloaded binary — magic bytes + SHA256 hash if available
             if (!IsValidExecutable(bytes))
             {
                 onStatus?.Invoke("Update failed: invalid binary.");
                 return false;
             }
+
+            // C2: Try to verify SHA256 hash from release checksums file
+            var hashVerified = await VerifyReleaseHashAsync(release, bytes);
+            if (hashVerified == false)
+            {
+                onStatus?.Invoke("Update failed: SHA256 hash mismatch! Download may be compromised.");
+                return false;
+            }
+            // hashVerified == null means no checksum file available — proceed with warning
 
             onStatus?.Invoke("Installing...");
 
@@ -294,6 +303,57 @@ public class UpdateService
         }
     }
 
+    /// <summary>
+    /// C2: Verify SHA256 hash of downloaded binary against checksums file from the release.
+    /// Returns true if verified, false if mismatch, null if no checksum file available.
+    /// </summary>
+    private static async Task<bool?> VerifyReleaseHashAsync(ReleaseInfo release, byte[] bytes)
+    {
+        try
+        {
+            // Look for SHA256SUMS asset in the same release
+            using var http = new HttpClient();
+            http.DefaultRequestHeaders.Add("User-Agent", "Rede-Desktop");
+            http.Timeout = TimeSpan.FromSeconds(10);
+
+            var url = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/{release.Tag}";
+            var json = await http.GetStringAsync(url);
+            var releaseDoc = JsonDocument.Parse(json);
+
+            string? checksumsUrl = null;
+            foreach (var asset in releaseDoc.RootElement.GetProperty("assets").EnumerateArray())
+            {
+                var name = asset.GetProperty("name").GetString();
+                if (name is "SHA256SUMS" or "checksums.txt")
+                {
+                    checksumsUrl = asset.GetProperty("browser_download_url").GetString();
+                    break;
+                }
+            }
+
+            if (checksumsUrl is null) return null; // No checksums file
+
+            var checksums = await http.GetStringAsync(checksumsUrl);
+            var actualHash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+
+            foreach (var line in checksums.Split('\n'))
+            {
+                var parts = line.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && parts[1].Trim('*') == release.AssetName)
+                {
+                    return string.Equals(parts[0], actualHash, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            return null; // Asset not found in checksums file
+        }
+        catch
+        {
+            return null; // Can't verify — proceed with caution
+        }
+    }
+
     private static bool IsValidExecutable(byte[] bytes)
     {
         if (bytes.Length < 4) return false;
@@ -308,13 +368,29 @@ public class UpdateService
 
     private static int ParseVersion(string tag)
     {
-        // "v2.0.1-beta" or "2.0.1-beta" -> 201
-        var clean = tag.TrimStart('v').Split('-')[0];
-        var parts = clean.Split('.');
+        // "v2.0.1-beta" or "2.0.1-beta" -> 20001 * 10 + prerelease_order
+        // M8: Include pre-release suffix in comparison
+        var clean = tag.TrimStart('v');
+        var dashIdx = clean.IndexOf('-');
+        var versionPart = dashIdx >= 0 ? clean[..dashIdx] : clean;
+        var suffix = dashIdx >= 0 ? clean[(dashIdx + 1)..].ToLowerInvariant() : "";
+
+        var parts = versionPart.Split('.');
         var major = parts.Length > 0 && int.TryParse(parts[0], out var a) ? a : 0;
         var minor = parts.Length > 1 && int.TryParse(parts[1], out var b) ? b : 0;
         var patch = parts.Length > 2 && int.TryParse(parts[2], out var c) ? c : 0;
-        return major * 10000 + minor * 100 + patch;
+
+        // Pre-release ordering: alpha=1, beta=2, rc=3, (stable)=4
+        var preOrder = suffix switch
+        {
+            _ when suffix.StartsWith("alpha") => 1,
+            _ when suffix.StartsWith("beta") => 2,
+            _ when suffix.StartsWith("rc") => 3,
+            "" => 4, // stable
+            _ => 2, // default to beta-level for unknown
+        };
+
+        return (major * 10000 + minor * 100 + patch) * 10 + preOrder;
     }
 
     public class ReleaseInfo

@@ -58,6 +58,20 @@ const MSG = {
   SEALED_MESSAGE: 'sealed_message',
   SEALED_MESSAGE_ACK: 'sealed_message_ack',
 
+  // Places (Discord-like servers with channels)
+  PLACE_CREATE: 'place_create',
+  PLACE_CREATE_OK: 'place_create_ok',
+  PLACE_INVITE: 'place_invite',
+  PLACE_KICK: 'place_kick',
+  PLACE_KICK_OK: 'place_kick_ok',
+  PLACE_LEAVE: 'place_leave',
+  PLACE_LEAVE_OK: 'place_leave_ok',
+  PLACE_CHANNEL_ADD: 'place_channel_add',
+  PLACE_CHANNEL_ADD_OK: 'place_channel_add_ok',
+  PLACE_CHANNEL_REMOVE: 'place_channel_remove',
+  PLACE_CHANNEL_REMOVE_OK: 'place_channel_remove_ok',
+  PLACE_MESSAGE: 'place_message',
+
   // System
   ERROR: 'error',
   PENDING_MESSAGES: 'pending_messages',
