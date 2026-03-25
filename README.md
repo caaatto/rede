@@ -237,9 +237,15 @@ Your user ID will be `<displayname>#<tag>` (e.g. `alice#a3f1`).
 
 ## transport
 
-### clearnet (WSS/TLS)
-Default. Requires the server to have TLS certificates.
-Certificate fingerprints are pinned on first use (TOFU).
+### direct (WSS/TLS)
+Connect directly to the server over TLS. Select "Direct (WSS)" in the
+desktop client or use `wss://` in the terminal client. Requires the
+server to have TLS certificates. Certificate fingerprints are pinned
+on first use (TOFU).
+
+Your IP address is visible to the server with direct connections.
+Messages remain end-to-end encrypted — the server cannot read them.
+Other users never see your IP regardless of transport.
 
 ### Tor
 ```
@@ -275,7 +281,7 @@ To link a new device:
   message timing ......... YES (when a message arrives)
   message size ........... NO  (fixed-size padding buckets)
   group membership ....... YES (server manages group state)
-  IP address ............. NO  (if using Tor/I2P)
+  IP address ............. NO  (if using Tor/I2P; YES for direct WSS)
   user public keys ....... YES (required for key exchange)
 ```
 
