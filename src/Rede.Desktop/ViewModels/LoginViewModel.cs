@@ -10,7 +10,7 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private string _userId = "";
     [ObservableProperty] private string _passphrase = "";
     [ObservableProperty] private string _passphraseConfirm = "";
-    [ObservableProperty] private string _selectedServer = "Nürnberg";
+    [ObservableProperty] private string _selectedServer = "I2Pd Nürnberg";
     [ObservableProperty] private string _inviteCode = "";
     [ObservableProperty] private string _errorMessage = "";
     [ObservableProperty] private string _statusMessage = "";
@@ -21,8 +21,8 @@ public partial class LoginViewModel : ViewModelBase
 
     public static readonly (string Name, string Url, string Transport)[] Servers =
     {
-        ("Nürnberg", "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p", "I2P"),
-        ("Direct (WSS)", "wss://203.0.113.1:9377", "Direct"),
+        ("I2Pd Nürnberg", "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p", "I2P"),
+        ("IP Direct", "wss://203.0.113.1:9377", "Direct"),
     };
 
     public string[] ServerOptions { get; } = Servers.Select(s => s.Name).ToArray();

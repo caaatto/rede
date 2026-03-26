@@ -1,0 +1,86 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Rede.Desktop.ViewModels"
+             x:Class="Rede.Desktop.Views.CallView"
+             x:DataType="vm:CallViewModel"
+             IsVisible="{Binding IsVisible}">
+
+    <!-- Call overlay bar — sits at bottom of chat area -->
+    <Border Background="#1a1a28"
+            BorderBrush="{StaticResource RedeBorderBrush}"
+            BorderThickness="0,1,0,0"
+            Padding="16,12">
+
+        <Grid ColumnDefinitions="Auto,*,Auto">
+
+            <!-- Left: mode indicator + remote user -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock Text="{Binding ModeIndicator}"
+                           FontSize="18"
+                           VerticalAlignment="Center"
+                           ToolTip.Tip="{Binding ModeTooltip}" />
+                <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding RemoteUser}"
+                               Foreground="{StaticResource RedeTextPrimaryBrush}"
+                               FontSize="14"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding StatusText}"
+                               Foreground="{StaticResource RedeTextSecondaryBrush}"
+                               FontSize="11" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Center: duration (when connected) -->
+            <TextBlock Grid.Column="1"
+                       Text="{Binding DurationText}"
+                       Foreground="{StaticResource RedeTextMutedBrush}"
+                       FontSize="16"
+                       FontFamily="Consolas,monospace"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       IsVisible="{Binding IsConnected}" />
+
+            <!-- Right: action buttons -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+
+                <!-- Incoming call: Accept / Decline -->
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsIncoming}">
+                    <Button Command="{Binding AcceptCallCommand}"
+                            Background="{StaticResource RedeSuccessBrush}"
+                            Foreground="White"
+                            Content="Accept"
+                            Padding="16,8"
+                            CornerRadius="6" />
+                    <Button Command="{Binding RejectCallCommand}"
+                            Background="{StaticResource RedeErrorBrush}"
+                            Foreground="White"
+                            Content="Decline"
+                            Padding="16,8"
+                            CornerRadius="6" />
+                </StackPanel>
+
+                <!-- Active call: Mute + Hang Up -->
+                <StackPanel Orientation="Horizontal" Spacing="8"
+                            IsVisible="{Binding !IsIncoming}">
+                    <Button Command="{Binding ToggleMuteCommand}"
+                            Background="{StaticResource RedeSurfaceActiveBrush}"
+                            Foreground="{StaticResource RedeTextPrimaryBrush}"
+                            Padding="12,8"
+                            CornerRadius="6"
+                            ToolTip.Tip="Toggle Mute">
+                        <Panel>
+                            <TextBlock Text="Mute" IsVisible="{Binding !IsMuted}" />
+                            <TextBlock Text="Unmute" IsVisible="{Binding IsMuted}" />
+                        </Panel>
+                    </Button>
+                    <Button Command="{Binding HangUpCommand}"
+                            Background="{StaticResource RedeErrorBrush}"
+                            Foreground="White"
+                            Content="Hang Up"
+                            Padding="16,8"
+                            CornerRadius="6" />
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

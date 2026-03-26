@@ -228,6 +228,30 @@ public class RedeConnection : IDisposable
         }
     }
 
+    /// <summary>
+    /// Send a binary frame (for SRTP audio packets in secure voice mode).
+    /// </summary>
+    public async Task<bool> SendBinaryAsync(byte[] data)
+    {
+        if (_ws?.State != WebSocketState.Open)
+            return false;
+        try
+        {
+            await _ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Binary, true,
+                _cts?.Token ?? CancellationToken.None);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Event fired when a binary frame is received (SRTP audio packets).
+    /// </summary>
+    public event Action<byte[]>? OnBinaryMessage;
+
     public async Task<bool> SendAsync(string type, JsonObject? payload = null)
     {
         if (_ws?.State != WebSocketState.Open)
@@ -281,6 +305,14 @@ public class RedeConnection : IDisposable
                 {
                     OnError?.Invoke("[SECURITY] Oversized message dropped.");
                     messageBuffer.SetLength(0);
+                    continue;
+                }
+
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    var data = messageBuffer.ToArray();
+                    try { OnBinaryMessage?.Invoke(data); }
+                    catch (Exception ex) { OnError?.Invoke($"Binary handler error: {ex.Message}"); }
                     continue;
                 }
 

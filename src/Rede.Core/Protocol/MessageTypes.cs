@@ -73,6 +73,20 @@ public static class Msg
     public const string PlaceChannelRemoveOk = "place_channel_remove_ok";
     public const string PlaceMessage = "place_message";
 
+    // Voice Calls
+    public const string CallOffer = "call_offer";
+    public const string CallAnswer = "call_answer";
+    public const string CallIce = "call_ice";
+    public const string CallHangup = "call_hangup";
+    public const string CallReject = "call_reject";
+    public const string CallBusy = "call_busy";
+    public const string CallRinging = "call_ringing";
+    // SFU Control
+    public const string CallJoin = "call_join";
+    public const string CallLeave = "call_leave";
+    public const string CallMute = "call_mute";
+    public const string CallParticipants = "call_participants";
+
     // System
     public const string Error = "error";
     public const string PendingMessages = "pending_messages";
