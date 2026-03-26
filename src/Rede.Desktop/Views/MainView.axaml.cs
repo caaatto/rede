@@ -49,10 +49,19 @@ public partial class MainView : UserControl
     }
 
     public event Action? OnRetryConnection;
+    public event Action<string>? OnCallContact;
 
     private void RetryConnection_Click(object? sender, RoutedEventArgs e)
     {
         OnRetryConnection?.Invoke();
+    }
+
+    private void CallContact_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm && vm.SelectedConversation is ContactItemViewModel contact)
+        {
+            OnCallContact?.Invoke(contact.UserId);
+        }
     }
 
     private void InputBox_KeyDown(object? sender, KeyEventArgs e)

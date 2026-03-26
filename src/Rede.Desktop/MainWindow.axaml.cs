@@ -136,6 +136,16 @@ public partial class MainWindow : Window
                 _ = _conn.ConnectAsync();
             }
         };
+        mainView.OnCallContact += (userId) =>
+        {
+            if (_call is not null)
+                _callVm.StartOutgoingCall(userId, _call.DefaultMode);
+        };
+
+        // Mount CallView overlay
+        var callView = new CallView { DataContext = _callVm };
+        mainView.FindControl<Avalonia.Controls.ContentControl>("CallOverlay")!.Content = callView;
+
         return mainView;
     }
 
@@ -604,12 +614,45 @@ public partial class MainWindow : Window
                     _mainVm.AddSystemMessage("Place not found.");
                 break;
 
+            case "call" when args.Length >= 1:
+            {
+                if (_call is null) { _mainVm.AddSystemMessage("Call service not initialized."); break; }
+                var callTarget = args[0];
+                if (!IsValidUserId(callTarget)) { _mainVm.AddSystemMessage("Invalid user ID format."); break; }
+                var callMode = _call.DefaultMode;
+                if (args.Length >= 2)
+                {
+                    callMode = args[1].ToLowerInvariant() switch
+                    {
+                        "fast" => CallMode.Fast,
+                        "secure" => CallMode.Secure,
+                        _ => _call.DefaultMode,
+                    };
+                }
+                _callVm.StartOutgoingCall(callTarget, callMode);
+                break;
+            }
+
+            case "hangup":
+                _call?.HangUp();
+                break;
+
+            case "mute":
+                if (_call is not null)
+                {
+                    var newMute = !_call.IsMuted;
+                    _call.SetMuted(newMute);
+                    _callVm.IsMuted = newMute;
+                    _mainVm.AddSystemMessage(newMute ? "Muted" : "Unmuted");
+                }
+                break;
+
             case "settings" or "key":
                 ShowSettings();
                 break;
 
             case "help":
-                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pleave <place>, /prekey <place>");
+                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id> [fast|secure], /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pleave <place>, /prekey <place>");
                 break;
 
             default:

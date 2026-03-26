@@ -24,6 +24,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private string _chatTitle = "";
     [ObservableProperty] private string _inputText = "";
     [ObservableProperty] private int _ttlSeconds;
+    [ObservableProperty] private bool _isContactSelected;
 
     public MainViewModel()
     {
@@ -43,16 +44,19 @@ public partial class MainViewModel : ViewModelBase
         if (item is ContactItemViewModel contact)
         {
             ChatTitle = contact.DisplayName;
+            IsContactSelected = true;
             LoadChatHistory(contact.UserId);
         }
         else if (item is GroupItemViewModel group)
         {
             ChatTitle = $"# {group.Name}";
+            IsContactSelected = false;
             LoadChatHistory(group.GroupId);
         }
         else if (item is ChannelItemViewModel channel)
         {
             ChatTitle = $"# {channel.Name}";
+            IsContactSelected = false;
             LoadChatHistory($"place:{channel.PlaceId}:{channel.ChannelId}");
         }
     }

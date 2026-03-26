@@ -238,10 +238,27 @@
                     Background="{StaticResource RedeSurfaceBrush}"
                     BorderBrush="{StaticResource RedeBorderSubtleBrush}"
                     BorderThickness="0,0,0,1">
-                <TextBlock Text="{Binding ChatTitle}"
-                           Classes="header"
-                           IsVisible="{Binding ChatTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding ChatTitle}"
+                               Classes="header"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding ChatTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <Button Grid.Column="1"
+                            Classes="ghost"
+                            Padding="8,4"
+                            CornerRadius="4"
+                            ToolTip.Tip="Start voice call"
+                            IsVisible="{Binding IsContactSelected}"
+                            Click="CallContact_Click">
+                        <TextBlock Text="&#x1F4DE;" FontSize="18" />
+                    </Button>
+                </Grid>
             </Border>
+
+            <!-- Call overlay (above input bar) -->
+            <ContentControl DockPanel.Dock="Bottom"
+                            x:Name="CallOverlay" />
 
             <!-- Message input bar -->
             <Border DockPanel.Dock="Bottom" Padding="16,12"
