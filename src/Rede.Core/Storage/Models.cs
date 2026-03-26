@@ -73,6 +73,13 @@ public class Profile
     [JsonPropertyName("protocolVersion")]
     public int ProtocolVersion { get; set; } = 3;
 
+    // Voice call settings
+    [JsonPropertyName("defaultCallMode")]
+    public string DefaultCallMode { get; set; } = "secure";
+
+    [JsonPropertyName("allowFastCalls")]
+    public bool AllowFastCalls { get; set; } = true;
+
     // Transient (not persisted in older profiles)
     [JsonPropertyName("_deliveryToken")]
     public string? DeliveryToken { get; set; }

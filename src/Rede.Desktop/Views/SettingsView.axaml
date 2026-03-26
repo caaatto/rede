@@ -70,6 +70,28 @@
 
             <Separator />
 
+            <!-- Voice Calls section -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Voice Calls" Classes="header" />
+
+                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Default Mode" Classes="secondary" VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="0" Grid.Column="1"
+                              ItemsSource="{Binding CallModeOptions}"
+                              SelectedIndex="{Binding SelectedCallModeIndex}"
+                              MinWidth="180" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Allow Fast Calls" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0" />
+                    <ToggleSwitch Grid.Row="1" Grid.Column="1" IsChecked="{Binding AllowFastCalls}" Margin="0,8,0,0" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                               Text="Secure: audio tunneled over I2P (anonymous, higher latency). Fast: direct UDP (lower latency, SFU sees your IP). Both use E2EE (SRTP)."
+                               Classes="secondary" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11" />
+                </Grid>
+            </StackPanel>
+
+            <Separator />
+
             <!-- Public Key section -->
             <StackPanel Spacing="12">
                 <TextBlock Text="Public Key" Classes="header" />

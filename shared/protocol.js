@@ -72,6 +72,20 @@ const MSG = {
   PLACE_CHANNEL_REMOVE_OK: 'place_channel_remove_ok',
   PLACE_MESSAGE: 'place_message',
 
+  // Voice Calls
+  CALL_OFFER: 'call_offer',
+  CALL_ANSWER: 'call_answer',
+  CALL_ICE: 'call_ice',
+  CALL_HANGUP: 'call_hangup',
+  CALL_REJECT: 'call_reject',
+  CALL_BUSY: 'call_busy',
+  CALL_RINGING: 'call_ringing',
+  // SFU Control
+  CALL_JOIN: 'call_join',
+  CALL_LEAVE: 'call_leave',
+  CALL_MUTE: 'call_mute',
+  CALL_PARTICIPANTS: 'call_participants',
+
   // System
   ERROR: 'error',
   PENDING_MESSAGES: 'pending_messages',

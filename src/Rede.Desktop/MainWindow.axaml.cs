@@ -25,6 +25,8 @@ public partial class MainWindow : Window
     private GroupService? _groups;
     private PlaceService? _places;
     private DeviceService? _devices;
+    private CallService? _call;
+    private readonly CallViewModel _callVm = new();
 
     // H10: Thread-safe pending devices (accessed from connection handler threads)
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string PublicKey, string SigningKey)> _pendingDevices = new();
@@ -246,6 +248,16 @@ public partial class MainWindow : Window
         _groups = new GroupService(_conn, _store);
         _places = new PlaceService(_conn, _store);
         _devices = new DeviceService(_conn, _store);
+        _call = new CallService(_conn);
+        _callVm.Init(_call);
+
+        // Apply saved call settings from profile
+        if (_auth?.Profile is not null)
+        {
+            _call.DefaultMode = _auth.Profile.DefaultCallMode == "fast"
+                ? CallMode.Fast : CallMode.Secure;
+            _call.AllowFastCalls = _auth.Profile.AllowFastCalls;
+        }
 
         // Connection events
         _conn.OnConnected += () =>
@@ -761,11 +773,27 @@ public partial class MainWindow : Window
             DeviceId = p.DeviceId,
             Fingerprint = Rede.Core.Crypto.CryptoService.Fingerprint(p.PublicKey),
             PublicKey = p.PublicKey,
+            SelectedCallModeIndex = p.DefaultCallMode == "fast" ? 1 : 0,
+            AllowFastCalls = p.AllowFastCalls,
         };
         vm.OnBackRequested += () =>
         {
             // H5: Re-wire retry handler when returning from settings
             RootContent.Content = CreateMainView();
+        };
+        vm.OnCallSettingsChanged += (mode, allowFast) =>
+        {
+            if (_auth?.Profile is not null && _auth.Passphrase is not null)
+            {
+                _auth.Profile.DefaultCallMode = mode;
+                _auth.Profile.AllowFastCalls = allowFast;
+                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                if (_call is not null)
+                {
+                    _call.DefaultMode = mode == "fast" ? CallMode.Fast : CallMode.Secure;
+                    _call.AllowFastCalls = allowFast;
+                }
+            }
         };
         var settingsView = new SettingsView { DataContext = vm };
         RootContent.Content = settingsView;
