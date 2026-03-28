@@ -141,6 +141,7 @@ public partial class MainWindow : Window
             if (_call is not null)
                 _callVm.StartOutgoingCall(userId);
         };
+        mainView.OnSettingsRequested += () => ShowSettings();
 
         // Mount CallView overlay
         var callView = new CallView { DataContext = _callVm };
@@ -841,19 +842,20 @@ public partial class MainWindow : Window
         }
         catch { /* PortAudio not available */ }
 
+        // Cache device list to avoid re-enumerating on every slider change
+        var cachedDevices = Rede.Core.Audio.AudioEngine.GetDevices();
+        var cachedInputDevs = cachedDevices.Where(d => d.IsInput).ToList();
+        var cachedOutputDevs = cachedDevices.Where(d => d.IsOutput).ToList();
+
         vm.OnAudioSettingsChanged += () =>
         {
             if (_auth?.Profile is not null && _auth.Passphrase is not null)
             {
-                var devices = Rede.Core.Audio.AudioEngine.GetDevices();
-                var inputDevs = devices.Where(d => d.IsInput).ToList();
-                var outputDevs = devices.Where(d => d.IsOutput).ToList();
-
                 // Save device names (not indices — indices change across runs)
                 var inIdx = vm.SelectedInputDeviceIndex - 1; // -1 for "System Default"
                 var outIdx = vm.SelectedOutputDeviceIndex - 1;
-                _auth.Profile.InputDeviceName = inIdx >= 0 && inIdx < inputDevs.Count ? inputDevs[inIdx].Name : null;
-                _auth.Profile.OutputDeviceName = outIdx >= 0 && outIdx < outputDevs.Count ? outputDevs[outIdx].Name : null;
+                _auth.Profile.InputDeviceName = inIdx >= 0 && inIdx < cachedInputDevs.Count ? cachedInputDevs[inIdx].Name : null;
+                _auth.Profile.OutputDeviceName = outIdx >= 0 && outIdx < cachedOutputDevs.Count ? cachedOutputDevs[outIdx].Name : null;
 
                 // Convert UI percentage (0-200) to engine float (0-2)
                 _auth.Profile.InputVolume = (float)(vm.InputVolume / 100.0);
@@ -869,13 +871,13 @@ public partial class MainWindow : Window
                     _call.Audio.OutputVolume = _auth.Profile.OutputVolume;
                     _call.Audio.NoiseGateThreshold = _auth.Profile.NoiseGateThreshold;
 
-                    if (inIdx >= 0 && inIdx < inputDevs.Count)
-                        _call.Audio.SelectedInputDevice = inputDevs[inIdx].Index;
+                    if (inIdx >= 0 && inIdx < cachedInputDevs.Count)
+                        _call.Audio.SelectedInputDevice = cachedInputDevs[inIdx].Index;
                     else
                         _call.Audio.SelectedInputDevice = -1;
 
-                    if (outIdx >= 0 && outIdx < outputDevs.Count)
-                        _call.Audio.SelectedOutputDevice = outputDevs[outIdx].Index;
+                    if (outIdx >= 0 && outIdx < cachedOutputDevs.Count)
+                        _call.Audio.SelectedOutputDevice = cachedOutputDevs[outIdx].Index;
                     else
                         _call.Audio.SelectedOutputDevice = -1;
                 }

@@ -50,10 +50,16 @@ public partial class MainView : UserControl
 
     public event Action? OnRetryConnection;
     public event Action<string>? OnCallContact;
+    public event Action? OnSettingsRequested;
 
     private void RetryConnection_Click(object? sender, RoutedEventArgs e)
     {
         OnRetryConnection?.Invoke();
+    }
+
+    private void Settings_Click(object? sender, RoutedEventArgs e)
+    {
+        OnSettingsRequested?.Invoke();
     }
 
     private void CallContact_Click(object? sender, RoutedEventArgs e)
@@ -297,6 +303,130 @@ public partial class MainView : UserControl
         };
 
         flyout.ShowAt(btn);
+    }
+
+    private void Group_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+        if (sender is not Button btn || btn.DataContext is not GroupItemViewModel group) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        var menu = new ContextMenu();
+
+        var rekeyItem = new MenuItem
+        {
+            Header = "Rotate key",
+            Foreground = Brush.Parse("#e0e0e8"),
+        };
+        rekeyItem.Click += (_, _) => vm.ExecuteCommand("rekey", new[] { group.GroupId });
+        menu.Items.Add(rekeyItem);
+
+        var inviteItem = new MenuItem
+        {
+            Header = "Invite member...",
+            Foreground = Brush.Parse("#e0e0e8"),
+        };
+        inviteItem.Click += (_, _) =>
+        {
+            // Show inline input for user ID
+            var input = new TextBox
+            {
+                Watermark = "user#id",
+                Width = 200,
+                MaxLength = 255,
+                Background = Brush.Parse("#12121a"),
+                Foreground = Brush.Parse("#e0e0e8"),
+                BorderBrush = Brush.Parse("#1e1e2e"),
+            };
+            var addBtn = new Button
+            {
+                Content = "Invite",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, addBtn } };
+            var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+            addBtn.Click += (_, _) =>
+            {
+                var uid = input.Text?.Trim();
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    vm.ExecuteCommand("ginvite", new[] { group.GroupId, uid });
+                    flyout.Hide();
+                }
+            };
+            input.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == Key.Enter)
+                {
+                    var uid = input.Text?.Trim();
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        vm.ExecuteCommand("ginvite", new[] { group.GroupId, uid });
+                        flyout.Hide();
+                    }
+                    ke.Handled = true;
+                }
+            };
+            flyout.ShowAt(btn);
+        };
+        menu.Items.Add(inviteItem);
+
+        var kickItem = new MenuItem
+        {
+            Header = "Kick member...",
+            Foreground = Brush.Parse("#e0e0e8"),
+        };
+        kickItem.Click += (_, _) =>
+        {
+            var input = new TextBox
+            {
+                Watermark = "user#id",
+                Width = 200,
+                MaxLength = 255,
+                Background = Brush.Parse("#12121a"),
+                Foreground = Brush.Parse("#e0e0e8"),
+                BorderBrush = Brush.Parse("#1e1e2e"),
+            };
+            var kickBtn = new Button
+            {
+                Content = "Kick",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, kickBtn } };
+            var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+            kickBtn.Click += (_, _) =>
+            {
+                var uid = input.Text?.Trim();
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    vm.ExecuteCommand("kick", new[] { group.GroupId, uid });
+                    flyout.Hide();
+                }
+            };
+            input.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == Key.Enter)
+                {
+                    var uid = input.Text?.Trim();
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        vm.ExecuteCommand("kick", new[] { group.GroupId, uid });
+                        flyout.Hide();
+                    }
+                    ke.Handled = true;
+                }
+            };
+            flyout.ShowAt(btn);
+        };
+        menu.Items.Add(kickItem);
+
+        btn.ContextMenu = menu;
+        menu.Open(btn);
+        e.Handled = true;
     }
 
     private void PlaceHeader_Click(object? sender, RoutedEventArgs e)

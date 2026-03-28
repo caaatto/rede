@@ -14,8 +14,16 @@
                 BorderThickness="0,0,1,0">
             <DockPanel>
 
-                <!-- Collapse toggle (always at top, extra padding for title bar) -->
-                <Border DockPanel.Dock="Top" Padding="4,6,4,6" Margin="0,30,0,0" Background="{StaticResource RedeSurfaceBrush}">
+                <!-- App icon in title bar area (draggable) -->
+                <Border DockPanel.Dock="Top" Height="30" Background="{StaticResource RedeSurfaceBrush}"
+                        IsHitTestVisible="False">
+                    <Image Source="avares://Rede.Desktop/Assets/icon.png"
+                           Width="18" Height="18"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+
+                <!-- Collapse toggle (always at top) -->
+                <Border DockPanel.Dock="Top" Padding="4,6" Background="{StaticResource RedeSurfaceBrush}">
                     <Grid ColumnDefinitions="*,Auto">
                         <!-- Status dot + text (hidden when collapsed) -->
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8"
@@ -133,7 +141,8 @@
                                         BorderThickness="0"
                                         CornerRadius="4"
                                         Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
-                                        CommandParameter="{Binding}">
+                                        CommandParameter="{Binding}"
+                                        PointerPressed="Group_PointerPressed">
                                     <Grid ColumnDefinitions="*,Auto">
                                         <TextBlock Grid.Column="0">
                                             <Run Text="#" Foreground="{StaticResource RedeTextMutedBrush}" />
@@ -226,6 +235,28 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+
+                <!-- Settings button (bottom of sidebar) -->
+                <Border DockPanel.Dock="Bottom" Padding="8,8"
+                        BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,1,0,0">
+                    <Button Classes="ghost"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left"
+                            Padding="8,6"
+                            CornerRadius="6"
+                            ToolTip.Tip="Settings"
+                            Click="Settings_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Image Source="{StaticResource IconGear}" Width="16" Height="16"
+                                   VerticalAlignment="Center" />
+                            <TextBlock Text="Settings"
+                                       Classes="secondary"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding !IsSidebarCollapsed}" />
+                        </StackPanel>
+                    </Button>
+                </Border>
 
             </DockPanel>
         </Border>

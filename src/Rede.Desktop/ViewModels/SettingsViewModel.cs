@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -33,22 +34,37 @@ public partial class SettingsViewModel : ViewModelBase
     public event Action? OnBackRequested;
     public event Action? OnAudioSettingsChanged;
 
+    private CancellationTokenSource? _debounce;
+
+    private void DebouncedAudioChange()
+    {
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        System.Threading.Tasks.Task.Delay(300, token).ContinueWith(_ =>
+        {
+            if (!token.IsCancellationRequested)
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => OnAudioSettingsChanged?.Invoke());
+        }, token, System.Threading.Tasks.TaskContinuationOptions.OnlyOnRanToCompletion,
+            System.Threading.Tasks.TaskScheduler.Default);
+    }
+
     partial void OnSelectedInputDeviceIndexChanged(int value) => OnAudioSettingsChanged?.Invoke();
     partial void OnSelectedOutputDeviceIndexChanged(int value) => OnAudioSettingsChanged?.Invoke();
     partial void OnInputVolumeChanged(double value)
     {
         OnPropertyChanged(nameof(InputVolumeText));
-        OnAudioSettingsChanged?.Invoke();
+        DebouncedAudioChange();
     }
     partial void OnOutputVolumeChanged(double value)
     {
         OnPropertyChanged(nameof(OutputVolumeText));
-        OnAudioSettingsChanged?.Invoke();
+        DebouncedAudioChange();
     }
     partial void OnNoiseGateThresholdChanged(double value)
     {
         OnPropertyChanged(nameof(NoiseGateText));
-        OnAudioSettingsChanged?.Invoke();
+        DebouncedAudioChange();
     }
 
     [RelayCommand]
