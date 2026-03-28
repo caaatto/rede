@@ -15,10 +15,10 @@
 
             <!-- Left: mode indicator + remote user -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <TextBlock Text="{Binding ModeIndicator}"
-                           FontSize="18"
-                           VerticalAlignment="Center"
-                           ToolTip.Tip="{Binding ModeTooltip}" />
+                <Image Source="{Binding ModeIcon}"
+                       Width="18" Height="18"
+                       VerticalAlignment="Center"
+                       ToolTip.Tip="{Binding ModeTooltip}" />
                 <StackPanel Spacing="2">
                     <TextBlock Text="{Binding RemoteUser}"
                                Foreground="{StaticResource RedeTextPrimaryBrush}"
@@ -69,8 +69,10 @@
                             CornerRadius="6"
                             ToolTip.Tip="Toggle Mute">
                         <Panel>
-                            <TextBlock Text="Mute" IsVisible="{Binding !IsMuted}" />
-                            <TextBlock Text="Unmute" IsVisible="{Binding IsMuted}" />
+                            <Image Source="{StaticResource IconMicrophone}" Width="16" Height="16"
+                                   IsVisible="{Binding !IsMuted}" />
+                            <Image Source="{StaticResource IconMicrophoneCrossed}" Width="16" Height="16"
+                                   IsVisible="{Binding IsMuted}" />
                         </Panel>
                     </Button>
                     <Button Command="{Binding HangUpCommand}"

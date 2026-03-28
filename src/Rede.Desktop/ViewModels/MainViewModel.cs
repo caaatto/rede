@@ -190,5 +190,5 @@ public partial class ChatMessageViewModel : ViewModelBase
 
     public string TimeString => Timestamp.ToString("h:mm tt").ToLowerInvariant();
     public bool HasTtl => Ttl > 0;
-    public string TtlDisplay => Ttl > 0 ? $"\u23f1 {Ttl}d" : "";
+    public string TtlDisplay => Ttl > 0 ? $"{Ttl}d" : "";
 }

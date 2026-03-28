@@ -1,8 +1,11 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Rede.Core.Audio;
+using Rede.Core.Crypto;
 using Rede.Core.Networking;
 using Rede.Core.Protocol;
+using Rede.Core.Storage;
 
 namespace Rede.Core.Services;
 
@@ -17,13 +20,15 @@ public enum CallState
 
 public enum CallMode
 {
-    Fast,   // WebRTC/UDP — low latency, SFU sees IP
-    Secure, // Binary WS over I2P — high latency, anonymous
+    Direct, // Binary WS over WSS — low latency, server sees IP
+    I2P,    // Binary WS over I2P — high latency, anonymous
+    Tor,    // Binary WS over Tor — high latency, anonymous
 }
 
 public class CallService : IDisposable
 {
     private readonly RedeConnection _connection;
+    private readonly ProfileStore _store;
     private AudioEngine? _audioEngine;
     private SrtpSession? _srtpSession;
 
@@ -36,12 +41,26 @@ public class CallService : IDisposable
     private DateTime _callStartTime;
     private System.Timers.Timer? _offerTimeout;
 
+    public Profile? Profile { get; set; }
+    public string? Passphrase { get; set; }
+
     public CallState State => _state;
     public string? CallId => _callId;
     public string? RemoteUserId => _remoteUserId;
     public CallMode Mode => _callMode;
+    public AudioEngine? Audio => _audioEngine;
     public bool IsMuted => _audioEngine?.IsMuted ?? false;
     public TimeSpan Duration => _state == CallState.Connected ? DateTime.UtcNow - _callStartTime : TimeSpan.Zero;
+
+    /// <summary>
+    /// The call mode derived from the connection transport.
+    /// </summary>
+    public CallMode LocalMode => _connection.Transport switch
+    {
+        "I2P" => CallMode.I2P,
+        "Tor" => CallMode.Tor,
+        _ => CallMode.Direct,
+    };
 
     // Events
     public event Action<string, string, CallMode>? OnIncomingCall;  // callId, callerId, mode
@@ -50,19 +69,10 @@ public class CallService : IDisposable
     public event Action<string, bool>? OnRemoteMuted;  // userId, isMuted
     public event Action<string>? OnError;
 
-    /// <summary>
-    /// Default call mode for outgoing calls. User can change in settings.
-    /// </summary>
-    public CallMode DefaultMode { get; set; } = CallMode.Secure;
-
-    /// <summary>
-    /// If false, incoming fast-mode calls are auto-rejected.
-    /// </summary>
-    public bool AllowFastCalls { get; set; } = true;
-
-    public CallService(RedeConnection connection)
+    public CallService(RedeConnection connection, ProfileStore store)
     {
         _connection = connection;
+        _store = store;
         RegisterHandlers();
     }
 
@@ -81,10 +91,9 @@ public class CallService : IDisposable
 
     /// <summary>
     /// Initiate a call to a target user.
-    /// SRTP key material is generated locally and must be encrypted via Double Ratchet before sending.
-    /// The encrypted srtpParams should be set by the caller on the payload.
+    /// SRTP key material is encrypted via Double Ratchet before sending.
     /// </summary>
-    public bool StartCall(string targetUserId, CallMode? mode = null)
+    public bool StartCall(string targetUserId)
     {
         if (_state != CallState.Idle)
         {
@@ -92,7 +101,19 @@ public class CallService : IDisposable
             return false;
         }
 
-        _callMode = mode ?? DefaultMode;
+        if (Profile is null || Passphrase is null)
+        {
+            OnError?.Invoke("Not authenticated");
+            return false;
+        }
+
+        if (!Profile.Contacts.TryGetValue(targetUserId, out var contact))
+        {
+            OnError?.Invoke("Contact not found");
+            return false;
+        }
+
+        _callMode = LocalMode;
         _callId = GenerateCallId();
         _remoteUserId = targetUserId;
         _state = CallState.Offering;
@@ -100,13 +121,59 @@ public class CallService : IDisposable
         // Generate SRTP key material
         (_srtpMasterKey, _srtpMasterSalt) = SrtpCrypto.GenerateKeyMaterial();
 
+        // Encrypt SRTP params via Double Ratchet (find first device with a session)
+        JsonObject? srtpParamsEncrypted = null;
+        foreach (var devId in contact.Devices.Keys)
+        {
+            var stateJson = _store.LoadRatchetState(Profile, targetUserId, devId);
+            if (stateJson is null) continue;
+
+            var ratchetState = JsonSerializer.Deserialize<DoubleRatchet.RatchetState>(stateJson.Value);
+            if (ratchetState is null) continue;
+
+            var backup = ratchetState.DeepClone();
+            var srtpPlaintext = JsonSerializer.Serialize(new
+            {
+                srtpKey = Convert.ToBase64String(_srtpMasterKey),
+                srtpSalt = Convert.ToBase64String(_srtpMasterSalt),
+            });
+
+            var result = DoubleRatchet.Encrypt(ratchetState, srtpPlaintext);
+
+            srtpParamsEncrypted = new JsonObject
+            {
+                ["encrypted"] = result.Ciphertext,
+                ["nonce"] = result.Nonce,
+                ["header"] = new JsonObject
+                {
+                    ["dh"] = result.Header.Dh,
+                    ["pn"] = result.Header.Pn,
+                    ["n"] = result.Header.N,
+                },
+                ["toDeviceId"] = devId,
+            };
+
+            // Save updated ratchet state
+            var stateElement = JsonSerializer.SerializeToElement(ratchetState);
+            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, targetUserId, stateElement, Passphrase, devId));
+            break;
+        }
+
+        if (srtpParamsEncrypted is null)
+        {
+            _state = CallState.Idle;
+            _callId = null;
+            _remoteUserId = null;
+            OnError?.Invoke("No secure session with this contact. Exchange messages first.");
+            return false;
+        }
+
         var payload = new JsonObject
         {
             ["to"] = targetUserId,
             ["callId"] = _callId,
-            ["mode"] = _callMode == CallMode.Fast ? "fast" : "secure",
-            ["srtpKey"] = Convert.ToBase64String(_srtpMasterKey),
-            ["srtpSalt"] = Convert.ToBase64String(_srtpMasterSalt),
+            ["mode"] = _callMode.ToString().ToLowerInvariant(),
+            ["srtpParams"] = srtpParamsEncrypted,
         };
 
         _connection.Send(Msg.CallOffer, payload);
@@ -222,16 +289,83 @@ public class CallService : IDisposable
         var incomingCallId = msg["callId"]?.GetValue<string>();
         var incomingFrom = msg["from"]?.GetValue<string>();
         var modeStr = msg["mode"]?.GetValue<string>();
-        var incomingMode = modeStr == "fast" ? CallMode.Fast : CallMode.Secure;
-
-        // Auto-reject fast calls if user disabled them
-        if (incomingMode == CallMode.Fast && !AllowFastCalls)
+        var incomingMode = modeStr switch
         {
+            "i2p" => CallMode.I2P,
+            "tor" => CallMode.Tor,
+            // Accept legacy "fast"/"secure" and "direct"
+            "direct" or "fast" => CallMode.Direct,
+            _ => CallMode.I2P,
+        };
+
+        // Decrypt SRTP params from Double Ratchet envelope
+        byte[]? srtpKey = null;
+        byte[]? srtpSalt = null;
+
+        var srtpParams = msg["srtpParams"]?.AsObject();
+        if (srtpParams is not null && Profile is not null && Passphrase is not null && incomingFrom is not null)
+        {
+            var encrypted = srtpParams["encrypted"]?.GetValue<string>();
+            var nonce = srtpParams["nonce"]?.GetValue<string>();
+            var headerNode = srtpParams["header"];
+            var fromDeviceId = msg["fromDeviceId"]?.GetValue<string>();
+
+            if (encrypted is not null && nonce is not null && headerNode is not null)
+            {
+                var header = new DoubleRatchet.RatchetHeader(
+                    headerNode["dh"]?.GetValue<string>() ?? "",
+                    headerNode["pn"]?.GetValue<int>() ?? 0,
+                    headerNode["n"]?.GetValue<int>() ?? 0
+                );
+
+                // Try to decrypt with ratchet state for the caller
+                var stateJson = _store.LoadRatchetState(Profile, incomingFrom, fromDeviceId);
+                if (stateJson is not null)
+                {
+                    var ratchetState = JsonSerializer.Deserialize<DoubleRatchet.RatchetState>(stateJson.Value);
+                    if (ratchetState is not null)
+                    {
+                        var backup = ratchetState.DeepClone();
+                        var plaintext = DoubleRatchet.Decrypt(ratchetState, header, encrypted, nonce);
+
+                        if (plaintext is not null)
+                        {
+                            try
+                            {
+                                var doc = JsonDocument.Parse(plaintext);
+                                var keyB64 = doc.RootElement.GetProperty("srtpKey").GetString();
+                                var saltB64 = doc.RootElement.GetProperty("srtpSalt").GetString();
+                                if (keyB64 is not null && saltB64 is not null)
+                                {
+                                    srtpKey = Convert.FromBase64String(keyB64);
+                                    srtpSalt = Convert.FromBase64String(saltB64);
+                                }
+                            }
+                            catch { }
+
+                            // Save updated ratchet state
+                            var stateElement = JsonSerializer.SerializeToElement(ratchetState);
+                            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, incomingFrom, stateElement, Passphrase, fromDeviceId));
+                        }
+                        else
+                        {
+                            // Decrypt failed — restore backup
+                            var backupJson = JsonSerializer.SerializeToElement(backup);
+                            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, incomingFrom, backupJson, Passphrase, fromDeviceId));
+                        }
+                    }
+                }
+            }
+        }
+
+        if (srtpKey is null || srtpSalt is null)
+        {
+            // Can't decrypt SRTP keys — reject call
             _connection.Send(Msg.CallReject, new JsonObject
             {
                 ["to"] = incomingFrom,
                 ["callId"] = incomingCallId,
-                ["reason"] = "mode_mismatch",
+                ["reason"] = "crypto_error",
             });
             return;
         }
@@ -239,15 +373,8 @@ public class CallService : IDisposable
         _callId = incomingCallId;
         _remoteUserId = incomingFrom;
         _callMode = incomingMode;
-
-        // Extract SRTP params (in real use, these would be encrypted in the Double Ratchet payload)
-        var keyB64 = msg["srtpKey"]?.GetValue<string>();
-        var saltB64 = msg["srtpSalt"]?.GetValue<string>();
-        if (keyB64 is not null && saltB64 is not null)
-        {
-            _srtpMasterKey = Convert.FromBase64String(keyB64);
-            _srtpMasterSalt = Convert.FromBase64String(saltB64);
-        }
+        _srtpMasterKey = srtpKey;
+        _srtpMasterSalt = srtpSalt;
 
         _state = CallState.Ringing;
 

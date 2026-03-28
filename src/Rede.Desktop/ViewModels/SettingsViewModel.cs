@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -13,25 +14,41 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _fingerprint = "";
     [ObservableProperty] private string _publicKey = "";
 
-    // Voice call settings
-    [ObservableProperty] private int _selectedCallModeIndex;
-    [ObservableProperty] private bool _allowFastCalls = true;
+    // Voice call transport (read-only, derived from connection)
+    [ObservableProperty] private string _callTransport = "Direct";
 
-    public List<string> CallModeOptions { get; } = new() { "Secure (I2P)", "Fast (Direct)" };
+    // Audio settings
+    [ObservableProperty] private ObservableCollection<string> _inputDevices = new();
+    [ObservableProperty] private ObservableCollection<string> _outputDevices = new();
+    [ObservableProperty] private int _selectedInputDeviceIndex;
+    [ObservableProperty] private int _selectedOutputDeviceIndex;
+    [ObservableProperty] private double _inputVolume = 100;       // 0-200 (percentage)
+    [ObservableProperty] private double _outputVolume = 100;      // 0-200 (percentage)
+    [ObservableProperty] private double _noiseGateThreshold = 2;  // 0-100 (percentage, 0=off)
+
+    public string InputVolumeText => $"{(int)InputVolume}%";
+    public string OutputVolumeText => $"{(int)OutputVolume}%";
+    public string NoiseGateText => NoiseGateThreshold < 1 ? "Off" : $"{(int)NoiseGateThreshold}%";
 
     public event Action? OnBackRequested;
-    public event Action<string, bool>? OnCallSettingsChanged;
+    public event Action? OnAudioSettingsChanged;
 
-    partial void OnSelectedCallModeIndexChanged(int value)
+    partial void OnSelectedInputDeviceIndexChanged(int value) => OnAudioSettingsChanged?.Invoke();
+    partial void OnSelectedOutputDeviceIndexChanged(int value) => OnAudioSettingsChanged?.Invoke();
+    partial void OnInputVolumeChanged(double value)
     {
-        var mode = value == 1 ? "fast" : "secure";
-        OnCallSettingsChanged?.Invoke(mode, AllowFastCalls);
+        OnPropertyChanged(nameof(InputVolumeText));
+        OnAudioSettingsChanged?.Invoke();
     }
-
-    partial void OnAllowFastCallsChanged(bool value)
+    partial void OnOutputVolumeChanged(double value)
     {
-        var mode = SelectedCallModeIndex == 1 ? "fast" : "secure";
-        OnCallSettingsChanged?.Invoke(mode, value);
+        OnPropertyChanged(nameof(OutputVolumeText));
+        OnAudioSettingsChanged?.Invoke();
+    }
+    partial void OnNoiseGateThresholdChanged(double value)
+    {
+        OnPropertyChanged(nameof(NoiseGateText));
+        OnAudioSettingsChanged?.Invoke();
     }
 
     [RelayCommand]

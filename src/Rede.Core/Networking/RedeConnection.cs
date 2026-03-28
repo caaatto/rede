@@ -41,6 +41,11 @@ public class RedeConnection : IDisposable
     private bool _isConnected;
     public bool IsConnected => _isConnected;
 
+    /// <summary>
+    /// The active transport: "I2P", "Tor", or "Direct".
+    /// </summary>
+    public string Transport => _proxySettings.UseI2P ? "I2P" : (_proxySettings.UseTor ? "Tor" : "Direct");
+
     public RedeConnection(string serverUrl, ProxySettings? proxySettings = null)
     {
         _serverUrl = serverUrl;

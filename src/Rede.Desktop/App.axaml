@@ -9,6 +9,7 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceInclude Source="/Themes/Colors.axaml" />
                 <ResourceInclude Source="/Themes/Typography.axaml" />
+                <ResourceInclude Source="/Themes/Icons.axaml" />
             </ResourceDictionary.MergedDictionaries>
             <conv:SidebarWidthConverter x:Key="SidebarWidthConverter" />
             <conv:StatusColorConverter x:Key="StatusColorConverter" />

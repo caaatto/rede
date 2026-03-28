@@ -1,5 +1,7 @@
 using System;
 using System.Timers;
+using Avalonia;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Rede.Core.Services;
@@ -18,7 +20,7 @@ public partial class CallViewModel : ViewModelBase
     [ObservableProperty] private string _remoteUser = "";
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private string _durationText = "00:00";
-    [ObservableProperty] private string _modeIndicator = "";
+    [ObservableProperty] private IImage? _modeIcon;
     [ObservableProperty] private string _modeTooltip = "";
 
     public void Init(CallService callService)
@@ -30,13 +32,28 @@ public partial class CallViewModel : ViewModelBase
         _callService.OnRemoteMuted += HandleRemoteMuted;
     }
 
+    private static (IImage? Icon, string Tooltip) ModeDisplay(CallMode mode)
+    {
+        var tooltip = mode switch
+        {
+            CallMode.I2P => "Anonymous (I2P)",
+            CallMode.Tor => "Anonymous (Tor)",
+            CallMode.Direct => "Direct (WSS)",
+            _ => "Encrypted",
+        };
+        var iconKey = mode == CallMode.Direct ? "IconSignal" : "IconLock";
+        Application.Current!.Resources.TryGetResource(iconKey, null, out var res);
+        return (res as IImage, tooltip);
+    }
+
     private void HandleIncomingCall(string callId, string callerId, CallMode mode)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             RemoteUser = callerId;
-            ModeIndicator = mode == CallMode.Secure ? "\ud83d\udd12" : "\u26a1";
-            ModeTooltip = mode == CallMode.Secure ? "Secure (I2P)" : "Fast (Direct)";
+            var (icon, tip) = ModeDisplay(mode);
+            ModeIcon = icon;
+            ModeTooltip = tip;
             StatusText = "Incoming call...";
             IsIncoming = true;
             IsConnected = false;
@@ -105,19 +122,20 @@ public partial class CallViewModel : ViewModelBase
         _callService.SetMuted(IsMuted);
     }
 
-    public void StartOutgoingCall(string targetUser, CallMode mode)
+    public void StartOutgoingCall(string targetUser)
     {
         if (_callService is null) return;
 
         RemoteUser = targetUser;
-        ModeIndicator = mode == CallMode.Secure ? "\ud83d\udd12" : "\u26a1";
-        ModeTooltip = mode == CallMode.Secure ? "Secure (I2P)" : "Fast (Direct)";
+        var (icon, tip) = ModeDisplay(_callService.LocalMode);
+        ModeIcon = icon;
+        ModeTooltip = tip;
         StatusText = "Calling...";
         IsIncoming = false;
         IsConnected = false;
         IsVisible = true;
 
-        _callService.StartCall(targetUser, mode);
+        _callService.StartCall(targetUser);
     }
 
     private void StartDurationTimer()

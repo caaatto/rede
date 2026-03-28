@@ -74,20 +74,70 @@
             <StackPanel Spacing="12">
                 <TextBlock Text="Voice Calls" Classes="header" />
 
-                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Default Mode" Classes="secondary" VerticalAlignment="Center" />
-                    <ComboBox Grid.Row="0" Grid.Column="1"
-                              ItemsSource="{Binding CallModeOptions}"
-                              SelectedIndex="{Binding SelectedCallModeIndex}"
-                              MinWidth="180" />
+                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Transport" Classes="secondary" VerticalAlignment="Center" />
+                    <TextBlock Grid.Row="0" Grid.Column="1"
+                               Text="{Binding CallTransport}"
+                               Foreground="{StaticResource RedeTextPrimaryBrush}"
+                               VerticalAlignment="Center" />
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Allow Fast Calls" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0" />
-                    <ToggleSwitch Grid.Row="1" Grid.Column="1" IsChecked="{Binding AllowFastCalls}" Margin="0,8,0,0" />
-
-                    <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
-                               Text="Secure: audio tunneled over I2P (anonymous, higher latency). Fast: direct UDP (lower latency, SFU sees your IP). Both use E2EE (SRTP)."
+                    <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                               Text="Voice calls use E2EE (SRTP) over your current transport. I2P/Tor: anonymous with higher latency. Direct: low latency, server sees your IP."
                                Classes="secondary" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11" />
                 </Grid>
+            </StackPanel>
+
+            <Separator />
+
+            <!-- Audio section -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Audio" Classes="header" />
+
+                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                    <!-- Input device -->
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Microphone" Classes="secondary" VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="0" Grid.Column="1"
+                              ItemsSource="{Binding InputDevices}"
+                              SelectedIndex="{Binding SelectedInputDeviceIndex}"
+                              MinWidth="220" />
+
+                    <!-- Output device -->
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Speaker" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0" />
+                    <ComboBox Grid.Row="1" Grid.Column="1"
+                              ItemsSource="{Binding OutputDevices}"
+                              SelectedIndex="{Binding SelectedOutputDeviceIndex}"
+                              MinWidth="220" Margin="0,12,0,0" />
+
+                    <!-- Input volume -->
+                    <TextBlock Grid.Row="2" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
+                        <Run Text="Mic Volume " /><Run Text="{Binding InputVolumeText}" />
+                    </TextBlock>
+                    <Slider Grid.Row="2" Grid.Column="1"
+                            Minimum="0" Maximum="200" Value="{Binding InputVolume}"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            Margin="0,12,0,0" />
+
+                    <!-- Output volume -->
+                    <TextBlock Grid.Row="3" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
+                        <Run Text="Output Volume " /><Run Text="{Binding OutputVolumeText}" />
+                    </TextBlock>
+                    <Slider Grid.Row="3" Grid.Column="1"
+                            Minimum="0" Maximum="200" Value="{Binding OutputVolume}"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            Margin="0,12,0,0" />
+
+                    <!-- Noise gate -->
+                    <TextBlock Grid.Row="4" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
+                        <Run Text="Noise Gate " /><Run Text="{Binding NoiseGateText}" />
+                    </TextBlock>
+                    <Slider Grid.Row="4" Grid.Column="1"
+                            Minimum="0" Maximum="100" Value="{Binding NoiseGateThreshold}"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            Margin="0,12,0,0" />
+                </Grid>
+
+                <TextBlock Text="Noise gate mutes mic when input is below threshold. 0 = off. Volumes above 100% amplify the signal."
+                           Classes="secondary" TextWrapping="Wrap" FontSize="11" />
             </StackPanel>
 
             <Separator />

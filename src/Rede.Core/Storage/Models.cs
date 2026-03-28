@@ -80,6 +80,21 @@ public class Profile
     [JsonPropertyName("allowFastCalls")]
     public bool AllowFastCalls { get; set; } = true;
 
+    [JsonPropertyName("inputDeviceName")]
+    public string? InputDeviceName { get; set; }
+
+    [JsonPropertyName("outputDeviceName")]
+    public string? OutputDeviceName { get; set; }
+
+    [JsonPropertyName("inputVolume")]
+    public float InputVolume { get; set; } = 1.0f;
+
+    [JsonPropertyName("outputVolume")]
+    public float OutputVolume { get; set; } = 1.0f;
+
+    [JsonPropertyName("noiseGateThreshold")]
+    public float NoiseGateThreshold { get; set; } = 0.02f;
+
     // Transient (not persisted in older profiles)
     [JsonPropertyName("_deliveryToken")]
     public string? DeliveryToken { get; set; }

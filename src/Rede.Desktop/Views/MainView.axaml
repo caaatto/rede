@@ -251,7 +251,7 @@
                             ToolTip.Tip="Start voice call"
                             IsVisible="{Binding IsContactSelected}"
                             Click="CallContact_Click">
-                        <TextBlock Text="&#x1F4DE;" FontSize="18" />
+                        <Image Source="{StaticResource IconMicrophone}" Width="18" Height="18" />
                     </Button>
                 </Grid>
             </Border>
@@ -334,11 +334,15 @@
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <TextBlock Text="{Binding Text}"
                                                            TextWrapping="Wrap" />
-                                                <TextBlock Text="{Binding TtlDisplay}"
-                                                           Classes="muted"
-                                                           FontSize="{StaticResource RedeCaptionSize}"
-                                                           VerticalAlignment="Bottom"
-                                                           IsVisible="{Binding HasTtl}" />
+                                                <StackPanel Orientation="Horizontal" Spacing="3"
+                                                            VerticalAlignment="Bottom"
+                                                            IsVisible="{Binding HasTtl}">
+                                                    <Image Source="{StaticResource IconClock}" Width="11" Height="11"
+                                                           VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding TtlDisplay}"
+                                                               Classes="muted"
+                                                               FontSize="{StaticResource RedeCaptionSize}" />
+                                                </StackPanel>
                                             </StackPanel>
                                         </Border>
                                     </StackPanel>
@@ -355,11 +359,15 @@
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <TextBlock Text="{Binding Text}"
                                                            TextWrapping="Wrap" />
-                                                <TextBlock Text="{Binding TtlDisplay}"
-                                                           Classes="muted"
-                                                           FontSize="{StaticResource RedeCaptionSize}"
-                                                           VerticalAlignment="Bottom"
-                                                           IsVisible="{Binding HasTtl}" />
+                                                <StackPanel Orientation="Horizontal" Spacing="3"
+                                                            VerticalAlignment="Bottom"
+                                                            IsVisible="{Binding HasTtl}">
+                                                    <Image Source="{StaticResource IconClock}" Width="11" Height="11"
+                                                           VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding TtlDisplay}"
+                                                               Classes="muted"
+                                                               FontSize="{StaticResource RedeCaptionSize}" />
+                                                </StackPanel>
                                             </StackPanel>
                                         </Border>
                                         <StackPanel Orientation="Horizontal" Spacing="6"

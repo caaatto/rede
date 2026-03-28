@@ -139,7 +139,7 @@ public partial class MainWindow : Window
         mainView.OnCallContact += (userId) =>
         {
             if (_call is not null)
-                _callVm.StartOutgoingCall(userId, _call.DefaultMode);
+                _callVm.StartOutgoingCall(userId);
         };
 
         // Mount CallView overlay
@@ -258,16 +258,8 @@ public partial class MainWindow : Window
         _groups = new GroupService(_conn, _store);
         _places = new PlaceService(_conn, _store);
         _devices = new DeviceService(_conn, _store);
-        _call = new CallService(_conn);
+        _call = new CallService(_conn, _store);
         _callVm.Init(_call);
-
-        // Apply saved call settings from profile
-        if (_auth?.Profile is not null)
-        {
-            _call.DefaultMode = _auth.Profile.DefaultCallMode == "fast"
-                ? CallMode.Fast : CallMode.Secure;
-            _call.AllowFastCalls = _auth.Profile.AllowFastCalls;
-        }
 
         // Connection events
         _conn.OnConnected += () =>
@@ -461,6 +453,7 @@ public partial class MainWindow : Window
         if (_groups is not null) { _groups.Profile = p; _groups.Passphrase = pp; }
         if (_places is not null) { _places.Profile = p; _places.Passphrase = pp; }
         if (_devices is not null) { _devices.Profile = p; _devices.Passphrase = pp; }
+        if (_call is not null) { _call.Profile = p; _call.Passphrase = pp; }
 
         // Cleanup expired TTL messages on login
         if (pp is not null)
@@ -619,17 +612,7 @@ public partial class MainWindow : Window
                 if (_call is null) { _mainVm.AddSystemMessage("Call service not initialized."); break; }
                 var callTarget = args[0];
                 if (!IsValidUserId(callTarget)) { _mainVm.AddSystemMessage("Invalid user ID format."); break; }
-                var callMode = _call.DefaultMode;
-                if (args.Length >= 2)
-                {
-                    callMode = args[1].ToLowerInvariant() switch
-                    {
-                        "fast" => CallMode.Fast,
-                        "secure" => CallMode.Secure,
-                        _ => _call.DefaultMode,
-                    };
-                }
-                _callVm.StartOutgoingCall(callTarget, callMode);
+                _callVm.StartOutgoingCall(callTarget);
                 break;
             }
 
@@ -652,7 +635,7 @@ public partial class MainWindow : Window
                 break;
 
             case "help":
-                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id> [fast|secure], /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pleave <place>, /prekey <place>");
+                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id>, /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pleave <place>, /prekey <place>");
                 break;
 
             default:
@@ -816,28 +799,89 @@ public partial class MainWindow : Window
             DeviceId = p.DeviceId,
             Fingerprint = Rede.Core.Crypto.CryptoService.Fingerprint(p.PublicKey),
             PublicKey = p.PublicKey,
-            SelectedCallModeIndex = p.DefaultCallMode == "fast" ? 1 : 0,
-            AllowFastCalls = p.AllowFastCalls,
+            CallTransport = _call?.LocalMode.ToString() ?? _conn.Transport,
         };
         vm.OnBackRequested += () =>
         {
             // H5: Re-wire retry handler when returning from settings
             RootContent.Content = CreateMainView();
         };
-        vm.OnCallSettingsChanged += (mode, allowFast) =>
+
+        // Populate audio device lists
+        try
+        {
+            var devices = Rede.Core.Audio.AudioEngine.GetDevices();
+            var inputDevs = devices.Where(d => d.IsInput).ToList();
+            var outputDevs = devices.Where(d => d.IsOutput).ToList();
+
+            vm.InputDevices.Clear();
+            vm.InputDevices.Add("System Default");
+            foreach (var d in inputDevs) vm.InputDevices.Add(d.Name);
+
+            vm.OutputDevices.Clear();
+            vm.OutputDevices.Add("System Default");
+            foreach (var d in outputDevs) vm.OutputDevices.Add(d.Name);
+
+            // Select saved device by name
+            if (p.InputDeviceName is not null)
+            {
+                var idx = inputDevs.FindIndex(d => d.Name == p.InputDeviceName);
+                vm.SelectedInputDeviceIndex = idx >= 0 ? idx + 1 : 0; // +1 for "System Default"
+            }
+            if (p.OutputDeviceName is not null)
+            {
+                var idx = outputDevs.FindIndex(d => d.Name == p.OutputDeviceName);
+                vm.SelectedOutputDeviceIndex = idx >= 0 ? idx + 1 : 0;
+            }
+
+            // Load saved volume/gate (profile stores 0-2 float, UI uses 0-200 percentage)
+            vm.InputVolume = p.InputVolume * 100;
+            vm.OutputVolume = p.OutputVolume * 100;
+            vm.NoiseGateThreshold = p.NoiseGateThreshold * 100 / 1.0; // 0.02 → 2
+        }
+        catch { /* PortAudio not available */ }
+
+        vm.OnAudioSettingsChanged += () =>
         {
             if (_auth?.Profile is not null && _auth.Passphrase is not null)
             {
-                _auth.Profile.DefaultCallMode = mode;
-                _auth.Profile.AllowFastCalls = allowFast;
+                var devices = Rede.Core.Audio.AudioEngine.GetDevices();
+                var inputDevs = devices.Where(d => d.IsInput).ToList();
+                var outputDevs = devices.Where(d => d.IsOutput).ToList();
+
+                // Save device names (not indices — indices change across runs)
+                var inIdx = vm.SelectedInputDeviceIndex - 1; // -1 for "System Default"
+                var outIdx = vm.SelectedOutputDeviceIndex - 1;
+                _auth.Profile.InputDeviceName = inIdx >= 0 && inIdx < inputDevs.Count ? inputDevs[inIdx].Name : null;
+                _auth.Profile.OutputDeviceName = outIdx >= 0 && outIdx < outputDevs.Count ? outputDevs[outIdx].Name : null;
+
+                // Convert UI percentage (0-200) to engine float (0-2)
+                _auth.Profile.InputVolume = (float)(vm.InputVolume / 100.0);
+                _auth.Profile.OutputVolume = (float)(vm.OutputVolume / 100.0);
+                _auth.Profile.NoiseGateThreshold = (float)(vm.NoiseGateThreshold / 100.0);
+
                 _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
-                if (_call is not null)
+
+                // Apply to running audio engine
+                if (_call?.Audio is not null)
                 {
-                    _call.DefaultMode = mode == "fast" ? CallMode.Fast : CallMode.Secure;
-                    _call.AllowFastCalls = allowFast;
+                    _call.Audio.InputVolume = _auth.Profile.InputVolume;
+                    _call.Audio.OutputVolume = _auth.Profile.OutputVolume;
+                    _call.Audio.NoiseGateThreshold = _auth.Profile.NoiseGateThreshold;
+
+                    if (inIdx >= 0 && inIdx < inputDevs.Count)
+                        _call.Audio.SelectedInputDevice = inputDevs[inIdx].Index;
+                    else
+                        _call.Audio.SelectedInputDevice = -1;
+
+                    if (outIdx >= 0 && outIdx < outputDevs.Count)
+                        _call.Audio.SelectedOutputDevice = outputDevs[outIdx].Index;
+                    else
+                        _call.Audio.SelectedOutputDevice = -1;
                 }
             }
         };
+
         var settingsView = new SettingsView { DataContext = vm };
         RootContent.Content = settingsView;
     }
