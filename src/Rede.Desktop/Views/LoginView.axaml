@@ -5,14 +5,17 @@
              x:DataType="vm:LoginViewModel">
 
     <!-- Centered login panel on dark background -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Padding="0,24">
     <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="360">
         <Border Background="{StaticResource RedeSurfaceBrush}"
                 BorderBrush="{StaticResource RedeBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="12"
-                Padding="32,28"
+                Padding="32,24"
                 BoxShadow="0 8 32 0 #20000000">
-            <StackPanel Spacing="20">
+            <StackPanel Spacing="16">
 
                 <!-- Logo / Title -->
                 <StackPanel Spacing="4" HorizontalAlignment="Center">
@@ -175,4 +178,5 @@
             </StackPanel>
         </Border>
     </Grid>
+    </ScrollViewer>
 </UserControl>

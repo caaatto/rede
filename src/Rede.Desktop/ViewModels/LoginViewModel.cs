@@ -22,7 +22,7 @@ public partial class LoginViewModel : ViewModelBase
     public static readonly (string Name, string Url, string Transport)[] Servers =
     {
         ("I2Pd Nürnberg", "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p", "I2P"),
-        ("IP Direct", "wss://clip.jetzt:9377", "Direct"),
+        ("IP Direct", "wss://clip.jetzt/rede", "Direct"),
     };
 
     public string[] ServerOptions { get; } = Servers.Select(s => s.Name).ToArray();
