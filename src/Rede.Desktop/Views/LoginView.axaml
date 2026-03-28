@@ -7,7 +7,7 @@
     <!-- Centered login panel on dark background -->
     <ScrollViewer VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
-                  Padding="0,24">
+                  Padding="0,36,0,24">
     <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="360">
         <Border Background="{StaticResource RedeSurfaceBrush}"
                 BorderBrush="{StaticResource RedeBorderBrush}"

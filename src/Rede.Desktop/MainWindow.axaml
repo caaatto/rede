@@ -9,6 +9,9 @@
         Background="{StaticResource RedeBackgroundBrush}"
         WindowStartupLocation="CenterScreen"
         Icon="avares://Rede.Desktop/Assets/icon.png"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="PreferSystemChrome"
+        ExtendClientAreaTitleBarHeightHint="36"
         KeyDown="Window_KeyDown">
 
     <ContentControl x:Name="RootContent" />
