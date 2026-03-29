@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.5.1-beta";
+    private const string CurrentVersion = "2.5.2-beta";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;

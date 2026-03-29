@@ -8,14 +8,14 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
                   Padding="0,36,0,24">
-    <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="360">
+    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
         <Border Background="{StaticResource RedeSurfaceBrush}"
                 BorderBrush="{StaticResource RedeBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="12"
-                Padding="32,24"
+                Padding="24,18"
                 BoxShadow="0 8 32 0 #20000000">
-            <StackPanel Spacing="16">
+            <StackPanel Spacing="10">
 
                 <!-- Logo / Title -->
                 <StackPanel Spacing="4" HorizontalAlignment="Center">
@@ -28,7 +28,7 @@
                                HorizontalAlignment="Center" />
                 </StackPanel>
 
-                <Separator Margin="0,4" />
+                <Separator Margin="0,2" />
 
                 <!-- Mode tabs -->
                 <Grid ColumnDefinitions="*,*">
@@ -58,87 +58,128 @@
                     </Border>
                 </Grid>
 
-                <!-- User ID (login) / Display Name (register) -->
-                <StackPanel Spacing="6">
-                    <TextBlock Text="User ID" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}"
-                               IsVisible="{Binding !IsRegisterMode}" />
-                    <TextBlock Text="Display Name" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}"
-                               IsVisible="{Binding IsRegisterMode}" />
-                    <TextBox Text="{Binding UserId}"
-                             Watermark="{Binding UserIdWatermark}"
-                             MaxLength="255"
-                             IsEnabled="{Binding !IsLoading}" />
+                <!-- === LOGIN MODE: single column === -->
+                <StackPanel Spacing="10" IsVisible="{Binding !IsRegisterMode}" Width="320">
+
+                    <!-- User ID -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="User ID" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightMedium}" />
+                        <TextBox Text="{Binding UserId}"
+                                 Watermark="{Binding UserIdWatermark}"
+                                 MaxLength="255"
+                                 IsEnabled="{Binding !IsLoading}" />
+                    </StackPanel>
+
+                    <!-- Passphrase -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Passphrase" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightMedium}" />
+                        <TextBox Text="{Binding Passphrase}"
+                                 PasswordChar="*"
+                                 Watermark="min 12 characters"
+                                 IsEnabled="{Binding !IsLoading}" />
+                    </StackPanel>
+
+                    <!-- Server -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Server" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightMedium}" />
+                        <ComboBox ItemsSource="{Binding ServerOptions}"
+                                  SelectedItem="{Binding SelectedServer}"
+                                  HorizontalAlignment="Stretch"
+                                  IsEnabled="{Binding !IsLoading}" />
+                        <TextBlock Text="Deine IP-Adresse ist bei direkter Verbindung für den Server sichtbar."
+                                   Foreground="{StaticResource RedeWarningBrush}"
+                                   FontSize="{StaticResource RedeSmallSize}"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding IsDirectTransport}" />
+                    </StackPanel>
+
+                    <!-- Login button -->
+                    <Button Content="Login"
+                            Command="{Binding LoginCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
-                <!-- Passphrase -->
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Passphrase" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
-                    <TextBox Text="{Binding Passphrase}"
-                             PasswordChar="*"
-                             Watermark="min 12 characters"
-                             IsEnabled="{Binding !IsLoading}" />
-                </StackPanel>
+                <!-- === REGISTER MODE: two columns === -->
+                <Grid ColumnDefinitions="*,16,*" IsVisible="{Binding IsRegisterMode}" Width="520">
 
-                <!-- Confirm Passphrase (register mode only) -->
-                <StackPanel Spacing="6" IsVisible="{Binding IsRegisterMode}">
-                    <TextBlock Text="Confirm Passphrase" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
-                    <TextBox Text="{Binding PassphraseConfirm}"
-                             PasswordChar="*"
-                             Watermark="repeat passphrase"
-                             IsEnabled="{Binding !IsLoading}" />
-                </StackPanel>
+                    <!-- Left column: identity -->
+                    <StackPanel Grid.Column="0" Spacing="10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Display Name" Classes="secondary"
+                                       FontWeight="{StaticResource RedeWeightMedium}" />
+                            <TextBox Text="{Binding UserId}"
+                                     Watermark="{Binding UserIdWatermark}"
+                                     MaxLength="255"
+                                     IsEnabled="{Binding !IsLoading}" />
+                        </StackPanel>
 
-                <!-- Invite Code (register mode only) -->
-                <StackPanel Spacing="6" IsVisible="{Binding IsRegisterMode}">
-                    <TextBlock Text="Invite Code" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
-                    <TextBox Text="{Binding InviteCode}"
-                             Watermark="required for registration"
-                             MaxLength="128"
-                             IsEnabled="{Binding !IsLoading}" />
-                </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Passphrase" Classes="secondary"
+                                       FontWeight="{StaticResource RedeWeightMedium}" />
+                            <TextBox Text="{Binding Passphrase}"
+                                     PasswordChar="*"
+                                     Watermark="min 12 characters"
+                                     IsEnabled="{Binding !IsLoading}" />
+                        </StackPanel>
 
-                <!-- Server -->
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Server" Classes="secondary"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
-                    <ComboBox ItemsSource="{Binding ServerOptions}"
-                              SelectedItem="{Binding SelectedServer}"
-                              HorizontalAlignment="Stretch"
-                              IsEnabled="{Binding !IsLoading}" />
-                    <TextBlock Text="Deine IP-Adresse ist bei direkter Verbindung für den Server sichtbar."
-                               Foreground="{StaticResource RedeWarningBrush}"
-                               FontSize="{StaticResource RedeSmallSize}"
-                               TextWrapping="Wrap"
-                               IsVisible="{Binding IsDirectTransport}" />
-                </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Confirm Passphrase" Classes="secondary"
+                                       FontWeight="{StaticResource RedeWeightMedium}" />
+                            <TextBox Text="{Binding PassphraseConfirm}"
+                                     PasswordChar="*"
+                                     Watermark="repeat passphrase"
+                                     IsEnabled="{Binding !IsLoading}" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Right column: connection -->
+                    <StackPanel Grid.Column="2" Spacing="10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Server" Classes="secondary"
+                                       FontWeight="{StaticResource RedeWeightMedium}" />
+                            <ComboBox ItemsSource="{Binding ServerOptions}"
+                                      SelectedItem="{Binding SelectedServer}"
+                                      HorizontalAlignment="Stretch"
+                                      IsEnabled="{Binding !IsLoading}" />
+                            <TextBlock Text="Deine IP-Adresse ist bei direkter Verbindung für den Server sichtbar."
+                                       Foreground="{StaticResource RedeWarningBrush}"
+                                       FontSize="{StaticResource RedeSmallSize}"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding IsDirectTransport}" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Invite Code" Classes="secondary"
+                                       FontWeight="{StaticResource RedeWeightMedium}" />
+                            <TextBox Text="{Binding InviteCode}"
+                                     Watermark="required for registration"
+                                     MaxLength="128"
+                                     IsEnabled="{Binding !IsLoading}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Register button (centered below both columns) -->
+                <Button Content="Register"
+                        Command="{Binding RegisterCommand}"
+                        HorizontalAlignment="Center"
+                        HorizontalContentAlignment="Center"
+                        MinWidth="200"
+                        IsVisible="{Binding IsRegisterMode}"
+                        IsEnabled="{Binding !IsLoading}" />
 
                 <!-- Error message -->
                 <TextBlock Text="{Binding ErrorMessage}"
                            Foreground="{StaticResource RedeErrorBrush}"
                            FontSize="{StaticResource RedeSmallSize}"
                            IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                           TextWrapping="Wrap" />
-
-                <!-- Login button (login mode) -->
-                <Button Content="Login"
-                        Command="{Binding LoginCommand}"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Center"
-                        IsVisible="{Binding !IsRegisterMode}"
-                        IsEnabled="{Binding !IsLoading}" />
-
-                <!-- Register button (register mode) -->
-                <Button Content="Register"
-                        Command="{Binding RegisterCommand}"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Center"
-                        IsVisible="{Binding IsRegisterMode}"
-                        IsEnabled="{Binding !IsLoading}" />
+                           TextWrapping="Wrap"
+                           HorizontalAlignment="Center" />
 
                 <!-- Loading indicator -->
                 <StackPanel Orientation="Horizontal"
@@ -150,7 +191,7 @@
                                Foreground="{StaticResource RedeAccentVioletBrush}" />
                 </StackPanel>
 
-                <!-- Update status (text, hidden when clickable button is shown instead) -->
+                <!-- Update status -->
                 <TextBlock Text="{Binding StatusMessage}"
                            Classes="secondary"
                            FontSize="{StaticResource RedeSmallSize}"
@@ -164,7 +205,7 @@
                     </TextBlock.IsVisible>
                 </TextBlock>
 
-                <!-- Update button (standalone exe) -->
+                <!-- Update button -->
                 <Button Content="{Binding StatusMessage}"
                         Command="{Binding TriggerUpdateCommand}"
                         HorizontalAlignment="Center"

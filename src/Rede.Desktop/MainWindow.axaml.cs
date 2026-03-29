@@ -109,7 +109,9 @@ public partial class MainWindow : Window
     }
 
     private bool _mainVmWired;
-    private bool _bootShown;
+    private BootView? _bootView;
+    private TaskCompletionSource? _bootDone;
+    private bool _authReady;
     private DateTime _lastRetryTime;
 
     private void ShowMain()
@@ -121,25 +123,39 @@ public partial class MainWindow : Window
             _mainVmWired = true;
         }
 
-        // Show boot animation on first login, then transition to main
-        if (!_bootShown)
+        // Boot animation running — signal it that auth is done
+        if (_bootView is not null)
         {
-            _bootShown = true;
-            var bootView = new BootView();
-            RootContent.Content = bootView;
-            bootView.OnBootComplete += () => Dispatcher.UIThread.Post(() =>
-            {
-                var mainView = CreateMainView();
-                RootContent.Content = mainView;
-            });
-            var userId = _auth?.Profile?.UserId ?? "unknown";
-            _ = bootView.RunBootSequence(userId, _isNewUser, _lastTransport, _lastServerUrl);
+            _authReady = true;
+            _bootDone?.TrySetResult();
+            return;
         }
-        else
+
+        // Reconnect (no boot animation)
+        var mainView = CreateMainView();
+        RootContent.Content = mainView;
+    }
+
+    private void StartBootAnimation(string userId)
+    {
+        _bootDone = new TaskCompletionSource();
+        _bootView = new BootView();
+        _authReady = false;
+        RootContent.Content = _bootView;
+
+        _bootView.OnBootComplete += () => Dispatcher.UIThread.Post(async () =>
         {
+            // Boot done — wait for auth if it hasn't completed yet
+            if (!_authReady)
+                await (_bootDone?.Task ?? Task.CompletedTask);
+
+            _bootView = null;
+            _bootDone = null;
             var mainView = CreateMainView();
             RootContent.Content = mainView;
-        }
+        });
+
+        _ = _bootView.RunBootSequence(userId, _isNewUser, _lastTransport, _lastServerUrl);
     }
 
     private MainView CreateMainView()
@@ -192,6 +208,9 @@ public partial class MainWindow : Window
             _lastTransport = transport;
             _isNewUser = false;
 
+            // Start boot animation immediately as loading screen
+            Dispatcher.UIThread.Post(() => StartBootAnimation(userId));
+
             InitServices(serverUrl, transport);
 
             await _conn!.ConnectAsync();
@@ -200,8 +219,13 @@ public partial class MainWindow : Window
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    // Auth failed — go back to login
+                    _bootView = null;
+                    _bootDone?.TrySetResult();
+                    _bootDone = null;
                     _loginVm.ErrorMessage = "Profile not found or wrong passphrase.";
                     _loginVm.IsLoading = false;
+                    ShowLogin();
                 });
                 return;
             }
@@ -214,8 +238,13 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(() =>
             {
+                // Error — go back to login
+                _bootView = null;
+                _bootDone?.TrySetResult();
+                _bootDone = null;
                 _loginVm.ErrorMessage = SanitizeErrorMessage(ex);
                 _loginVm.IsLoading = false;
+                ShowLogin();
             });
         }
     }
@@ -229,6 +258,9 @@ public partial class MainWindow : Window
             _lastServerUrl = serverUrl;
             _lastTransport = transport;
             _isNewUser = true;
+
+            // Start boot animation immediately as loading screen
+            Dispatcher.UIThread.Post(() => StartBootAnimation(displayName));
 
             InitServices(serverUrl, transport);
 
@@ -247,8 +279,13 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(() =>
             {
+                // Error — go back to login
+                _bootView = null;
+                _bootDone?.TrySetResult();
+                _bootDone = null;
                 _loginVm.ErrorMessage = SanitizeErrorMessage(ex);
                 _loginVm.IsLoading = false;
+                ShowLogin();
             });
         }
     }
