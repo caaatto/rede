@@ -82,9 +82,9 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private void ShowLogin()
+    private void ShowLogin(string? errorMessage = null)
     {
-        _loginVm.ErrorMessage = "";
+        _loginVm.ErrorMessage = errorMessage ?? "";
         _loginVm.IsLoading = false;
         // K1: Unsubscribe before subscribing to prevent duplicate handlers on repeated ShowLogin calls
         _loginVm.OnLoginRequested -= OnLogin;
@@ -161,11 +161,11 @@ public partial class MainWindow : Window
             RootContent.Content = mainView;
         });
 
-        _bootView.OnFailComplete += () => Dispatcher.UIThread.Post(() =>
+        _bootView.OnFailComplete += (err) => Dispatcher.UIThread.Post(() =>
         {
             _bootView = null;
             _bootDone = null;
-            ShowLogin();
+            ShowLogin(err);
         });
 
         _ = _bootView.RunBootSequence(userId, _isNewUser, _lastTransport, _lastServerUrl);
@@ -173,9 +173,6 @@ public partial class MainWindow : Window
 
     private void ShowBootFail(string error)
     {
-        _loginVm.ErrorMessage = error;
-        _loginVm.IsLoading = false;
-
         if (_bootView is not null)
         {
             _authFailed = true;
@@ -184,7 +181,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            ShowLogin();
+            ShowLogin(error);
         }
     }
 

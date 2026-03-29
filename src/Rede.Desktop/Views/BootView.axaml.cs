@@ -15,7 +15,7 @@ public partial class BootView : UserControl
     private readonly StringBuilder _buffer = new();
 
     public event Action? OnBootComplete;
-    public event Action? OnFailComplete;
+    public event Action<string>? OnFailComplete;
 
     public BootView()
     {
@@ -203,7 +203,7 @@ public partial class BootView : UserControl
         // Restore then fade
         await Dispatcher.UIThread.InvokeAsync(() => _bootText.Text = currentText);
         await Delay(800);
-        OnFailComplete?.Invoke();
+        OnFailComplete?.Invoke(error);
     }
 
     private void AppendLine(string text)
