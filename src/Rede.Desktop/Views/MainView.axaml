@@ -51,10 +51,36 @@
                     </Grid>
                 </Border>
 
-                <Separator DockPanel.Dock="Top" />
+                <!-- Settings button (bottom of sidebar) -->
+                <Border DockPanel.Dock="Bottom" Padding="8,8"
+                        BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,1,0,0">
+                    <Button Classes="ghost"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left"
+                            Padding="8,6"
+                            CornerRadius="6"
+                            ToolTip.Tip="Settings"
+                            Click="Settings_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Image Source="{StaticResource IconGear}" Width="16" Height="16"
+                                   VerticalAlignment="Center" />
+                            <TextBlock Text="Settings"
+                                       Classes="secondary"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding !IsSidebarCollapsed}" />
+                        </StackPanel>
+                    </Button>
+                </Border>
+
+                <!-- Scrollable sidebar content -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+
+                <Separator />
 
                 <!-- Contacts header -->
-                <Border DockPanel.Dock="Top" Padding="12,8"
+                <Border Padding="12,8"
                         IsVisible="{Binding !IsSidebarCollapsed}">
                     <Grid ColumnDefinitions="*,Auto">
                         <TextBlock Text="Contacts" Classes="secondary"
@@ -70,8 +96,6 @@
                 </Border>
 
                 <!-- Contact list -->
-                <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
-                              MaxHeight="300">
                     <ItemsControl ItemsSource="{Binding Contacts}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:ContactItemViewModel">
@@ -124,12 +148,11 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ScrollViewer>
 
-                <Separator DockPanel.Dock="Top" />
+                <Separator />
 
                 <!-- Groups header -->
-                <Border DockPanel.Dock="Top" Padding="12,8"
+                <Border Padding="12,8"
                         IsVisible="{Binding !IsSidebarCollapsed}">
                     <Grid ColumnDefinitions="*,Auto">
                         <TextBlock Text="Groups" Classes="secondary"
@@ -145,8 +168,6 @@
                 </Border>
 
                 <!-- Group list -->
-                <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
-                              MaxHeight="200">
                     <ItemsControl ItemsSource="{Binding Groups}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:GroupItemViewModel">
@@ -174,12 +195,11 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ScrollViewer>
 
-                <Separator DockPanel.Dock="Top" />
+                <Separator />
 
                 <!-- Places header -->
-                <Border DockPanel.Dock="Top" Padding="12,8"
+                <Border Padding="12,8"
                         IsVisible="{Binding !IsSidebarCollapsed}">
                     <Grid ColumnDefinitions="*,Auto">
                         <TextBlock Text="Places" Classes="secondary"
@@ -195,7 +215,6 @@
                 </Border>
 
                 <!-- Place list with nested channels -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Places}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:PlaceItemViewModel">
@@ -282,29 +301,9 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ScrollViewer>
 
-                <!-- Settings button (bottom of sidebar) -->
-                <Border DockPanel.Dock="Bottom" Padding="8,8"
-                        BorderBrush="{StaticResource RedeBorderSubtleBrush}"
-                        BorderThickness="0,1,0,0">
-                    <Button Classes="ghost"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left"
-                            Padding="8,6"
-                            CornerRadius="6"
-                            ToolTip.Tip="Settings"
-                            Click="Settings_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Image Source="{StaticResource IconGear}" Width="16" Height="16"
-                                   VerticalAlignment="Center" />
-                            <TextBlock Text="Settings"
-                                       Classes="secondary"
-                                       VerticalAlignment="Center"
-                                       IsVisible="{Binding !IsSidebarCollapsed}" />
-                        </StackPanel>
-                    </Button>
-                </Border>
+                    </StackPanel>
+                </ScrollViewer>
 
             </DockPanel>
         </Border>

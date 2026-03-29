@@ -107,10 +107,10 @@ public class AudioEngine : IDisposable
         PortAudioSharp.PortAudio.Initialize();
 
         _encoder = Concentus.OpusCodecFactory.CreateEncoder(SampleRate, Channels, Concentus.Enums.OpusApplication.OPUS_APPLICATION_VOIP);
-        _encoder.Bitrate = 24000;
+        _encoder.Bitrate = 96000;
         _encoder.UseInbandFEC = true;
         _encoder.UseDTX = true;
-        _encoder.Complexity = 5;
+        _encoder.Complexity = 8;
 
         _decoder = Concentus.OpusCodecFactory.CreateDecoder(SampleRate, Channels);
 

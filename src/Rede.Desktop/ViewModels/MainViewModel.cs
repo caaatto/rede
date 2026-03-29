@@ -65,6 +65,14 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    public void DeselectConversation()
+    {
+        SelectedConversation = null;
+        ChatTitle = "";
+        IsContactSelected = false;
+        Messages.Clear();
+    }
+
     [RelayCommand]
     private void SendMessage()
     {

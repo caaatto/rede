@@ -31,6 +31,9 @@ public partial class MainWindow : Window
     // H10: Thread-safe pending devices (accessed from connection handler threads)
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string PublicKey, string SigningKey)> _pendingDevices = new();
     private UpdateService.ReleaseInfo? _pendingRelease;
+    private string _lastServerUrl = "";
+    private string _lastTransport = "";
+    private bool _isNewUser;
 
     public MainWindow()
     {
@@ -106,6 +109,7 @@ public partial class MainWindow : Window
     }
 
     private bool _mainVmWired;
+    private bool _bootShown;
     private DateTime _lastRetryTime;
 
     private void ShowMain()
@@ -116,8 +120,26 @@ public partial class MainWindow : Window
             WireMainViewModel();
             _mainVmWired = true;
         }
-        var mainView = CreateMainView();
-        RootContent.Content = mainView;
+
+        // Show boot animation on first login, then transition to main
+        if (!_bootShown)
+        {
+            _bootShown = true;
+            var bootView = new BootView();
+            RootContent.Content = bootView;
+            bootView.OnBootComplete += () => Dispatcher.UIThread.Post(() =>
+            {
+                var mainView = CreateMainView();
+                RootContent.Content = mainView;
+            });
+            var userId = _auth?.Profile?.UserId ?? "unknown";
+            _ = bootView.RunBootSequence(userId, _isNewUser, _lastTransport, _lastServerUrl);
+        }
+        else
+        {
+            var mainView = CreateMainView();
+            RootContent.Content = mainView;
+        }
     }
 
     private MainView CreateMainView()
@@ -166,6 +188,9 @@ public partial class MainWindow : Window
         {
             _loginVm.IsLoading = true;
             _loginVm.ErrorMessage = "";
+            _lastServerUrl = serverUrl;
+            _lastTransport = transport;
+            _isNewUser = false;
 
             InitServices(serverUrl, transport);
 
@@ -201,6 +226,9 @@ public partial class MainWindow : Window
         {
             _loginVm.IsLoading = true;
             _loginVm.ErrorMessage = "";
+            _lastServerUrl = serverUrl;
+            _lastTransport = transport;
+            _isNewUser = true;
 
             InitServices(serverUrl, transport);
 
@@ -694,6 +722,13 @@ public partial class MainWindow : Window
         var groups = _groups?.GetGroups();
         if (groups is null) return;
 
+        // Deselect if current group no longer exists
+        if (_mainVm.SelectedConversation is GroupItemViewModel selectedGroup
+            && !groups.ContainsKey(selectedGroup.GroupId))
+        {
+            _mainVm.DeselectConversation();
+        }
+
         _mainVm.Groups.Clear();
         foreach (var (id, g) in groups)
         {
@@ -711,6 +746,13 @@ public partial class MainWindow : Window
     {
         var places = _places?.GetPlaces();
         if (places is null) return;
+
+        // Deselect if current channel's place no longer exists
+        if (_mainVm.SelectedConversation is ChannelItemViewModel selectedChannel
+            && !places.ContainsKey(selectedChannel.PlaceId))
+        {
+            _mainVm.DeselectConversation();
+        }
 
         _mainVm.Places.Clear();
         foreach (var (id, p) in places)

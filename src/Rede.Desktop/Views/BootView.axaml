@@ -1,0 +1,17 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Rede.Desktop.Views.BootView">
+
+    <Border Background="{StaticResource RedeBackgroundBrush}" Padding="0">
+        <ScrollViewer VerticalScrollBarVisibility="Hidden"
+                      HorizontalScrollBarVisibility="Disabled"
+                      x:Name="BootScroller">
+            <TextBlock x:Name="BootText"
+                       FontFamily="Cascadia Mono, JetBrains Mono, Consolas, monospace"
+                       FontSize="13"
+                       Foreground="{StaticResource RedeErrorBrush}"
+                       Padding="24,40,24,24"
+                       TextWrapping="NoWrap" />
+        </ScrollViewer>
+    </Border>
+</UserControl>
