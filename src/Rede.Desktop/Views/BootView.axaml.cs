@@ -15,6 +15,7 @@ public partial class BootView : UserControl
     private readonly StringBuilder _buffer = new();
 
     public event Action? OnBootComplete;
+    public event Action? OnFailComplete;
 
     public BootView()
     {
@@ -167,6 +168,42 @@ public partial class BootView : UserControl
 
         await Delay(600);
         OnBootComplete?.Invoke();
+    }
+
+    public async Task RunFailSequence(string error)
+    {
+        AppendLine("");
+        AppendLine("============================================");
+        await TypeLine(">> ABORT :: CONNECTION FAILED <<");
+        AppendLine("============================================");
+        AppendLine("");
+        await StatusLine("ERROR   ", error);
+        AppendLine("");
+
+        // Glitch the screen
+        var glitchChars = "@#$%&*!=+~<>/?|\\";
+        var currentText = _buffer.ToString();
+        for (var f = 0; f < 6; f++)
+        {
+            var chars = currentText.ToCharArray();
+            var corruptions = 20 + Random.Shared.Next(30);
+            for (var i = 0; i < corruptions; i++)
+            {
+                var pos = Random.Shared.Next(chars.Length);
+                if (chars[pos] != '\n' && chars[pos] != ' ')
+                    chars[pos] = glitchChars[Random.Shared.Next(glitchChars.Length)];
+            }
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _bootText.Text = new string(chars);
+            });
+            await Delay(60);
+        }
+
+        // Restore then fade
+        await Dispatcher.UIThread.InvokeAsync(() => _bootText.Text = currentText);
+        await Delay(800);
+        OnFailComplete?.Invoke();
     }
 
     private void AppendLine(string text)

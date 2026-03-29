@@ -112,6 +112,7 @@ public partial class MainWindow : Window
     private BootView? _bootView;
     private TaskCompletionSource? _bootDone;
     private bool _authReady;
+    private bool _authFailed;
     private DateTime _lastRetryTime;
 
     private void ShowMain()
@@ -141,13 +142,18 @@ public partial class MainWindow : Window
         _bootDone = new TaskCompletionSource();
         _bootView = new BootView();
         _authReady = false;
+        _authFailed = false;
         RootContent.Content = _bootView;
 
         _bootView.OnBootComplete += () => Dispatcher.UIThread.Post(async () =>
         {
             // Boot done — wait for auth if it hasn't completed yet
-            if (!_authReady)
+            if (!_authReady && !_authFailed)
                 await (_bootDone?.Task ?? Task.CompletedTask);
+
+            // Auth failed during boot — don't transition to main
+            if (_authFailed)
+                return;
 
             _bootView = null;
             _bootDone = null;
@@ -155,7 +161,31 @@ public partial class MainWindow : Window
             RootContent.Content = mainView;
         });
 
+        _bootView.OnFailComplete += () => Dispatcher.UIThread.Post(() =>
+        {
+            _bootView = null;
+            _bootDone = null;
+            ShowLogin();
+        });
+
         _ = _bootView.RunBootSequence(userId, _isNewUser, _lastTransport, _lastServerUrl);
+    }
+
+    private void ShowBootFail(string error)
+    {
+        _loginVm.ErrorMessage = error;
+        _loginVm.IsLoading = false;
+
+        if (_bootView is not null)
+        {
+            _authFailed = true;
+            _bootDone?.TrySetResult();
+            _ = _bootView.RunFailSequence(error);
+        }
+        else
+        {
+            ShowLogin();
+        }
     }
 
     private MainView CreateMainView()
@@ -218,15 +248,7 @@ public partial class MainWindow : Window
             if (!ok)
             {
                 Dispatcher.UIThread.Post(() =>
-                {
-                    // Auth failed — go back to login
-                    _bootView = null;
-                    _bootDone?.TrySetResult();
-                    _bootDone = null;
-                    _loginVm.ErrorMessage = "Profile not found or wrong passphrase.";
-                    _loginVm.IsLoading = false;
-                    ShowLogin();
-                });
+                    ShowBootFail("Profile not found or wrong passphrase."));
                 return;
             }
 
@@ -237,15 +259,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Dispatcher.UIThread.Post(() =>
-            {
-                // Error — go back to login
-                _bootView = null;
-                _bootDone?.TrySetResult();
-                _bootDone = null;
-                _loginVm.ErrorMessage = SanitizeErrorMessage(ex);
-                _loginVm.IsLoading = false;
-                ShowLogin();
-            });
+                ShowBootFail(SanitizeErrorMessage(ex)));
         }
     }
 
@@ -278,15 +292,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Dispatcher.UIThread.Post(() =>
-            {
-                // Error — go back to login
-                _bootView = null;
-                _bootDone?.TrySetResult();
-                _bootDone = null;
-                _loginVm.ErrorMessage = SanitizeErrorMessage(ex);
-                _loginVm.IsLoading = false;
-                ShowLogin();
-            });
+                ShowBootFail(SanitizeErrorMessage(ex)));
         }
     }
 
