@@ -94,6 +94,12 @@
                 <WrapPanel x:Name="ColorPalette" Orientation="Horizontal">
                     <!-- Color swatches populated in code-behind -->
                 </WrapPanel>
+                <Button Content="Apply"
+                        Command="{Binding ApplyProfileCommand}"
+                        IsEnabled="{Binding ProfileDirty}"
+                        HorizontalAlignment="Left"
+                        Padding="16,6"
+                        Margin="0,4,0,0" />
             </StackPanel>
 
             <Separator />

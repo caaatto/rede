@@ -32,7 +32,7 @@ auto-updates when a new version is published.
 - **End-to-end encryption** — X3DH + Double Ratchet (Signal Protocol), XSalsa20-Poly1305
 - **Sealed sender** — the server can't see who sent a message
 - **Groups** — Sender Keys for group PFS, Ed25519 signed
-- **Places** — Discord-like servers with channels. Channel names and metadata are E2EE
+- **Places** — Discord-like servers with channels, customizable profile (icon, accent color). All metadata is E2EE
 - **Voice calls** — E2EE audio via SRTP (AES-128-CM + HMAC-SHA1-80), server relays encrypted packets
 - **Profile customization** — accent colors, avatar images (PNG/GIF/JPEG), shared with contacts
 - **Multi-device** — each device has its own keys, messages delivered to all devices
@@ -130,11 +130,13 @@ hang up controls.
 ## places
 
 Places work like Discord servers — a place has channels, members, and roles.
-Unlike Discord, all channel metadata (names, topics) is end-to-end encrypted.
-The server only sees opaque channel IDs.
+Unlike Discord, all metadata (names, topics, icons, colors) is end-to-end
+encrypted. The server only sees opaque IDs.
 
-Create a place, add channels, and invite contacts. Management is available
-via right-click context menus or slash commands.
+Each place has its own profile — accent color and icon — visible in the
+sidebar. Right-click a place to manage members, channels, keys, and the
+place profile. Only the creator can edit the profile, kick members, or
+delete channels.
 
 
 ## profile
@@ -143,7 +145,7 @@ Customize your profile in Settings:
 - **Accent color** — 12 preset colors, visible to your contacts in chat
 - **Avatar** — upload a PNG, JPEG, or GIF (max 256KB)
 
-Profile changes are automatically shared with your contacts.
+Changes are previewed locally. Click **Apply** to save and share with contacts.
 
 
 ## multi-device
@@ -164,7 +166,7 @@ sender identity ........... hidden (sealed sender)
 recipient identity ........ visible (server must route)
 message size .............. hidden (fixed-size padding)
 group/place membership .... visible (server manages roster)
-channel names ............. hidden (E2EE metadata)
+channel names/place profile  hidden (E2EE metadata)
 voice audio ............... never visible (SRTP, blind relay)
 call participants ......... visible (server routes signaling)
 your IP address ........... hidden with I2P/Tor, visible with direct WSS

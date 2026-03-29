@@ -615,6 +615,68 @@ public partial class MainView : UserControl
             };
             menu.Items.Add(kickItem);
 
+            // Edit place profile
+            var profileItem = new MenuItem
+            {
+                Header = "Edit profile...",
+                Foreground = Brush.Parse("#e0e0e8"),
+            };
+            profileItem.Click += (_, _) =>
+            {
+                var colorLabel = new TextBlock
+                {
+                    Text = "Accent Color",
+                    Foreground = Brush.Parse("#e0e0e8"),
+                    FontWeight = FontWeight.SemiBold,
+                    FontSize = 13,
+                };
+                var colorPalette = new WrapPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
+                var selectedColor = place.AccentColor;
+
+                void BuildSwatches()
+                {
+                    colorPalette.Children.Clear();
+                    foreach (var hex in ViewModels.SettingsViewModel.PresetColors)
+                    {
+                        var c = hex;
+                        var swatch = new Border
+                        {
+                            Width = 24, Height = 24,
+                            CornerRadius = new CornerRadius(12),
+                            Background = Brush.Parse(c),
+                            Margin = new Thickness(2),
+                            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                            BorderThickness = new Thickness(2),
+                            BorderBrush = selectedColor == c ? Brush.Parse("#e0e0e8") : Avalonia.Media.Brushes.Transparent,
+                        };
+                        swatch.PointerPressed += (_, _) =>
+                        {
+                            selectedColor = c;
+                            BuildSwatches();
+                        };
+                        colorPalette.Children.Add(swatch);
+                    }
+                }
+                BuildSwatches();
+
+                var applyBtn = new Button
+                {
+                    Content = "Apply",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 8, 0, 0),
+                };
+                var panel = new StackPanel { Spacing = 4, Width = 230, Children = { colorLabel, colorPalette, applyBtn } };
+                var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+                applyBtn.Click += (_, _) =>
+                {
+                    vm.ExecuteCommand("pprofile", new[] { place.PlaceId, selectedColor });
+                    flyout.Hide();
+                };
+                flyout.ShowAt(btn);
+            };
+            menu.Items.Add(profileItem);
+
             // Rotate key
             var rekeyItem = new MenuItem
             {

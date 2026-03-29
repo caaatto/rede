@@ -204,6 +204,27 @@ public partial class PlaceItemViewModel : ViewModelBase
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private int _memberCount;
     [ObservableProperty] private bool _isCreator;
+    [ObservableProperty] private string _accentColor = "#8b5cf6";
+    [ObservableProperty] private Bitmap? _iconImage;
+    [ObservableProperty] private bool _hasIcon;
+
+    public string Initial => string.IsNullOrEmpty(Name) ? "?" : Name[..1].ToUpperInvariant();
+    public IBrush AccentBrush => Brush.Parse(AccentColor);
+
+    partial void OnAccentColorChanged(string value) => OnPropertyChanged(nameof(AccentBrush));
+
+    public void LoadIcon(string? base64)
+    {
+        if (string.IsNullOrEmpty(base64)) { IconImage = null; HasIcon = false; return; }
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            using var ms = new MemoryStream(bytes);
+            IconImage = new Bitmap(ms);
+            HasIcon = true;
+        }
+        catch { IconImage = null; HasIcon = false; }
+    }
 }
 
 public partial class ChannelItemViewModel : ViewModelBase

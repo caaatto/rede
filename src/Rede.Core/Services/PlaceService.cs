@@ -68,6 +68,9 @@ public class PlaceService
             ["roles"] = JsonSerializer.SerializeToNode(place.Roles),
             ["creatorId"] = place.CreatorId,
         };
+        if (place.AccentColor is not null) meta["accentColor"] = place.AccentColor;
+        if (place.IconData is not null) meta["iconData"] = place.IconData;
+        if (place.IconMimeType is not null) meta["iconMimeType"] = place.IconMimeType;
         var json = meta.ToJsonString();
         var keyBytes = Convert.FromBase64String(metadataKey);
         var nonce = Sodium.SodiumCore.GetRandomBytes(24);
@@ -101,6 +104,12 @@ public class PlaceService
                 place.Roles = JsonSerializer.Deserialize<Dictionary<string, PlaceRole>>(rolesElem) ?? new();
             if (root.TryGetProperty("creatorId", out var creatorElem))
                 place.CreatorId = creatorElem.GetString() ?? "";
+            if (root.TryGetProperty("accentColor", out var acElem))
+                place.AccentColor = acElem.GetString();
+            if (root.TryGetProperty("iconData", out var iconElem))
+                place.IconData = iconElem.GetString();
+            if (root.TryGetProperty("iconMimeType", out var iconMimeElem))
+                place.IconMimeType = iconMimeElem.GetString();
             return true;
         }
         catch { return false; }
@@ -213,6 +222,25 @@ public class PlaceService
             ("placeId", JsonValue.Create(placeId)),
             ("channelId", JsonValue.Create(channelId))
         ));
+    }
+
+    public void UpdatePlaceProfile(string placeId, string? accentColor, string? iconData, string? iconMimeType, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        place.AccentColor = accentColor;
+        place.IconData = iconData;
+        place.IconMimeType = iconMimeType;
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Place profile updated for \"{place.Name}\".");
     }
 
     public void RekeyPlace(string placeId, ChatService? chatService)

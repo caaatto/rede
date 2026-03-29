@@ -578,6 +578,14 @@ public partial class MainWindow : Window
                 _places?.CreatePlace(string.Join(" ", args));
                 break;
 
+            case "pprofile":
+                // Handled via context menu flyout — args: placeId, accentColor, iconData?, iconMimeType?
+                if (args.Length >= 2)
+                    _places?.UpdatePlaceProfile(args[0], args[1],
+                        args.Length > 2 ? args[2] : null,
+                        args.Length > 3 ? args[3] : null, _chat);
+                break;
+
             case "pchannel" when args.Length >= 2:
                 var pcPlaceId = FindPlaceId(args[0]);
                 if (pcPlaceId is not null)
@@ -721,14 +729,17 @@ public partial class MainWindow : Window
                     IsCreator = isCreator,
                 });
             }
-            _mainVm.Places.Add(new PlaceItemViewModel
+            var placeVm = new PlaceItemViewModel
             {
                 PlaceId = id,
                 Name = placeName,
                 MemberCount = p.Members?.Count ?? 0,
                 IsCreator = isCreator,
                 Channels = channels,
-            });
+                AccentColor = p.AccentColor ?? "#8b5cf6",
+            };
+            placeVm.LoadIcon(p.IconData);
+            _mainVm.Places.Add(placeVm);
         }
     }
 
@@ -924,8 +935,8 @@ public partial class MainWindow : Window
             }
         };
 
-        // Profile customization (accent color, avatar)
-        vm.OnProfileChanged += () =>
+        // Profile customization — save + broadcast only on Apply
+        vm.OnProfileApplied += () =>
         {
             if (_auth?.Profile is not null && _auth.Passphrase is not null)
             {
@@ -933,8 +944,6 @@ public partial class MainWindow : Window
                 _auth.Profile.AvatarData = vm.AvatarData;
                 _auth.Profile.AvatarMimeType = vm.AvatarMimeType;
                 _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
-
-                // Broadcast profile to contacts
                 _chat?.BroadcastProfile(vm.AccentColor, vm.AvatarData, vm.AvatarMimeType);
             }
         };

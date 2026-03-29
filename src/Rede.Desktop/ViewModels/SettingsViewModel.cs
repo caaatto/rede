@@ -1,9 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
-using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -19,17 +17,16 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _fingerprint = "";
     [ObservableProperty] private string _publicKey = "";
 
-    // Profile customization
+    // Profile customization (local-only until Apply)
     [ObservableProperty] private string _accentColor = "#8b5cf6";
-    [ObservableProperty] private Avalonia.Media.Imaging.Bitmap? _avatarImage;
+    [ObservableProperty] private Bitmap? _avatarImage;
     [ObservableProperty] private bool _hasAvatar;
     [ObservableProperty] private string _avatarInitial = "?";
+    [ObservableProperty] private bool _profileDirty;
 
-    // Raw avatar data for saving
     public string? AvatarData { get; set; }
     public string? AvatarMimeType { get; set; }
 
-    // Preset accent colors
     public static readonly string[] PresetColors = new[]
     {
         "#8b5cf6", // violet (default)
@@ -51,17 +48,14 @@ public partial class SettingsViewModel : ViewModelBase
     partial void OnAccentColorChanged(string value)
     {
         OnPropertyChanged(nameof(AccentBrush));
-        OnProfileChanged?.Invoke();
+        ProfileDirty = true;
     }
 
-    public event Action? OnProfileChanged;
+    public event Action? OnProfileApplied; // save + broadcast
     public event Action? OnAvatarPickRequested;
 
     [RelayCommand]
-    private void PickAvatar()
-    {
-        OnAvatarPickRequested?.Invoke();
-    }
+    private void PickAvatar() => OnAvatarPickRequested?.Invoke();
 
     [RelayCommand]
     private void RemoveAvatar()
@@ -70,12 +64,19 @@ public partial class SettingsViewModel : ViewModelBase
         AvatarData = null;
         AvatarMimeType = null;
         HasAvatar = false;
-        OnProfileChanged?.Invoke();
+        ProfileDirty = true;
+    }
+
+    [RelayCommand]
+    private void ApplyProfile()
+    {
+        if (!ProfileDirty) return;
+        OnProfileApplied?.Invoke();
+        ProfileDirty = false;
     }
 
     public void SetAvatarFromBytes(byte[] data, string mimeType)
     {
-        // Max 256KB
         if (data.Length > 256 * 1024) return;
 
         AvatarData = Convert.ToBase64String(data);
@@ -84,7 +85,7 @@ public partial class SettingsViewModel : ViewModelBase
         using var ms = new MemoryStream(data);
         AvatarImage = new Bitmap(ms);
         HasAvatar = true;
-        OnProfileChanged?.Invoke();
+        ProfileDirty = true;
     }
 
     public void LoadAvatarFromBase64(string? base64, string? mimeType)

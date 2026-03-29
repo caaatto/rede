@@ -183,6 +183,15 @@ public class Place
 
     [JsonPropertyName("creatorId")]
     public string CreatorId { get; set; } = "";
+
+    [JsonPropertyName("accentColor")]
+    public string? AccentColor { get; set; }
+
+    [JsonPropertyName("iconData")]
+    public string? IconData { get; set; } // base64-encoded image (max 256KB)
+
+    [JsonPropertyName("iconMimeType")]
+    public string? IconMimeType { get; set; }
 }
 
 public class PlaceChannel
