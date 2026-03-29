@@ -58,8 +58,8 @@ public partial class MainWindow : Window
                     // H2: Only notify — don't auto-apply git updates without user action
                     Dispatcher.UIThread.Post(() =>
                         _loginVm.StatusMessage = $"Update available ({remote[..8]}). Run 'git pull' to update.");
+                    return;
                 }
-                return;
             }
 
             // Standalone exe — check GitHub Releases API

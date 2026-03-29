@@ -16,7 +16,7 @@ public class UpdateService
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;
 
-    public UpdateService(string repoPath, string branch = "v2")
+    public UpdateService(string repoPath, string branch = "main")
     {
         _repoPath = repoPath;
         _branch = branch;
