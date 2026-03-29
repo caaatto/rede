@@ -16,12 +16,12 @@ Grab the latest release for your platform:
 
 **Linux:**
 ```
-chmod +x Rede-Desktop-linux-x64
-./Rede-Desktop-linux-x64
+chmod +x REDE
+./REDE
 ```
 
 **Windows:**
-Double-click `Rede-Desktop-win-x64.exe`.
+Double-click `REDE.exe`.
 
 No runtime or SDK required — the app is fully self-contained and
 auto-updates when a new version is published.

@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.5.0-beta";
+    private const string CurrentVersion = "2.5.1-beta";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;
@@ -171,9 +171,9 @@ public class UpdateService
                 // Find the right asset for this platform
                 string assetName;
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                    assetName = "Rede-Desktop-win-x64.exe";
+                    assetName = "REDE.exe";
                 else
-                    assetName = "Rede-Desktop-linux-x64";
+                    assetName = "REDE";
 
                 string? downloadUrl = null;
                 foreach (var asset in release.GetProperty("assets").EnumerateArray())

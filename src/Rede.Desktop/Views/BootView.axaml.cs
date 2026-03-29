@@ -27,21 +27,82 @@ public partial class BootView : UserControl
     {
         _buffer.Clear();
 
-        // Logo
-        var logo = new[]
+        // Logo animation: REDE -> glitch -> R3D#
+        var logoRede = new[]
         {
             " ____   _____  ____   _____",
-            "|  _ \\ |___ / |  _ \\ |___ /",
-            "| |_) |  |_ \\ | | | |  |_ \\",
-            "|  _ <  ___) || |_| | ___) |",
-            "|_| \\_\\|____/ |____/ |____/",
+            "|  _ \\ | ____||  _ \\ | ____|",
+            "| |_) ||  _|  | | | ||  _|  ",
+            "|  _ < | |___ | |_| || |___ ",
+            "|_| \\_\\|_____||____/ |_____|",
+        };
+        var logoR3Dh = new[]
+        {
+            " ____   _____  ____     _  _",
+            "|  _ \\ |___ / |  _ \\  _| || |",
+            "| |_) |  |_ \\ | | | ||_  ..  |",
+            "|  _ <  ___) || |_| ||_      |",
+            "|_| \\_\\|____/ |____/   |_||_|",
         };
 
-        foreach (var line in logo)
-        {
+        // Show REDE
+        foreach (var line in logoRede)
             AppendLine(line);
-            await Delay(30);
+        await Delay(600);
+
+        // Glitch transition
+        const string glitchChars = "@#$%&*!=+~<>/?";
+        const int frames = 8;
+        var logoStartLine = _buffer.ToString().Split('\n').Length - logoRede.Length - 1;
+
+        for (var f = 0; f < frames; f++)
+        {
+            var progress = (double)f / frames;
+            var lines = _buffer.ToString().Split('\n');
+
+            for (var l = 0; l < logoRede.Length; l++)
+            {
+                var src = logoRede[l];
+                var dst = logoR3Dh[l];
+                var len = Math.Max(src.Length, dst.Length);
+                var sb = new StringBuilder(len);
+                for (var c = 0; c < len; c++)
+                {
+                    var srcCh = c < src.Length ? src[c] : ' ';
+                    var dstCh = c < dst.Length ? dst[c] : ' ';
+                    if (Random.Shared.NextDouble() < progress)
+                        sb.Append(dstCh);
+                    else if (Random.Shared.NextDouble() < 0.3)
+                        sb.Append(glitchChars[Random.Shared.Next(glitchChars.Length)]);
+                    else
+                        sb.Append(srcCh);
+                }
+                lines[logoStartLine + l] = sb.ToString();
+            }
+
+            var glitched = string.Join('\n', lines);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _bootText.Text = glitched;
+                _scroller.ScrollToEnd();
+            });
+            await Delay(80);
         }
+
+        // Final R3D3
+        {
+            var lines = _buffer.ToString().Split('\n');
+            for (var l = 0; l < logoR3Dh.Length; l++)
+                lines[logoStartLine + l] = logoR3Dh[l];
+            _buffer.Clear();
+            _buffer.Append(string.Join('\n', lines));
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _bootText.Text = _buffer.ToString();
+                _scroller.ScrollToEnd();
+            });
+        }
+        await Delay(200);
 
         AppendLine("");
         AppendLine("============================================");
