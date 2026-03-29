@@ -28,6 +28,7 @@ public class ChatService
     public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
     public event Action<string, string, string, string, string>? OnGroupKeyReceived; // groupId, name, key, sig, senderId
     public event Action<string, string, string, string>? OnPlaceKeyReceived; // placeId, metadataKey, encryptedMetadata, senderId
+    public event Action<string, string?, string?, string?>? OnProfileReceived; // senderId, accentColor, avatarData, avatarMimeType
     public event Action<string, string, string, string>? OnNewDeviceDetected; // targetUserId, deviceId, publicKey, signingKey
 
     public ChatService(RedeConnection conn, ProfileStore store)
@@ -52,6 +53,28 @@ public class ChatService
     /// Send a 1:1 message using Double Ratchet with multi-device fan-out.
     /// Mirrors: sendRatcheted(targetId, text, ttl) in index.js
     /// </summary>
+    /// <summary>
+    /// Broadcast profile customization (accent color, avatar) to all contacts as a control message.
+    /// </summary>
+    public void BroadcastProfile(string? accentColor, string? avatarData, string? avatarMimeType)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        var payload = new System.Text.Json.Nodes.JsonObject
+        {
+            ["__rede_ctrl"] = "profile",
+        };
+        if (accentColor is not null) payload["accentColor"] = accentColor;
+        if (avatarData is not null) payload["avatarData"] = avatarData;
+        if (avatarMimeType is not null) payload["avatarMimeType"] = avatarMimeType;
+
+        var text = payload.ToJsonString();
+        foreach (var contactId in Profile.Contacts.Keys)
+        {
+            SendMessage(contactId, text, 0);
+        }
+    }
+
     public void SendMessage(string targetId, string text, int ttl = 0)
     {
         if (Profile is null || Passphrase is null) return;
@@ -627,6 +650,15 @@ public class ChatService
                     OnGroupKeyReceived?.Invoke(groupId, name, key, sig, from);
                     return true;
                 }
+            }
+
+            if (ctrl.GetString() == "profile")
+            {
+                var accentColor = root.TryGetProperty("accentColor", out var ac) ? ac.GetString() : null;
+                var avatarData = root.TryGetProperty("avatarData", out var ad) ? ad.GetString() : null;
+                var avatarMimeType = root.TryGetProperty("avatarMimeType", out var am) ? am.GetString() : null;
+                OnProfileReceived?.Invoke(from, accentColor, avatarData, avatarMimeType);
+                return true;
             }
 
             if (ctrl.GetString() == "placekey")

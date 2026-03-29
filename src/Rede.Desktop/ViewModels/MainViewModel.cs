@@ -1,6 +1,10 @@
 using System;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -55,7 +59,7 @@ public partial class MainViewModel : ViewModelBase
         }
         else if (item is ChannelItemViewModel channel)
         {
-            ChatTitle = $"# {channel.Name}";
+            ChatTitle = $"{channel.PlaceName} > #{channel.Name}";
             IsContactSelected = false;
             LoadChatHistory($"place:{channel.PlaceId}:{channel.ChannelId}");
         }
@@ -103,14 +107,26 @@ public partial class MainViewModel : ViewModelBase
 
     public void AddIncomingMessage(string from, string text, DateTime timestamp, bool isSystem = false)
     {
-        Messages.Add(new ChatMessageViewModel
+        // Look up sender's profile customization from contacts
+        var contact = Contacts.FirstOrDefault(c => c.UserId == from);
+        var accentColor = contact?.AccentColor ?? "#8b5cf6";
+        var initial = string.IsNullOrEmpty(from) ? "?" : from[..1].ToUpperInvariant();
+        if (contact is not null)
+            initial = contact.Initial;
+
+        var msg = new ChatMessageViewModel
         {
             From = from,
             Text = text,
             IsOwn = false,
             IsSystem = isSystem,
             Timestamp = timestamp,
-        });
+            SenderAccentColor = accentColor,
+            SenderInitial = initial,
+            SenderAvatar = contact?.AvatarImage,
+            HasSenderAvatar = contact?.HasAvatar ?? false,
+        };
+        Messages.Add(msg);
     }
 
     public void AddSystemMessage(string text)
@@ -148,8 +164,27 @@ public partial class ContactItemViewModel : ViewModelBase
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private string _lastMessage = "";
     [ObservableProperty] private string _lastMessageTime = "";
+    [ObservableProperty] private string _accentColor = "#8b5cf6";
+    [ObservableProperty] private Bitmap? _avatarImage;
+    [ObservableProperty] private bool _hasAvatar;
 
     public string Initial => string.IsNullOrEmpty(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
+    public IBrush AccentBrush => Brush.Parse(AccentColor);
+
+    partial void OnAccentColorChanged(string value) => OnPropertyChanged(nameof(AccentBrush));
+
+    public void LoadAvatar(string? base64)
+    {
+        if (string.IsNullOrEmpty(base64)) { AvatarImage = null; HasAvatar = false; return; }
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            using var ms = new MemoryStream(bytes);
+            AvatarImage = new Bitmap(ms);
+            HasAvatar = true;
+        }
+        catch { AvatarImage = null; HasAvatar = false; }
+    }
 }
 
 public partial class GroupItemViewModel : ViewModelBase
@@ -168,6 +203,7 @@ public partial class PlaceItemViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<ChannelItemViewModel> _channels = new();
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private int _memberCount;
+    [ObservableProperty] private bool _isCreator;
 }
 
 public partial class ChannelItemViewModel : ViewModelBase
@@ -175,7 +211,9 @@ public partial class ChannelItemViewModel : ViewModelBase
     [ObservableProperty] private string _placeId = "";
     [ObservableProperty] private string _channelId = "";
     [ObservableProperty] private string _name = "";
+    [ObservableProperty] private string _placeName = "";
     [ObservableProperty] private bool _hasUnread;
+    [ObservableProperty] private bool _isCreator;
 }
 
 public partial class ChatMessageViewModel : ViewModelBase
@@ -187,8 +225,13 @@ public partial class ChatMessageViewModel : ViewModelBase
     [ObservableProperty] private DateTime _timestamp;
     [ObservableProperty] private int _ttl;
     [ObservableProperty] private bool _isSecurityAlert;
+    [ObservableProperty] private string _senderAccentColor = "#8b5cf6";
+    [ObservableProperty] private Bitmap? _senderAvatar;
+    [ObservableProperty] private bool _hasSenderAvatar;
+    [ObservableProperty] private string _senderInitial = "?";
 
     public string TimeString => Timestamp.ToString("h:mm tt").ToLowerInvariant();
     public bool HasTtl => Ttl > 0;
     public string TtlDisplay => Ttl > 0 ? $"{Ttl}d" : "";
+    public IBrush SenderAccentBrush => Brush.Parse(SenderAccentColor);
 }

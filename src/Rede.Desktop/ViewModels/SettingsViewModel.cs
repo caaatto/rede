@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Threading;
+using Avalonia;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -14,6 +18,99 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _deviceId = "";
     [ObservableProperty] private string _fingerprint = "";
     [ObservableProperty] private string _publicKey = "";
+
+    // Profile customization
+    [ObservableProperty] private string _accentColor = "#8b5cf6";
+    [ObservableProperty] private Avalonia.Media.Imaging.Bitmap? _avatarImage;
+    [ObservableProperty] private bool _hasAvatar;
+    [ObservableProperty] private string _avatarInitial = "?";
+
+    // Raw avatar data for saving
+    public string? AvatarData { get; set; }
+    public string? AvatarMimeType { get; set; }
+
+    // Preset accent colors
+    public static readonly string[] PresetColors = new[]
+    {
+        "#8b5cf6", // violet (default)
+        "#6366f1", // indigo
+        "#3b82f6", // blue
+        "#2dd4bf", // teal
+        "#22c55e", // green
+        "#eab308", // yellow
+        "#f97316", // orange
+        "#ef4444", // red
+        "#ec4899", // pink
+        "#a855f7", // purple
+        "#06b6d4", // cyan
+        "#f43f5e", // rose
+    };
+
+    public IBrush AccentBrush => Brush.Parse(AccentColor);
+
+    partial void OnAccentColorChanged(string value)
+    {
+        OnPropertyChanged(nameof(AccentBrush));
+        OnProfileChanged?.Invoke();
+    }
+
+    public event Action? OnProfileChanged;
+    public event Action? OnAvatarPickRequested;
+
+    [RelayCommand]
+    private void PickAvatar()
+    {
+        OnAvatarPickRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private void RemoveAvatar()
+    {
+        AvatarImage = null;
+        AvatarData = null;
+        AvatarMimeType = null;
+        HasAvatar = false;
+        OnProfileChanged?.Invoke();
+    }
+
+    public void SetAvatarFromBytes(byte[] data, string mimeType)
+    {
+        // Max 256KB
+        if (data.Length > 256 * 1024) return;
+
+        AvatarData = Convert.ToBase64String(data);
+        AvatarMimeType = mimeType;
+
+        using var ms = new MemoryStream(data);
+        AvatarImage = new Bitmap(ms);
+        HasAvatar = true;
+        OnProfileChanged?.Invoke();
+    }
+
+    public void LoadAvatarFromBase64(string? base64, string? mimeType)
+    {
+        if (string.IsNullOrEmpty(base64))
+        {
+            AvatarImage = null;
+            HasAvatar = false;
+            return;
+        }
+
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            using var ms = new MemoryStream(bytes);
+            AvatarImage = new Bitmap(ms);
+            AvatarData = base64;
+            AvatarMimeType = mimeType;
+            HasAvatar = true;
+        }
+        catch
+        {
+            AvatarImage = null;
+            HasAvatar = false;
+        }
+    }
 
     // Voice call transport (read-only, derived from connection)
     [ObservableProperty] private string _callTransport = "Direct";

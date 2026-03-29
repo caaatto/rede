@@ -4,6 +4,7 @@
              x:Class="Rede.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,36,0,24">
     <Border Background="{StaticResource RedeSurfaceBrush}"
             Padding="32">
         <StackPanel Spacing="24" MaxWidth="480" HorizontalAlignment="Center">
@@ -23,20 +24,76 @@
 
             <Separator />
 
-            <!-- Identity section -->
+            <!-- Profile section -->
             <StackPanel Spacing="12">
-                <TextBlock Text="Identity" Classes="header" />
+                <TextBlock Text="Profile" Classes="header" />
 
-                <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="User ID" Classes="secondary" VerticalAlignment="Center" />
-                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding UserId}" />
+                <!-- Avatar + Identity side by side -->
+                <Grid ColumnDefinitions="Auto,16,*">
+                    <!-- Avatar -->
+                    <StackPanel Grid.Column="0" Spacing="8" HorizontalAlignment="Center">
+                        <!-- Avatar circle -->
+                        <Border Width="72" Height="72" CornerRadius="36"
+                                Background="{Binding AccentBrush}"
+                                ClipToBounds="True"
+                                HorizontalAlignment="Center">
+                            <!-- Initial letter (shown when no avatar) -->
+                            <Panel>
+                                <TextBlock Text="{Binding AvatarInitial}"
+                                           FontSize="28"
+                                           FontWeight="Bold"
+                                           Foreground="White"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           IsVisible="{Binding !HasAvatar}" />
+                                <Image Source="{Binding AvatarImage}"
+                                       Width="72" Height="72"
+                                       Stretch="UniformToFill"
+                                       IsVisible="{Binding HasAvatar}" />
+                            </Panel>
+                        </Border>
+                        <!-- Avatar buttons -->
+                        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                            <Button Classes="ghost" Content="Upload"
+                                    Padding="8,3" FontSize="11"
+                                    Command="{Binding PickAvatarCommand}" />
+                            <Button Classes="ghost" Content="Remove"
+                                    Padding="8,3" FontSize="11"
+                                    Foreground="{StaticResource RedeErrorBrush}"
+                                    Command="{Binding RemoveAvatarCommand}"
+                                    IsVisible="{Binding HasAvatar}" />
+                        </StackPanel>
+                        <TextBlock Text="PNG, JPEG, GIF (max 256KB)"
+                                   Classes="muted" FontSize="10"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Display Name" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
-                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DisplayName}" Margin="0,8,0,0" />
+                    <!-- Identity info -->
+                    <StackPanel Grid.Column="2" Spacing="6" VerticalAlignment="Center">
+                        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="User ID" Classes="secondary" VerticalAlignment="Center" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding UserId}" />
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Device ID" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
-                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DeviceId}" Margin="0,8,0,0" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Display Name" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DisplayName}" Margin="0,8,0,0" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Device ID" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DeviceId}" Margin="0,8,0,0" />
+                        </Grid>
+                    </StackPanel>
                 </Grid>
+            </StackPanel>
+
+            <Separator />
+
+            <!-- Accent Color section -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Accent Color" Classes="header" />
+                <TextBlock Text="Choose your profile accent color. Contacts will see your messages in this color."
+                           Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                <WrapPanel x:Name="ColorPalette" Orientation="Horizontal">
+                    <!-- Color swatches populated in code-behind -->
+                </WrapPanel>
             </StackPanel>
 
             <Separator />
@@ -159,4 +216,5 @@
 
         </StackPanel>
     </Border>
+    </ScrollViewer>
 </UserControl>

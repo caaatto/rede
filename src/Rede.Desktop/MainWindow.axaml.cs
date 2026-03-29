@@ -327,6 +327,19 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage(msg);
         });
 
+        _chat.OnProfileReceived += (senderId, accentColor, avatarData, avatarMimeType) =>
+        {
+            if (_auth?.Profile is null || _auth.Passphrase is null) return;
+            if (_auth.Profile.Contacts.TryGetValue(senderId, out var contact))
+            {
+                contact.AccentColor = accentColor;
+                contact.AvatarData = avatarData;
+                contact.AvatarMimeType = avatarMimeType;
+                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                Dispatcher.UIThread.Post(RefreshContacts);
+            }
+        };
+
         _chat.OnNewDeviceDetected += (targetUserId, deviceId, publicKey, signingKey) =>
         {
             // H10: Thread-safe store of pending device for user confirmation
@@ -573,6 +586,10 @@ public partial class MainWindow : Window
                     _mainVm.AddSystemMessage("Place not found.");
                 break;
 
+            case "pchannelrm" when args.Length >= 2:
+                _places?.RemoveChannel(args[0], args[1]);
+                break;
+
             case "pinvite" when args.Length >= 2:
                 var piPlaceId = FindPlaceId(args[0]);
                 if (piPlaceId is not null)
@@ -653,12 +670,14 @@ public partial class MainWindow : Window
         _mainVm.Contacts.Clear();
         foreach (var (id, c) in contacts)
         {
-            // M3: Sanitize server-provided display names
-            _mainVm.Contacts.Add(new ContactItemViewModel
+            var contactVm = new ContactItemViewModel
             {
                 UserId = id,
                 DisplayName = SanitizeDisplayString(c.DisplayName ?? id, 64),
-            });
+                AccentColor = c.AccentColor ?? "#8b5cf6",
+            };
+            contactVm.LoadAvatar(c.AvatarData);
+            _mainVm.Contacts.Add(contactVm);
         }
     }
 
@@ -689,6 +708,8 @@ public partial class MainWindow : Window
         foreach (var (id, p) in places)
         {
             var channels = new System.Collections.ObjectModel.ObservableCollection<ChannelItemViewModel>();
+            var isCreator = p.CreatorId == _auth?.Profile?.UserId;
+            var placeName = SanitizeDisplayString(p.Name, 64);
             foreach (var (chId, ch) in p.Channels)
             {
                 channels.Add(new ChannelItemViewModel
@@ -696,13 +717,16 @@ public partial class MainWindow : Window
                     PlaceId = id,
                     ChannelId = chId,
                     Name = SanitizeDisplayString(ch.Name, 64),
+                    PlaceName = placeName,
+                    IsCreator = isCreator,
                 });
             }
             _mainVm.Places.Add(new PlaceItemViewModel
             {
                 PlaceId = id,
-                Name = SanitizeDisplayString(p.Name, 64),
+                Name = placeName,
                 MemberCount = p.Members?.Count ?? 0,
+                IsCreator = isCreator,
                 Channels = channels,
             });
         }
@@ -755,6 +779,15 @@ public partial class MainWindow : Window
             {
                 var isOwn = msg.From == _auth.Profile.UserId;
                 var ts = DateTimeOffset.FromUnixTimeMilliseconds(msg.Ts).LocalDateTime;
+
+                // Look up sender profile for avatar/color
+                var contactVm = _mainVm.Contacts.FirstOrDefault(c => c.UserId == msg.From);
+                var accentColor = isOwn
+                    ? (_auth.Profile.AccentColor ?? "#8b5cf6")
+                    : (contactVm?.AccentColor ?? "#8b5cf6");
+                var initial = contactVm?.Initial
+                    ?? (string.IsNullOrEmpty(msg.From) ? "?" : msg.From[..1].ToUpperInvariant());
+
                 _mainVm.Messages.Add(new ChatMessageViewModel
                 {
                     From = msg.From,
@@ -762,6 +795,10 @@ public partial class MainWindow : Window
                     IsOwn = isOwn,
                     Timestamp = ts,
                     Ttl = msg.Ttl,
+                    SenderAccentColor = accentColor,
+                    SenderInitial = initial,
+                    SenderAvatar = contactVm?.AvatarImage,
+                    HasSenderAvatar = contactVm?.HasAvatar ?? false,
                 });
             }
         }
@@ -801,7 +838,10 @@ public partial class MainWindow : Window
             Fingerprint = Rede.Core.Crypto.CryptoService.Fingerprint(p.PublicKey),
             PublicKey = p.PublicKey,
             CallTransport = _call?.LocalMode.ToString() ?? _conn.Transport,
+            AccentColor = p.AccentColor ?? "#8b5cf6",
+            AvatarInitial = string.IsNullOrEmpty(p.DisplayName) ? "?" : p.DisplayName[..1].ToUpperInvariant(),
         };
+        vm.LoadAvatarFromBase64(p.AvatarData, p.AvatarMimeType);
         vm.OnBackRequested += () =>
         {
             // H5: Re-wire retry handler when returning from settings
@@ -882,6 +922,66 @@ public partial class MainWindow : Window
                         _call.Audio.SelectedOutputDevice = -1;
                 }
             }
+        };
+
+        // Profile customization (accent color, avatar)
+        vm.OnProfileChanged += () =>
+        {
+            if (_auth?.Profile is not null && _auth.Passphrase is not null)
+            {
+                _auth.Profile.AccentColor = vm.AccentColor;
+                _auth.Profile.AvatarData = vm.AvatarData;
+                _auth.Profile.AvatarMimeType = vm.AvatarMimeType;
+                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+
+                // Broadcast profile to contacts
+                _chat?.BroadcastProfile(vm.AccentColor, vm.AvatarData, vm.AvatarMimeType);
+            }
+        };
+
+        vm.OnAvatarPickRequested += async () =>
+        {
+            var topLevel = TopLevel.GetTopLevel(this);
+            if (topLevel is null) return;
+
+            var files = await topLevel.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+            {
+                Title = "Choose Avatar",
+                AllowMultiple = false,
+                FileTypeFilter = new[]
+                {
+                    new Avalonia.Platform.Storage.FilePickerFileType("Images")
+                    {
+                        Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.gif" },
+                        MimeTypes = new[] { "image/png", "image/jpeg", "image/gif" },
+                    },
+                },
+            });
+
+            if (files.Count == 0) return;
+
+            var file = files[0];
+            await using var stream = await file.OpenReadAsync();
+            using var ms = new System.IO.MemoryStream();
+            await stream.CopyToAsync(ms);
+            var data = ms.ToArray();
+
+            if (data.Length > 256 * 1024)
+            {
+                _mainVm.AddSystemMessage("Avatar too large (max 256KB).");
+                return;
+            }
+
+            var ext = file.Name.Split('.').LastOrDefault()?.ToLowerInvariant();
+            var mime = ext switch
+            {
+                "png" => "image/png",
+                "gif" => "image/gif",
+                "jpg" or "jpeg" => "image/jpeg",
+                _ => "image/png",
+            };
+
+            vm.SetAvatarFromBytes(data, mime);
         };
 
         var settingsView = new SettingsView { DataContext = vm };

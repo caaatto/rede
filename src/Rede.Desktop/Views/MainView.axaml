@@ -89,10 +89,30 @@
                                         CommandParameter="{Binding}"
                                         PointerPressed="Contact_PointerPressed">
                                     <Grid ColumnDefinitions="Auto,8,*,Auto">
-                                        <!-- Online dot -->
-                                        <Ellipse Grid.Column="0" Width="6" Height="6"
-                                                 VerticalAlignment="Center"
-                                                 Fill="{Binding IsOnline, Converter={StaticResource StatusColorConverter}}" />
+                                        <!-- Avatar circle -->
+                                        <Panel Grid.Column="0" Width="28" Height="28">
+                                            <Border Width="28" Height="28" CornerRadius="14"
+                                                    Background="{Binding AccentBrush}"
+                                                    ClipToBounds="True">
+                                                <Panel>
+                                                    <TextBlock Text="{Binding Initial}"
+                                                               FontSize="12" FontWeight="SemiBold"
+                                                               Foreground="White"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               IsVisible="{Binding !HasAvatar}" />
+                                                    <Image Source="{Binding AvatarImage}"
+                                                           Width="28" Height="28"
+                                                           Stretch="UniformToFill"
+                                                           IsVisible="{Binding HasAvatar}" />
+                                                </Panel>
+                                            </Border>
+                                            <!-- Online indicator -->
+                                            <Ellipse Width="8" Height="8"
+                                                     HorizontalAlignment="Right"
+                                                     VerticalAlignment="Bottom"
+                                                     Fill="{Binding IsOnline, Converter={StaticResource StatusColorConverter}}" />
+                                        </Panel>
                                         <!-- Name -->
                                         <TextBlock Grid.Column="2" Text="{Binding DisplayName}"
                                                    VerticalAlignment="Center"
@@ -191,15 +211,28 @@
                                             Margin="2,1"
                                             BorderThickness="0"
                                             CornerRadius="4"
-                                            Click="PlaceHeader_Click">
-                                        <Grid ColumnDefinitions="*,Auto">
+                                            Click="PlaceHeader_Click"
+                                            PointerPressed="Place_PointerPressed">
+                                        <Grid ColumnDefinitions="Auto,4,*,Auto,Auto">
                                             <TextBlock Grid.Column="0"
+                                                       Text="{Binding IsExpanded, Converter={StaticResource CollapseIconConverter}}"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource RedeTextMutedBrush}"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2"
                                                        FontWeight="{StaticResource RedeWeightMedium}">
                                                 <Run Text="{Binding Name}" />
                                             </TextBlock>
-                                            <Ellipse Grid.Column="1" Width="8" Height="8"
+                                            <TextBlock Grid.Column="3"
+                                                       Text="{Binding MemberCount, StringFormat={}{0}}"
+                                                       Classes="muted"
+                                                       FontSize="{StaticResource RedeCaptionSize}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="6,0,0,0" />
+                                            <Ellipse Grid.Column="4" Width="8" Height="8"
                                                      Fill="{StaticResource RedeAccentVioletBrush}"
                                                      VerticalAlignment="Center"
+                                                     Margin="4,0,0,0"
                                                      IsVisible="{Binding HasUnread}" />
                                         </Grid>
                                     </Button>
@@ -215,7 +248,8 @@
                                                         Margin="2,0"
                                                         BorderThickness="0"
                                                         CornerRadius="4"
-                                                        Click="Channel_Click">
+                                                        Click="Channel_Click"
+                                                        PointerPressed="Channel_PointerPressed">
                                                     <Grid ColumnDefinitions="*,Auto">
                                                         <TextBlock Grid.Column="0">
                                                             <Run Text="#" Foreground="{StaticResource RedeTextMutedBrush}" />
@@ -342,40 +376,61 @@
                                                IsVisible="{Binding IsSystem}" />
 
                                     <!-- Incoming message (left) -->
-                                    <StackPanel Spacing="2"
+                                    <StackPanel Orientation="Horizontal" Spacing="8"
                                                 HorizontalAlignment="Left"
                                                 Margin="0,0,80,0"
-                                                MaxWidth="500"
+                                                MaxWidth="540"
                                                 IsVisible="{Binding !IsOwn}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"
-                                                    IsVisible="{Binding !IsSystem}">
-                                            <TextBlock Text="{Binding From}"
-                                                       Foreground="{StaticResource RedeAccentVioletBrush}"
-                                                       FontWeight="{StaticResource RedeWeightMedium}"
-                                                       FontSize="{StaticResource RedeSmallSize}" />
-                                            <TextBlock Text="{Binding TimeString}"
-                                                       Classes="muted"
-                                                       FontSize="{StaticResource RedeCaptionSize}"
-                                                       VerticalAlignment="Bottom" />
-                                        </StackPanel>
-                                        <Border Background="{StaticResource RedeSurfaceBrush}"
-                                                CornerRadius="4,12,12,12"
-                                                Padding="12,8"
+                                        <!-- Sender avatar -->
+                                        <Border Width="32" Height="32" CornerRadius="16"
+                                                Background="{Binding SenderAccentBrush}"
+                                                ClipToBounds="True"
+                                                VerticalAlignment="Top" Margin="0,18,0,0"
                                                 IsVisible="{Binding !IsSystem}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <TextBlock Text="{Binding Text}"
-                                                           TextWrapping="Wrap" />
-                                                <StackPanel Orientation="Horizontal" Spacing="3"
-                                                            VerticalAlignment="Bottom"
-                                                            IsVisible="{Binding HasTtl}">
-                                                    <Image Source="{StaticResource IconClock}" Width="11" Height="11"
-                                                           VerticalAlignment="Center" />
-                                                    <TextBlock Text="{Binding TtlDisplay}"
-                                                               Classes="muted"
-                                                               FontSize="{StaticResource RedeCaptionSize}" />
-                                                </StackPanel>
-                                            </StackPanel>
+                                            <Panel>
+                                                <TextBlock Text="{Binding SenderInitial}"
+                                                           FontSize="13" FontWeight="SemiBold"
+                                                           Foreground="White"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding !HasSenderAvatar}" />
+                                                <Image Source="{Binding SenderAvatar}"
+                                                       Width="32" Height="32"
+                                                       Stretch="UniformToFill"
+                                                       IsVisible="{Binding HasSenderAvatar}" />
+                                            </Panel>
                                         </Border>
+                                        <StackPanel Spacing="2" MaxWidth="500">
+                                            <StackPanel Orientation="Horizontal" Spacing="8"
+                                                        IsVisible="{Binding !IsSystem}">
+                                                <TextBlock Text="{Binding From}"
+                                                           Foreground="{Binding SenderAccentBrush}"
+                                                           FontWeight="{StaticResource RedeWeightMedium}"
+                                                           FontSize="{StaticResource RedeSmallSize}" />
+                                                <TextBlock Text="{Binding TimeString}"
+                                                           Classes="muted"
+                                                           FontSize="{StaticResource RedeCaptionSize}"
+                                                           VerticalAlignment="Bottom" />
+                                            </StackPanel>
+                                            <Border Background="{StaticResource RedeSurfaceBrush}"
+                                                    CornerRadius="4,12,12,12"
+                                                    Padding="12,8"
+                                                    IsVisible="{Binding !IsSystem}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="{Binding Text}"
+                                                               TextWrapping="Wrap" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="3"
+                                                                VerticalAlignment="Bottom"
+                                                                IsVisible="{Binding HasTtl}">
+                                                        <Image Source="{StaticResource IconClock}" Width="11" Height="11"
+                                                               VerticalAlignment="Center" />
+                                                        <TextBlock Text="{Binding TtlDisplay}"
+                                                                   Classes="muted"
+                                                                   FontSize="{StaticResource RedeCaptionSize}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
                                     </StackPanel>
 
                                     <!-- Own message (right) -->

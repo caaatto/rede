@@ -95,6 +95,16 @@ public class Profile
     [JsonPropertyName("noiseGateThreshold")]
     public float NoiseGateThreshold { get; set; } = 0.02f;
 
+    // Profile customization
+    [JsonPropertyName("accentColor")]
+    public string? AccentColor { get; set; } // hex color, e.g. "#8b5cf6"
+
+    [JsonPropertyName("avatarData")]
+    public string? AvatarData { get; set; } // base64-encoded image (PNG/GIF/JPEG, max 256KB)
+
+    [JsonPropertyName("avatarMimeType")]
+    public string? AvatarMimeType { get; set; } // "image/png", "image/gif", "image/jpeg"
+
     // Transient (not persisted in older profiles)
     [JsonPropertyName("_deliveryToken")]
     public string? DeliveryToken { get; set; }
@@ -122,6 +132,15 @@ public class Contact
 
     [JsonPropertyName("addedAt")]
     public long AddedAt { get; set; }
+
+    [JsonPropertyName("accentColor")]
+    public string? AccentColor { get; set; }
+
+    [JsonPropertyName("avatarData")]
+    public string? AvatarData { get; set; }
+
+    [JsonPropertyName("avatarMimeType")]
+    public string? AvatarMimeType { get; set; }
 }
 
 public class DeviceKeys

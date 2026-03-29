@@ -446,6 +446,228 @@ public partial class MainView : UserControl
         }
     }
 
+    private void Place_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+        if (sender is not Button btn || btn.DataContext is not PlaceItemViewModel place) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        var menu = new ContextMenu();
+
+        // Invite member
+        var inviteItem = new MenuItem
+        {
+            Header = "Invite member...",
+            Foreground = Brush.Parse("#e0e0e8"),
+        };
+        inviteItem.Click += (_, _) =>
+        {
+            var input = new TextBox
+            {
+                Watermark = "user#id",
+                Width = 200,
+                MaxLength = 255,
+                Background = Brush.Parse("#12121a"),
+                Foreground = Brush.Parse("#e0e0e8"),
+                BorderBrush = Brush.Parse("#1e1e2e"),
+            };
+            var addBtn = new Button
+            {
+                Content = "Invite",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, addBtn } };
+            var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+            addBtn.Click += (_, _) =>
+            {
+                var uid = input.Text?.Trim();
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    vm.ExecuteCommand("pinvite", new[] { place.PlaceId, uid });
+                    flyout.Hide();
+                }
+            };
+            input.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == Key.Enter)
+                {
+                    var uid = input.Text?.Trim();
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        vm.ExecuteCommand("pinvite", new[] { place.PlaceId, uid });
+                        flyout.Hide();
+                    }
+                    ke.Handled = true;
+                }
+            };
+            flyout.ShowAt(btn);
+        };
+        menu.Items.Add(inviteItem);
+
+        // Create channel
+        var channelItem = new MenuItem
+        {
+            Header = "Create channel...",
+            Foreground = Brush.Parse("#e0e0e8"),
+        };
+        channelItem.Click += (_, _) =>
+        {
+            var input = new TextBox
+            {
+                Watermark = "Channel name",
+                Width = 200,
+                MaxLength = 64,
+                Background = Brush.Parse("#12121a"),
+                Foreground = Brush.Parse("#e0e0e8"),
+                BorderBrush = Brush.Parse("#1e1e2e"),
+            };
+            var createBtn = new Button
+            {
+                Content = "Create",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, createBtn } };
+            var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+            createBtn.Click += (_, _) =>
+            {
+                var name = input.Text?.Trim();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    vm.ExecuteCommand("pchannel", new[] { place.PlaceId, name });
+                    flyout.Hide();
+                }
+            };
+            input.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == Key.Enter)
+                {
+                    var name = input.Text?.Trim();
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        vm.ExecuteCommand("pchannel", new[] { place.PlaceId, name });
+                        flyout.Hide();
+                    }
+                    ke.Handled = true;
+                }
+            };
+            flyout.ShowAt(btn);
+        };
+        menu.Items.Add(channelItem);
+
+        // Creator-only actions
+        if (place.IsCreator)
+        {
+            menu.Items.Add(new Separator());
+
+            // Kick member
+            var kickItem = new MenuItem
+            {
+                Header = "Kick member...",
+                Foreground = Brush.Parse("#e0e0e8"),
+            };
+            kickItem.Click += (_, _) =>
+            {
+                var input = new TextBox
+                {
+                    Watermark = "user#id",
+                    Width = 200,
+                    MaxLength = 255,
+                    Background = Brush.Parse("#12121a"),
+                    Foreground = Brush.Parse("#e0e0e8"),
+                    BorderBrush = Brush.Parse("#1e1e2e"),
+                };
+                var kickBtn = new Button
+                {
+                    Content = "Kick",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 8, 0, 0),
+                };
+                var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, kickBtn } };
+                var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+                kickBtn.Click += (_, _) =>
+                {
+                    var uid = input.Text?.Trim();
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        vm.ExecuteCommand("pkick", new[] { place.PlaceId, uid });
+                        flyout.Hide();
+                    }
+                };
+                input.KeyDown += (_, ke) =>
+                {
+                    if (ke.Key == Key.Enter)
+                    {
+                        var uid = input.Text?.Trim();
+                        if (!string.IsNullOrEmpty(uid))
+                        {
+                            vm.ExecuteCommand("pkick", new[] { place.PlaceId, uid });
+                            flyout.Hide();
+                        }
+                        ke.Handled = true;
+                    }
+                };
+                flyout.ShowAt(btn);
+            };
+            menu.Items.Add(kickItem);
+
+            // Rotate key
+            var rekeyItem = new MenuItem
+            {
+                Header = "Rotate key",
+                Foreground = Brush.Parse("#e0e0e8"),
+            };
+            rekeyItem.Click += (_, _) => vm.ExecuteCommand("prekey", new[] { place.PlaceId });
+            menu.Items.Add(rekeyItem);
+        }
+
+        menu.Items.Add(new Separator());
+
+        // Leave place
+        var leaveItem = new MenuItem
+        {
+            Header = "Leave place",
+            Foreground = Brush.Parse("#f87171"),
+        };
+        leaveItem.Click += (_, _) => vm.ExecuteCommand("pleave", new[] { place.PlaceId });
+        menu.Items.Add(leaveItem);
+
+        btn.ContextMenu = menu;
+        menu.Open(btn);
+        e.Handled = true;
+    }
+
+    private void Channel_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+        if (sender is not Button btn || btn.DataContext is not ChannelItemViewModel channel) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        var menu = new ContextMenu();
+
+        if (channel.IsCreator)
+        {
+            var deleteItem = new MenuItem
+            {
+                Header = "Delete channel",
+                Foreground = Brush.Parse("#f87171"),
+            };
+            deleteItem.Click += (_, _) => vm.ExecuteCommand("pchannelrm", new[] { channel.PlaceId, channel.ChannelId });
+            menu.Items.Add(deleteItem);
+        }
+
+        // Only show menu if it has items
+        if (menu.Items.Count == 0) return;
+
+        btn.ContextMenu = menu;
+        menu.Open(btn);
+        e.Handled = true;
+    }
+
     private void Contact_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
@@ -467,6 +689,24 @@ public partial class MainView : UserControl
                     Foreground = Brush.Parse("#e0e0e8"),
                 };
                 item.Click += (_, _) => vm.InviteContactToGroup(groupId, contact.UserId);
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new Separator());
+        }
+
+        // Add "Invite to place" items for each place
+        if (vm.Places.Count > 0)
+        {
+            foreach (var place in vm.Places)
+            {
+                var placeId = place.PlaceId;
+                var displayName = place.Name.Length > 32 ? place.Name[..32] + "..." : place.Name;
+                var item = new MenuItem
+                {
+                    Header = $"Invite to {displayName}",
+                    Foreground = Brush.Parse("#e0e0e8"),
+                };
+                item.Click += (_, _) => vm.ExecuteCommand("pinvite", new[] { placeId, contact.UserId });
                 menu.Items.Add(item);
             }
             menu.Items.Add(new Separator());
