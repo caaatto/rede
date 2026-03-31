@@ -72,6 +72,14 @@ public static class Msg
     public const string PlaceChannelRemove = "place_channel_remove";
     public const string PlaceChannelRemoveOk = "place_channel_remove_ok";
     public const string PlaceMessage = "place_message";
+    public const string PlaceRoleSet = "place_role_set";
+    public const string PlaceRoleSetOk = "place_role_set_ok";
+    public const string PlaceBan = "place_ban";
+    public const string PlaceBanOk = "place_ban_ok";
+    public const string PlaceUnban = "place_unban";
+    public const string PlaceUnbanOk = "place_unban_ok";
+    public const string PlaceMembers = "place_members";
+    public const string PlaceMembersOk = "place_members_ok";
 
     // Voice Calls
     public const string CallOffer = "call_offer";
@@ -86,6 +94,11 @@ public static class Msg
     public const string CallLeave = "call_leave";
     public const string CallMute = "call_mute";
     public const string CallParticipants = "call_participants";
+
+    // Status / Presence
+    public const string StatusUpdate = "status_update";
+    public const string StatusSubscribe = "status_subscribe";
+    public const string StatusChange = "status_change";
 
     // System
     public const string Error = "error";

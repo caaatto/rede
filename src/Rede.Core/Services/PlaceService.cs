@@ -44,6 +44,9 @@ public class PlaceService
         _conn.On(Msg.PlaceChannelAddOk, HandlePlaceChannelAddOk);
         _conn.On(Msg.PlaceChannelRemoveOk, HandlePlaceChannelRemoveOk);
         _conn.On(Msg.PlaceMessage, HandlePlaceMessage);
+        _conn.On(Msg.PlaceRoleSetOk, HandlePlaceRoleSetOk);
+        _conn.On(Msg.PlaceBanOk, HandlePlaceBanOk);
+        _conn.On(Msg.PlaceUnbanOk, HandlePlaceUnbanOk);
     }
 
     // --- Channel ID generation ---
@@ -71,6 +74,12 @@ public class PlaceService
         if (place.AccentColor is not null) meta["accentColor"] = place.AccentColor;
         if (place.IconData is not null) meta["iconData"] = place.IconData;
         if (place.IconMimeType is not null) meta["iconMimeType"] = place.IconMimeType;
+        if (place.Emotes.Count > 0) meta["emotes"] = JsonSerializer.SerializeToNode(place.Emotes);
+        if (place.Bans.Count > 0) meta["bans"] = JsonSerializer.SerializeToNode(place.Bans);
+        if (place.Categories.Count > 0) meta["categories"] = JsonSerializer.SerializeToNode(place.Categories);
+        meta["ownerColor"] = place.OwnerColor;
+        meta["adminColor"] = place.AdminColor;
+        meta["memberColor"] = place.MemberColor;
         var json = meta.ToJsonString();
         var keyBytes = Convert.FromBase64String(metadataKey);
         var nonce = Sodium.SodiumCore.GetRandomBytes(24);
@@ -110,6 +119,18 @@ public class PlaceService
                 place.IconData = iconElem.GetString();
             if (root.TryGetProperty("iconMimeType", out var iconMimeElem))
                 place.IconMimeType = iconMimeElem.GetString();
+            if (root.TryGetProperty("emotes", out var emotesElem))
+                place.Emotes = JsonSerializer.Deserialize<Dictionary<string, PlaceEmote>>(emotesElem) ?? new();
+            if (root.TryGetProperty("bans", out var bansElem))
+                place.Bans = JsonSerializer.Deserialize<Dictionary<string, PlaceBan>>(bansElem) ?? new();
+            if (root.TryGetProperty("categories", out var catsElem))
+                place.Categories = JsonSerializer.Deserialize<List<string>>(catsElem) ?? new();
+            if (root.TryGetProperty("ownerColor", out var ownerColorElem))
+                place.OwnerColor = ownerColorElem.GetString() ?? "#eab308";
+            if (root.TryGetProperty("adminColor", out var adminColorElem))
+                place.AdminColor = adminColorElem.GetString() ?? "#8b5cf6";
+            if (root.TryGetProperty("memberColor", out var memberColorElem))
+                place.MemberColor = memberColorElem.GetString() ?? "#6b7280";
             return true;
         }
         catch { return false; }
@@ -241,6 +262,383 @@ public class PlaceService
 
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Place profile updated for \"{place.Name}\".");
+    }
+
+    public void UpdateRoleColors(string placeId, string ownerColor, string adminColor, string memberColor, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can change role colors.");
+            return;
+        }
+
+        place.OwnerColor = ownerColor;
+        place.AdminColor = adminColor;
+        place.MemberColor = memberColor;
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Role colors updated for \"{place.Name}\".");
+        OnPlacesChanged?.Invoke();
+    }
+
+    // --- Permission helpers ---
+
+    public static bool HasPermission(Place place, string userId, PlaceRole minRole)
+    {
+        if (place.CreatorId == userId) return true; // Owner always has all permissions
+        if (!place.Roles.TryGetValue(userId, out var role)) role = PlaceRole.Member;
+        return role >= minRole;
+    }
+
+    // --- Emote management ---
+    // Emotes are stored in E2EE metadata — server never sees them.
+    // Max 50 emotes per place, max 64KB per emote image.
+
+    private const int MaxEmotesPerPlace = 50;
+    private const int MaxEmoteSize = 64 * 1024; // 64KB
+
+    public void AddEmote(string placeId, string name, byte[] imageData, string mimeType, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can add emotes.");
+            return;
+        }
+
+        if (place.Emotes.Count >= MaxEmotesPerPlace)
+        {
+            OnSystemMessage?.Invoke($"Emote limit reached ({MaxEmotesPerPlace}).");
+            return;
+        }
+
+        if (imageData.Length > MaxEmoteSize)
+        {
+            OnSystemMessage?.Invoke("Emote image too large (max 64KB).");
+            return;
+        }
+
+        // Sanitize name: alphanumeric + underscores, 2-32 chars
+        var safeName = System.Text.RegularExpressions.Regex.Replace(name.ToLowerInvariant(), @"[^a-z0-9_]", "");
+        if (safeName.Length < 2 || safeName.Length > 32)
+        {
+            OnSystemMessage?.Invoke("Emote name must be 2-32 alphanumeric characters.");
+            return;
+        }
+
+        var emoteId = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+        place.Emotes[emoteId] = new PlaceEmote
+        {
+            Name = safeName,
+            ImageData = Convert.ToBase64String(imageData),
+            MimeType = mimeType,
+            UploadedBy = Profile.UserId,
+        };
+
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Emote :{safeName}: added to \"{place.Name}\".");
+        OnPlacesChanged?.Invoke();
+    }
+
+    public void RemoveEmote(string placeId, string emoteId, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can remove emotes.");
+            return;
+        }
+
+        if (!place.Emotes.Remove(emoteId))
+        {
+            OnSystemMessage?.Invoke("Emote not found.");
+            return;
+        }
+
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke("Emote removed.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    // --- Role management ---
+    // Owner can promote members to Admin or demote Admins to Member.
+    // Role change is both server-side (for permission enforcement) and E2EE metadata (for display).
+
+    public void SetRole(string placeId, string targetUserId, PlaceRole role, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (place.CreatorId != Profile.UserId)
+        {
+            OnSystemMessage?.Invoke("Only the place owner can change roles.");
+            return;
+        }
+
+        if (targetUserId == Profile.UserId)
+        {
+            OnSystemMessage?.Invoke("Cannot change your own role.");
+            return;
+        }
+
+        if (!place.Members.Contains(targetUserId))
+        {
+            OnSystemMessage?.Invoke("User is not a member of this place.");
+            return;
+        }
+
+        // Send to server for enforcement
+        var serverRole = role >= PlaceRole.Admin ? "admin" : "member";
+        _conn.Send(Msg.PlaceRoleSet, ProtocolSerializer.Payload(
+            ("placeId", JsonValue.Create(placeId)),
+            ("targetUserId", JsonValue.Create(targetUserId)),
+            ("role", JsonValue.Create(serverRole))
+        ));
+
+        // Update local E2EE metadata
+        place.Roles[targetUserId] = role;
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        DistributeMetadata(placeId, place, chatService);
+
+        var roleName = role switch { PlaceRole.Admin => "Admin", PlaceRole.Owner => "Owner", _ => "Member" };
+        OnSystemMessage?.Invoke($"Set {targetUserId} to {roleName} in \"{place.Name}\".");
+    }
+
+    // --- Ban / Unban ---
+    // Bans are stored both server-side (for enforcement) and E2EE metadata (for display).
+
+    public void BanUser(string placeId, string targetUserId, string? reason, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can ban users.");
+            return;
+        }
+
+        if (targetUserId == Profile.UserId)
+        {
+            OnSystemMessage?.Invoke("Cannot ban yourself.");
+            return;
+        }
+
+        if (targetUserId == place.CreatorId)
+        {
+            OnSystemMessage?.Invoke("Cannot ban the owner.");
+            return;
+        }
+
+        _conn.Send(Msg.PlaceBan, ProtocolSerializer.Payload(
+            ("placeId", JsonValue.Create(placeId)),
+            ("targetUserId", JsonValue.Create(targetUserId)),
+            ("reason", JsonValue.Create(reason ?? ""))
+        ));
+
+        // Update local state
+        place.Bans[targetUserId] = new PlaceBan
+        {
+            UserId = targetUserId,
+            BannedBy = Profile.UserId,
+            Reason = reason,
+            BannedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
+        place.Members.Remove(targetUserId);
+        place.Roles.Remove(targetUserId);
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Banned {targetUserId} from \"{place.Name}\".");
+        OnPlacesChanged?.Invoke();
+    }
+
+    public void UnbanUser(string placeId, string targetUserId, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can unban users.");
+            return;
+        }
+
+        _conn.Send(Msg.PlaceUnban, ProtocolSerializer.Payload(
+            ("placeId", JsonValue.Create(placeId)),
+            ("targetUserId", JsonValue.Create(targetUserId))
+        ));
+
+        place.Bans.Remove(targetUserId);
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Unbanned {targetUserId} from \"{place.Name}\".");
+    }
+
+    // --- Channel categories ---
+
+    public void SetChannelCategory(string placeId, string channelId, string? category, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can manage categories.");
+            return;
+        }
+
+        if (!place.Channels.TryGetValue(channelId, out var channel))
+        {
+            OnSystemMessage?.Invoke("Channel not found.");
+            return;
+        }
+
+        channel.Category = category;
+
+        // Ensure category is in the list
+        if (category is not null && !place.Categories.Contains(category))
+            place.Categories.Add(category);
+
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Channel #{channel.Name} moved to category \"{category ?? "None"}\".");
+        OnPlacesChanged?.Invoke();
+    }
+
+    public void AddCategory(string placeId, string categoryName, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can manage categories.");
+            return;
+        }
+
+        if (place.Categories.Contains(categoryName))
+        {
+            OnSystemMessage?.Invoke("Category already exists.");
+            return;
+        }
+
+        place.Categories.Add(categoryName);
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Category \"{categoryName}\" added to \"{place.Name}\".");
+        OnPlacesChanged?.Invoke();
+    }
+
+    public void RemoveCategory(string placeId, string categoryName, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can manage categories.");
+            return;
+        }
+
+        place.Categories.Remove(categoryName);
+        // Move channels in that category to uncategorized
+        foreach (var ch in place.Channels.Values)
+        {
+            if (ch.Category == categoryName) ch.Category = null;
+        }
+
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Category \"{categoryName}\" removed.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    // --- Channel topic ---
+
+    public void SetChannelTopic(string placeId, string channelId, string topic, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only the owner or admins can set channel topics.");
+            return;
+        }
+
+        if (!place.Channels.TryGetValue(channelId, out var channel))
+        {
+            OnSystemMessage?.Invoke("Channel not found.");
+            return;
+        }
+
+        channel.Topic = topic;
+        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Topic set for #{channel.Name}.");
+        OnPlacesChanged?.Invoke();
     }
 
     public void RekeyPlace(string placeId, ChatService? chatService)
@@ -591,6 +989,44 @@ public class PlaceService
         }, Passphrase));
 
         OnChannelMessageReceived?.Invoke(placeId, channelId, from, sanitized, ts);
+    }
+
+    private async void HandlePlaceRoleSetOk(JsonObject msg)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        var placeId = ProtocolSerializer.GetString(msg, "placeId");
+        var targetUserId = ProtocolSerializer.GetString(msg, "targetUserId");
+        var role = ProtocolSerializer.GetString(msg, "role");
+        var from = ProtocolSerializer.GetString(msg, "from");
+        if (placeId is null || targetUserId is null || role is null) return;
+
+        // If we are the target, update our local role
+        if (targetUserId == Profile.UserId && Profile.Places.TryGetValue(placeId, out var place))
+        {
+            var newRole = role == "admin" ? PlaceRole.Admin : PlaceRole.Member;
+            place.Roles[Profile.UserId] = newRole;
+            await _store.SaveProfileAsync(Profile, Passphrase);
+            var roleName = newRole == PlaceRole.Admin ? "Admin" : "Member";
+            OnSystemMessage?.Invoke($"Your role in \"{place.Name}\" was changed to {roleName} by {from ?? "owner"}.");
+            OnPlacesChanged?.Invoke();
+        }
+    }
+
+    private void HandlePlaceBanOk(JsonObject msg)
+    {
+        var placeId = ProtocolSerializer.GetString(msg, "placeId");
+        var targetUserId = ProtocolSerializer.GetString(msg, "targetUserId");
+        if (placeId is null || targetUserId is null) return;
+        OnSystemMessage?.Invoke($"Banned {targetUserId} from place {placeId}.");
+    }
+
+    private void HandlePlaceUnbanOk(JsonObject msg)
+    {
+        var placeId = ProtocolSerializer.GetString(msg, "placeId");
+        var targetUserId = ProtocolSerializer.GetString(msg, "targetUserId");
+        if (placeId is null || targetUserId is null) return;
+        OnSystemMessage?.Invoke($"Unbanned {targetUserId} from place {placeId}.");
     }
 
     /// <summary>

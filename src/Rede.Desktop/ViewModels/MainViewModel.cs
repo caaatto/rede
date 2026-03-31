@@ -29,6 +29,10 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private string _inputText = "";
     [ObservableProperty] private int _ttlSeconds;
     [ObservableProperty] private bool _isContactSelected;
+    [ObservableProperty] private bool _isPlaceSelected;
+    [ObservableProperty] private string _channelTopic = "";
+    [ObservableProperty] private bool _isMemberListVisible;
+    [ObservableProperty] private ObservableCollection<PlaceMemberViewModel> _memberList = new();
 
     public MainViewModel()
     {
@@ -45,6 +49,8 @@ public partial class MainViewModel : ViewModelBase
     private void SelectConversation(object? item)
     {
         SelectedConversation = item;
+        IsPlaceSelected = false;
+        ChannelTopic = "";
         if (item is ContactItemViewModel contact)
         {
             ChatTitle = contact.DisplayName;
@@ -61,7 +67,11 @@ public partial class MainViewModel : ViewModelBase
         {
             ChatTitle = $"{channel.PlaceName} > #{channel.Name}";
             IsContactSelected = false;
+            IsPlaceSelected = true;
+            ChannelTopic = channel.Topic;
             LoadChatHistory($"place:{channel.PlaceId}:{channel.ChannelId}");
+            OnMemberListRequested?.Invoke(channel.PlaceId);
+            return;
         }
     }
 
@@ -70,7 +80,11 @@ public partial class MainViewModel : ViewModelBase
         SelectedConversation = null;
         ChatTitle = "";
         IsContactSelected = false;
+        IsPlaceSelected = false;
+        ChannelTopic = "";
+        IsMemberListVisible = false;
         Messages.Clear();
+        MemberList.Clear();
     }
 
     [RelayCommand]
@@ -113,7 +127,7 @@ public partial class MainViewModel : ViewModelBase
         OnChatHistoryRequested?.Invoke(chatId);
     }
 
-    public void AddIncomingMessage(string from, string text, DateTime timestamp, bool isSystem = false)
+    public void AddIncomingMessage(string from, string text, DateTime timestamp, bool isSystem = false, string? senderRole = null, string? roleBadgeColor = null)
     {
         // Look up sender's profile customization from contacts
         var contact = Contacts.FirstOrDefault(c => c.UserId == from);
@@ -133,6 +147,8 @@ public partial class MainViewModel : ViewModelBase
             SenderInitial = initial,
             SenderAvatar = contact?.AvatarImage,
             HasSenderAvatar = contact?.HasAvatar ?? false,
+            SenderRole = senderRole,
+            RoleBadgeColor = roleBadgeColor ?? "#8b5cf6",
         };
         Messages.Add(msg);
     }
@@ -152,6 +168,7 @@ public partial class MainViewModel : ViewModelBase
     public event Action<string>? OnMessageSend;
     public event Action<string, string[]>? OnCommandExecuted;
     public event Action<string>? OnChatHistoryRequested;
+    public event Action<string>? OnMemberListRequested;
 
     public void InviteContactToGroup(string groupId, string userId)
     {
@@ -175,11 +192,34 @@ public partial class ContactItemViewModel : ViewModelBase
     [ObservableProperty] private string _accentColor = "#8b5cf6";
     [ObservableProperty] private Bitmap? _avatarImage;
     [ObservableProperty] private bool _hasAvatar;
+    [ObservableProperty] private string _status = "offline"; // online, away, dnd, offline
+    [ObservableProperty] private string? _customStatus;
 
     public string Initial => string.IsNullOrEmpty(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
     public IBrush AccentBrush => Brush.Parse(AccentColor);
+    public IBrush StatusBrush => Status switch
+    {
+        "online" => Brush.Parse("#22c55e"),
+        "away" => Brush.Parse("#eab308"),
+        "dnd" => Brush.Parse("#ef4444"),
+        _ => Brush.Parse("#6b7280"),
+    };
+    public string StatusTooltip => Status switch
+    {
+        "online" => CustomStatus ?? "Online",
+        "away" => CustomStatus ?? "Away",
+        "dnd" => CustomStatus ?? "Do Not Disturb",
+        _ => "Offline",
+    };
 
     partial void OnAccentColorChanged(string value) => OnPropertyChanged(nameof(AccentBrush));
+    partial void OnStatusChanged(string value)
+    {
+        OnPropertyChanged(nameof(StatusBrush));
+        OnPropertyChanged(nameof(StatusTooltip));
+        IsOnline = value != "offline";
+    }
+    partial void OnCustomStatusChanged(string? value) => OnPropertyChanged(nameof(StatusTooltip));
 
     public void LoadAvatar(string? base64)
     {
@@ -216,6 +256,12 @@ public partial class PlaceItemViewModel : ViewModelBase
     [ObservableProperty] private Bitmap? _iconImage;
     [ObservableProperty] private bool _hasIcon;
 
+    [ObservableProperty] private ObservableCollection<PlaceMemberViewModel> _members = new();
+    [ObservableProperty] private bool _isAdmin; // current user is admin or owner
+    [ObservableProperty] private string _ownerColor = "#eab308";
+    [ObservableProperty] private string _adminColor = "#8b5cf6";
+    [ObservableProperty] private string _memberColor = "#6b7280";
+
     public string Initial => string.IsNullOrEmpty(Name) ? "?" : Name[..1].ToUpperInvariant();
     public IBrush AccentBrush => Brush.Parse(AccentColor);
 
@@ -243,6 +289,29 @@ public partial class ChannelItemViewModel : ViewModelBase
     [ObservableProperty] private string _placeName = "";
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private bool _isCreator;
+    [ObservableProperty] private string? _category;
+    [ObservableProperty] private string _topic = "";
+}
+
+public partial class PlaceMemberViewModel : ViewModelBase
+{
+    [ObservableProperty] private string _userId = "";
+    [ObservableProperty] private string _displayName = "";
+    [ObservableProperty] private string _role = "Member"; // Owner, Admin, Member
+    [ObservableProperty] private string _status = "offline";
+    [ObservableProperty] private string _accentColor = "#8b5cf6";
+    [ObservableProperty] private string _roleColor = "#6b7280"; // customizable per-place
+
+    public string Initial => string.IsNullOrEmpty(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
+    public IBrush AccentBrush => Brush.Parse(AccentColor);
+    public IBrush RoleBrush => Brush.Parse(RoleColor);
+    public IBrush StatusBrush => Status switch
+    {
+        "online" => Brush.Parse("#22c55e"),
+        "away" => Brush.Parse("#eab308"),
+        "dnd" => Brush.Parse("#ef4444"),
+        _ => Brush.Parse("#6b7280"),
+    };
 }
 
 public partial class ChatMessageViewModel : ViewModelBase
@@ -258,9 +327,13 @@ public partial class ChatMessageViewModel : ViewModelBase
     [ObservableProperty] private Bitmap? _senderAvatar;
     [ObservableProperty] private bool _hasSenderAvatar;
     [ObservableProperty] private string _senderInitial = "?";
+    [ObservableProperty] private string? _senderRole; // "Owner", "Admin", or null
+    [ObservableProperty] private string _roleBadgeColor = "#8b5cf6"; // customizable per-place
 
     public string TimeString => Timestamp.ToString("h:mm tt").ToLowerInvariant();
     public bool HasTtl => Ttl > 0;
     public string TtlDisplay => Ttl > 0 ? $"{Ttl}d" : "";
     public IBrush SenderAccentBrush => Brush.Parse(SenderAccentColor);
+    public bool HasSenderRole => SenderRole is not null;
+    public IBrush RoleBadgeBrush => Brush.Parse(RoleBadgeColor);
 }

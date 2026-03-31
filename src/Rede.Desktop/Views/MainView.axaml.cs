@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Specialized;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -558,8 +559,8 @@ public partial class MainView : UserControl
         };
         menu.Items.Add(channelItem);
 
-        // Creator-only actions
-        if (place.IsCreator)
+        // Admin/Creator actions
+        if (place.IsCreator || place.IsAdmin)
         {
             menu.Items.Add(new Separator());
 
@@ -615,7 +616,115 @@ public partial class MainView : UserControl
             };
             menu.Items.Add(kickItem);
 
-            // Edit place profile
+            // Ban member
+            var banItem = new MenuItem
+            {
+                Header = "Ban member...",
+                Foreground = Brush.Parse("#f87171"),
+            };
+            banItem.Click += (_, _) =>
+            {
+                var input = new TextBox
+                {
+                    Watermark = "user#id",
+                    Width = 200,
+                    MaxLength = 255,
+                    Background = Brush.Parse("#12121a"),
+                    Foreground = Brush.Parse("#e0e0e8"),
+                    BorderBrush = Brush.Parse("#1e1e2e"),
+                };
+                var reasonInput = new TextBox
+                {
+                    Watermark = "Reason (optional)",
+                    Width = 200,
+                    MaxLength = 200,
+                    Background = Brush.Parse("#12121a"),
+                    Foreground = Brush.Parse("#e0e0e8"),
+                    BorderBrush = Brush.Parse("#1e1e2e"),
+                };
+                var banBtn = new Button
+                {
+                    Content = "Ban",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 8, 0, 0),
+                };
+                var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, reasonInput, banBtn } };
+                var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+                banBtn.Click += (_, _) =>
+                {
+                    var uid = input.Text?.Trim();
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        var reason = reasonInput.Text?.Trim();
+                        var cmdArgs = string.IsNullOrEmpty(reason)
+                            ? new[] { place.PlaceId, uid }
+                            : new[] { place.PlaceId, uid, reason };
+                        vm.ExecuteCommand("pban", cmdArgs);
+                        flyout.Hide();
+                    }
+                };
+                flyout.ShowAt(btn);
+            };
+            menu.Items.Add(banItem);
+
+            // Add category
+            var categoryItem = new MenuItem
+            {
+                Header = "Add category...",
+                Foreground = Brush.Parse("#e0e0e8"),
+            };
+            categoryItem.Click += (_, _) =>
+            {
+                var input = new TextBox
+                {
+                    Watermark = "Category name",
+                    Width = 200,
+                    MaxLength = 64,
+                    Background = Brush.Parse("#12121a"),
+                    Foreground = Brush.Parse("#e0e0e8"),
+                    BorderBrush = Brush.Parse("#1e1e2e"),
+                };
+                var createBtn = new Button
+                {
+                    Content = "Create",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 8, 0, 0),
+                };
+                var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, createBtn } };
+                var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+                createBtn.Click += (_, _) =>
+                {
+                    var name = input.Text?.Trim();
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        vm.ExecuteCommand("pcategory", new[] { place.PlaceId, name });
+                        flyout.Hide();
+                    }
+                };
+                input.KeyDown += (_, ke) =>
+                {
+                    if (ke.Key == Key.Enter)
+                    {
+                        var name = input.Text?.Trim();
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            vm.ExecuteCommand("pcategory", new[] { place.PlaceId, name });
+                            flyout.Hide();
+                        }
+                        ke.Handled = true;
+                    }
+                };
+                flyout.ShowAt(btn);
+            };
+            menu.Items.Add(categoryItem);
+        }
+
+        // Admin/Creator: edit profile & colors
+        if (place.IsCreator || place.IsAdmin)
+        {
+            // Edit place profile (accent color)
             var profileItem = new MenuItem
             {
                 Header = "Edit profile...",
@@ -677,6 +786,100 @@ public partial class MainView : UserControl
             };
             menu.Items.Add(profileItem);
 
+            // Role colors
+            var roleColorsItem = new MenuItem
+            {
+                Header = "Role colors...",
+                Foreground = Brush.Parse("#e0e0e8"),
+            };
+            roleColorsItem.Click += (_, _) =>
+            {
+                var ownerColor = place.OwnerColor;
+                var adminColor = place.AdminColor;
+                var memberColor = place.MemberColor;
+
+                WrapPanel BuildRoleSwatches(string label, string current, Action<string> onSelect)
+                {
+                    var lbl = new TextBlock
+                    {
+                        Text = label,
+                        Foreground = Brush.Parse("#e0e0e8"),
+                        FontSize = 11,
+                        Margin = new Thickness(0, 4, 0, 2),
+                    };
+                    var palette = new WrapPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
+
+                    void Build()
+                    {
+                        palette.Children.Clear();
+                        foreach (var hex in ViewModels.SettingsViewModel.PresetColors)
+                        {
+                            var c = hex;
+                            var swatch = new Border
+                            {
+                                Width = 20, Height = 20,
+                                CornerRadius = new CornerRadius(10),
+                                Background = Brush.Parse(c),
+                                Margin = new Thickness(1),
+                                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                                BorderThickness = new Thickness(2),
+                                BorderBrush = current == c ? Brush.Parse("#e0e0e8") : Avalonia.Media.Brushes.Transparent,
+                            };
+                            swatch.PointerPressed += (_, _) =>
+                            {
+                                current = c;
+                                onSelect(c);
+                                Build();
+                            };
+                            palette.Children.Add(swatch);
+                        }
+                    }
+                    Build();
+                    var stack = new WrapPanel();
+                    // Return as a single panel
+                    return palette;
+                }
+
+                var ownerLbl = new TextBlock { Text = "Owner", Foreground = Brush.Parse("#e0e0e8"), FontSize = 11, Margin = new Thickness(0, 4, 0, 2) };
+                var ownerPalette = BuildRoleSwatches("Owner", ownerColor, c => ownerColor = c);
+                var adminLbl = new TextBlock { Text = "Admin", Foreground = Brush.Parse("#e0e0e8"), FontSize = 11, Margin = new Thickness(0, 4, 0, 2) };
+                var adminPalette = BuildRoleSwatches("Admin", adminColor, c => adminColor = c);
+                var memberLbl = new TextBlock { Text = "Member", Foreground = Brush.Parse("#e0e0e8"), FontSize = 11, Margin = new Thickness(0, 4, 0, 2) };
+                var memberPalette = BuildRoleSwatches("Member", memberColor, c => memberColor = c);
+
+                var applyBtn = new Button
+                {
+                    Content = "Apply",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 8, 0, 0),
+                };
+                var panel = new StackPanel
+                {
+                    Spacing = 2, Width = 230,
+                    Children =
+                    {
+                        new TextBlock { Text = "Role Colors", Foreground = Brush.Parse("#e0e0e8"), FontWeight = FontWeight.SemiBold, FontSize = 13 },
+                        ownerLbl, ownerPalette,
+                        adminLbl, adminPalette,
+                        memberLbl, memberPalette,
+                        applyBtn,
+                    }
+                };
+                var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+                applyBtn.Click += (_, _) =>
+                {
+                    vm.ExecuteCommand("prolecolors", new[] { place.PlaceId, ownerColor, adminColor, memberColor });
+                    flyout.Hide();
+                };
+                flyout.ShowAt(btn);
+            };
+            menu.Items.Add(roleColorsItem);
+        }
+
+        // Creator-only actions
+        if (place.IsCreator)
+        {
             // Rotate key
             var rekeyItem = new MenuItem
             {
@@ -709,9 +912,72 @@ public partial class MainView : UserControl
         if (sender is not Button btn || btn.DataContext is not ChannelItemViewModel channel) return;
         if (DataContext is not MainViewModel vm) return;
 
+        var placeVm = vm.Places.FirstOrDefault(p => p.PlaceId == channel.PlaceId);
+
         var menu = new ContextMenu();
 
-        if (channel.IsCreator)
+        // Show topic
+        if (!string.IsNullOrEmpty(channel.Topic))
+        {
+            var topicItem = new MenuItem
+            {
+                Header = $"Topic: {(channel.Topic.Length > 40 ? channel.Topic[..40] + "..." : channel.Topic)}",
+                Foreground = Brush.Parse("#9ca3af"),
+                IsEnabled = false,
+            };
+            menu.Items.Add(topicItem);
+            menu.Items.Add(new Separator());
+        }
+
+        // Admin actions
+        if (placeVm?.IsCreator == true || placeVm?.IsAdmin == true)
+        {
+            // Set topic
+            var topicEditItem = new MenuItem
+            {
+                Header = "Set topic...",
+                Foreground = Brush.Parse("#e0e0e8"),
+            };
+            topicEditItem.Click += (_, _) =>
+            {
+                var input = new TextBox
+                {
+                    Watermark = "Channel topic",
+                    Text = channel.Topic,
+                    Width = 250,
+                    MaxLength = 200,
+                    Background = Brush.Parse("#12121a"),
+                    Foreground = Brush.Parse("#e0e0e8"),
+                    BorderBrush = Brush.Parse("#1e1e2e"),
+                };
+                var setBtn = new Button
+                {
+                    Content = "Set",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 8, 0, 0),
+                };
+                var panel = new StackPanel { Spacing = 4, Width = 260, Children = { input, setBtn } };
+                var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+                setBtn.Click += (_, _) =>
+                {
+                    vm.ExecuteCommand("ptopic", new[] { channel.PlaceId, channel.ChannelId, input.Text ?? "" });
+                    flyout.Hide();
+                };
+                flyout.ShowAt(btn);
+            };
+            menu.Items.Add(topicEditItem);
+
+            // Delete channel
+            var deleteItem = new MenuItem
+            {
+                Header = "Delete channel",
+                Foreground = Brush.Parse("#f87171"),
+            };
+            deleteItem.Click += (_, _) => vm.ExecuteCommand("pchannelrm", new[] { channel.PlaceId, channel.ChannelId });
+            menu.Items.Add(deleteItem);
+        }
+        else if (channel.IsCreator)
         {
             var deleteItem = new MenuItem
             {
@@ -722,11 +988,78 @@ public partial class MainView : UserControl
             menu.Items.Add(deleteItem);
         }
 
-        // Only show menu if it has items
         if (menu.Items.Count == 0) return;
 
         btn.ContextMenu = menu;
         menu.Open(btn);
+        e.Handled = true;
+    }
+
+    private void ToggleMemberList_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+            vm.IsMemberListVisible = !vm.IsMemberListVisible;
+    }
+
+    private void Member_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+        if (sender is not Border border || border.DataContext is not PlaceMemberViewModel member) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        // Find current place
+        if (vm.SelectedConversation is not ChannelItemViewModel channel) return;
+        var placeVm = vm.Places.FirstOrDefault(p => p.PlaceId == channel.PlaceId);
+        if (placeVm is null) return;
+
+        var menu = new ContextMenu();
+
+        // View fingerprint
+        var fpItem = new MenuItem { Header = "View fingerprint", Foreground = Brush.Parse("#e0e0e8") };
+        fpItem.Click += (_, _) => vm.ExecuteCommand("fingerprint", new[] { member.UserId });
+        menu.Items.Add(fpItem);
+
+        // Admin actions
+        if (placeVm.IsCreator || placeVm.IsAdmin)
+        {
+            menu.Items.Add(new Separator());
+
+            // Set role (owner only)
+            if (placeVm.IsCreator && member.Role != "Owner")
+            {
+                if (member.Role != "Admin")
+                {
+                    var promoteItem = new MenuItem { Header = "Promote to Admin", Foreground = Brush.Parse("#8b5cf6") };
+                    promoteItem.Click += (_, _) => vm.ExecuteCommand("prole", new[] { placeVm.PlaceId, member.UserId, "admin" });
+                    menu.Items.Add(promoteItem);
+                }
+                else
+                {
+                    var demoteItem = new MenuItem { Header = "Demote to Member", Foreground = Brush.Parse("#e0e0e8") };
+                    demoteItem.Click += (_, _) => vm.ExecuteCommand("prole", new[] { placeVm.PlaceId, member.UserId, "member" });
+                    menu.Items.Add(demoteItem);
+                }
+            }
+
+            // Kick (can't kick owner)
+            if (member.Role != "Owner")
+            {
+                var kickItem = new MenuItem { Header = "Kick", Foreground = Brush.Parse("#f87171") };
+                kickItem.Click += (_, _) => vm.ExecuteCommand("pkick", new[] { placeVm.PlaceId, member.UserId });
+                menu.Items.Add(kickItem);
+            }
+
+            // Ban (can't ban owner)
+            if (member.Role != "Owner")
+            {
+                var banItem = new MenuItem { Header = "Ban", Foreground = Brush.Parse("#f87171") };
+                banItem.Click += (_, _) => vm.ExecuteCommand("pban", new[] { placeVm.PlaceId, member.UserId });
+                menu.Items.Add(banItem);
+            }
+        }
+
+        border.ContextMenu = menu;
+        menu.Open(border);
         e.Handled = true;
     }
 

@@ -71,6 +71,14 @@ const MSG = {
   PLACE_CHANNEL_REMOVE: 'place_channel_remove',
   PLACE_CHANNEL_REMOVE_OK: 'place_channel_remove_ok',
   PLACE_MESSAGE: 'place_message',
+  PLACE_ROLE_SET: 'place_role_set',
+  PLACE_ROLE_SET_OK: 'place_role_set_ok',
+  PLACE_BAN: 'place_ban',
+  PLACE_BAN_OK: 'place_ban_ok',
+  PLACE_UNBAN: 'place_unban',
+  PLACE_UNBAN_OK: 'place_unban_ok',
+  PLACE_MEMBERS: 'place_members',
+  PLACE_MEMBERS_OK: 'place_members_ok',
 
   // Voice Calls
   CALL_OFFER: 'call_offer',
@@ -85,6 +93,11 @@ const MSG = {
   CALL_LEAVE: 'call_leave',
   CALL_MUTE: 'call_mute',
   CALL_PARTICIPANTS: 'call_participants',
+
+  // Status / Presence
+  STATUS_UPDATE: 'status_update',
+  STATUS_SUBSCRIBE: 'status_subscribe',
+  STATUS_CHANGE: 'status_change',
 
   // System
   ERROR: 'error',

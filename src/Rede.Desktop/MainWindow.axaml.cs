@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private DeviceService? _devices;
     private CallService? _call;
     private readonly CallViewModel _callVm = new();
+    private readonly Rede.Core.Services.NotificationService _notifications = new();
 
     // H10: Thread-safe pending devices (accessed from connection handler threads)
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string PublicKey, string SigningKey)> _pendingDevices = new();
@@ -359,6 +360,32 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage($"[Error] {err}");
         });
 
+        // Status / Presence handler — server broadcasts to all, client filters locally
+        _conn.On(Rede.Core.Protocol.Msg.StatusChange, msg =>
+        {
+            var userId = msg["userId"]?.GetValue<string>();
+            var status = msg["status"]?.GetValue<string>();
+            var customStatus = msg["customStatus"]?.GetValue<string>();
+            if (userId is null || status is null) return;
+
+            // Privacy: only process if this user is in our contact list (ignore strangers)
+            if (_auth?.Profile?.Contacts.TryGetValue(userId, out var contact) != true) return;
+
+            contact.Status = status;
+            contact.CustomStatus = customStatus;
+
+            // Update sidebar UI
+            Dispatcher.UIThread.Post(() =>
+            {
+                var contactVm = _mainVm.Contacts.FirstOrDefault(c => c.UserId == userId);
+                if (contactVm is not null)
+                {
+                    contactVm.Status = status;
+                    contactVm.CustomStatus = customStatus;
+                }
+            });
+        });
+
         // Auth events
         _auth.OnAuthSuccess += () => Dispatcher.UIThread.Post(() =>
         {
@@ -388,6 +415,14 @@ public partial class MainWindow : Window
         {
             _mainVm.AddIncomingMessage(from, text, ts);
             MarkContactUnread(from);
+
+            // Desktop notification if not viewing this conversation
+            if (_mainVm.SelectedConversation is not ContactItemViewModel sel || sel.UserId != from)
+            {
+                var displayName = _auth?.Profile?.Contacts.TryGetValue(from, out var c) == true
+                    ? c.DisplayName ?? from : from;
+                _notifications.ShowMessageNotification(displayName, text);
+            }
         });
 
         _chat.OnSystemMessage += msg => Dispatcher.UIThread.Post(() =>
@@ -482,6 +517,14 @@ public partial class MainWindow : Window
         {
             _mainVm.AddIncomingMessage(from, text, ts);
             MarkGroupUnread(groupId);
+
+            // Desktop notification if not viewing this group
+            if (_mainVm.SelectedConversation is not GroupItemViewModel selG || selG.GroupId != groupId)
+            {
+                var groupName = _auth?.Profile?.Groups.TryGetValue(groupId, out var g) == true
+                    ? g.Name : groupId;
+                _notifications.ShowGroupNotification(groupName, from, text);
+            }
         });
 
         _groups.OnGroupsChanged += () => Dispatcher.UIThread.Post(RefreshGroups);
@@ -494,8 +537,18 @@ public partial class MainWindow : Window
         // Place events
         _places.OnChannelMessageReceived += (placeId, channelId, from, text, ts) => Dispatcher.UIThread.Post(() =>
         {
-            _mainVm.AddIncomingMessage(from, text, ts);
+            var (senderRole, roleColor) = GetSenderRoleInfo(placeId, from);
+            _mainVm.AddIncomingMessage(from, text, ts, senderRole: senderRole, roleBadgeColor: roleColor);
             MarkChannelUnread(placeId, channelId);
+
+            // Desktop notification if not viewing this channel
+            if (_mainVm.SelectedConversation is not ChannelItemViewModel selCh
+                || selCh.PlaceId != placeId || selCh.ChannelId != channelId)
+            {
+                var placeName = _auth?.Profile?.Places.TryGetValue(placeId, out var pl) == true
+                    ? pl.Name : placeId;
+                _notifications.ShowGroupNotification(placeName, from, text);
+            }
         });
 
         _places.OnPlacesChanged += () => Dispatcher.UIThread.Post(RefreshPlaces);
@@ -541,11 +594,32 @@ public partial class MainWindow : Window
         if (pp is not null)
             Task.Run(async () => await _store.CleanupExpiredMessagesAsync(p, pp));
 
+        // Configure notifications from profile
+        _notifications.Enabled = p.NotificationsEnabled;
+        _notifications.ShowContent = p.NotificationShowContent;
+        _notifications.OwnStatus = p.Status ?? "online";
+
+        // Send own status (server broadcasts to all — no contact list leaked)
+        SendOwnStatus();
+
         Dispatcher.UIThread.Post(() =>
         {
             RefreshContacts();
             RefreshGroups();
             RefreshPlaces();
+        });
+    }
+
+    private void SendOwnStatus()
+    {
+        if (_conn is null || _auth?.Profile is null) return;
+
+        // Send own status — server broadcasts to all, no contact list sent
+        var status = _auth.Profile.Status ?? "online";
+        _conn.Send(Rede.Core.Protocol.Msg.StatusUpdate, new System.Text.Json.Nodes.JsonObject
+        {
+            ["status"] = status,
+            ["customStatus"] = _auth.Profile.CustomStatus,
         });
     }
 
@@ -569,6 +643,11 @@ public partial class MainWindow : Window
         _mainVm.OnChatHistoryRequested += chatId =>
         {
             LoadChatHistoryForConversation(chatId);
+        };
+
+        _mainVm.OnMemberListRequested += placeId =>
+        {
+            LoadMemberList(placeId);
         };
     }
 
@@ -701,6 +780,70 @@ public partial class MainWindow : Window
                     _mainVm.AddSystemMessage("Place not found.");
                 break;
 
+            case "pban" when args.Length >= 2:
+                var pbanPlaceId = FindPlaceId(args[0]);
+                if (pbanPlaceId is not null)
+                {
+                    var reason = args.Length > 2 ? string.Join(" ", args[2..]) : null;
+                    _places?.BanUser(pbanPlaceId, args[1], reason, _chat);
+                }
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "punban" when args.Length >= 2:
+                var punbanPlaceId = FindPlaceId(args[0]);
+                if (punbanPlaceId is not null)
+                    _places?.UnbanUser(punbanPlaceId, args[1], _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "prole" when args.Length >= 3:
+                var prPlaceId2 = FindPlaceId(args[0]);
+                if (prPlaceId2 is not null)
+                {
+                    var roleVal = args[2].ToLowerInvariant() == "admin"
+                        ? Rede.Core.Storage.PlaceRole.Admin
+                        : Rede.Core.Storage.PlaceRole.Member;
+                    _places?.SetRole(prPlaceId2, args[1], roleVal, _chat);
+                }
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "prolecolors" when args.Length >= 4:
+                var prcPlaceId = FindPlaceId(args[0]);
+                if (prcPlaceId is not null)
+                    _places?.UpdateRoleColors(prcPlaceId, args[1], args[2], args[3], _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "ptopic" when args.Length >= 3:
+                var ptPlaceId = FindPlaceId(args[0]);
+                if (ptPlaceId is not null)
+                    _places?.SetChannelTopic(ptPlaceId, args[1], string.Join(" ", args[2..]), _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "pcategory" when args.Length >= 2:
+                var pcatPlaceId = FindPlaceId(args[0]);
+                if (pcatPlaceId is not null)
+                    _places?.AddCategory(pcatPlaceId, string.Join(" ", args[1..]), _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "pcategoryrm" when args.Length >= 2:
+                var pcatrmPlaceId = FindPlaceId(args[0]);
+                if (pcatrmPlaceId is not null)
+                    _places?.RemoveCategory(pcatrmPlaceId, string.Join(" ", args[1..]), _chat);
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
             case "call" when args.Length >= 1:
             {
                 if (_call is null) { _mainVm.AddSystemMessage("Call service not initialized."); break; }
@@ -729,7 +872,7 @@ public partial class MainWindow : Window
                 break;
 
             case "help":
-                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id>, /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pleave <place>, /prekey <place>");
+                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id>, /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pban <place> <uid> [reason], /punban <place> <uid>, /prole <place> <uid> <admin|member>, /ptopic <place> <chId> <text>, /pcategory <place> <name>, /pcategoryrm <place> <name>, /pleave <place>, /prekey <place>");
                 break;
 
             default:
@@ -751,6 +894,8 @@ public partial class MainWindow : Window
                 UserId = id,
                 DisplayName = SanitizeDisplayString(c.DisplayName ?? id, 64),
                 AccentColor = c.AccentColor ?? "#8b5cf6",
+                Status = c.Status ?? "offline",
+                CustomStatus = c.CustomStatus,
             };
             contactVm.LoadAvatar(c.AvatarData);
             _mainVm.Contacts.Add(contactVm);
@@ -799,8 +944,16 @@ public partial class MainWindow : Window
         {
             var channels = new System.Collections.ObjectModel.ObservableCollection<ChannelItemViewModel>();
             var isCreator = p.CreatorId == _auth?.Profile?.UserId;
+            var isAdmin = isCreator || (p.Roles.TryGetValue(_auth?.Profile?.UserId ?? "", out var myRole) && myRole >= Rede.Core.Storage.PlaceRole.Admin);
             var placeName = SanitizeDisplayString(p.Name, 64);
-            foreach (var (chId, ch) in p.Channels)
+
+            // Sort channels by category then position
+            var sortedChannels = p.Channels
+                .OrderBy(kv => kv.Value.Category ?? "")
+                .ThenBy(kv => kv.Value.Position)
+                .ThenBy(kv => kv.Value.CreatedAt);
+
+            foreach (var (chId, ch) in sortedChannels)
             {
                 channels.Add(new ChannelItemViewModel
                 {
@@ -809,6 +962,8 @@ public partial class MainWindow : Window
                     Name = SanitizeDisplayString(ch.Name, 64),
                     PlaceName = placeName,
                     IsCreator = isCreator,
+                    Category = ch.Category,
+                    Topic = ch.Topic ?? "",
                 });
             }
             var placeVm = new PlaceItemViewModel
@@ -817,12 +972,75 @@ public partial class MainWindow : Window
                 Name = placeName,
                 MemberCount = p.Members?.Count ?? 0,
                 IsCreator = isCreator,
+                IsAdmin = isAdmin,
                 Channels = channels,
                 AccentColor = p.AccentColor ?? "#8b5cf6",
+                OwnerColor = p.OwnerColor,
+                AdminColor = p.AdminColor,
+                MemberColor = p.MemberColor,
             };
             placeVm.LoadIcon(p.IconData);
             _mainVm.Places.Add(placeVm);
         }
+    }
+
+    private void LoadMemberList(string placeId)
+    {
+        if (_auth?.Profile is null) return;
+        if (!_auth.Profile.Places.TryGetValue(placeId, out var place)) return;
+
+        _mainVm.MemberList.Clear();
+        foreach (var memberId in place.Members)
+        {
+            var role = "Member";
+            var roleColor = place.MemberColor;
+            if (memberId == place.CreatorId)
+            {
+                role = "Owner";
+                roleColor = place.OwnerColor;
+            }
+            else if (place.Roles.TryGetValue(memberId, out var r) && r >= Rede.Core.Storage.PlaceRole.Admin)
+            {
+                role = "Admin";
+                roleColor = place.AdminColor;
+            }
+
+            var displayName = memberId;
+            var accentColor = "#8b5cf6";
+            var status = "offline";
+            if (_auth.Profile.Contacts.TryGetValue(memberId, out var contact))
+            {
+                displayName = contact.DisplayName ?? memberId;
+                accentColor = contact.AccentColor ?? "#8b5cf6";
+                status = contact.Status ?? "offline";
+            }
+            else if (memberId == _auth.Profile.UserId)
+            {
+                displayName = _auth.Profile.DisplayName;
+                accentColor = _auth.Profile.AccentColor ?? "#8b5cf6";
+                status = _auth.Profile.Status ?? "online";
+            }
+
+            _mainVm.MemberList.Add(new PlaceMemberViewModel
+            {
+                UserId = memberId,
+                DisplayName = SanitizeDisplayString(displayName, 64),
+                Role = role,
+                RoleColor = roleColor,
+                Status = status,
+                AccentColor = accentColor,
+            });
+        }
+    }
+
+    private (string? Role, string Color) GetSenderRoleInfo(string placeId, string senderId)
+    {
+        if (_auth?.Profile is null) return (null, "#6b7280");
+        if (!_auth.Profile.Places.TryGetValue(placeId, out var place)) return (null, "#6b7280");
+        if (senderId == place.CreatorId) return ("Owner", place.OwnerColor);
+        if (place.Roles.TryGetValue(senderId, out var role) && role >= Rede.Core.Storage.PlaceRole.Admin)
+            return ("Admin", place.AdminColor);
+        return (null, place.MemberColor);
     }
 
     private string? FindPlaceId(string nameOrId)
@@ -933,8 +1151,43 @@ public partial class MainWindow : Window
             CallTransport = _call?.LocalMode.ToString() ?? _conn.Transport,
             AccentColor = p.AccentColor ?? "#8b5cf6",
             AvatarInitial = string.IsNullOrEmpty(p.DisplayName) ? "?" : p.DisplayName[..1].ToUpperInvariant(),
+            SelectedStatus = p.Status ?? "online",
+            CustomStatusText = p.CustomStatus ?? "",
         };
         vm.LoadAvatarFromBase64(p.AvatarData, p.AvatarMimeType);
+
+        // Status changes — send to server immediately (live)
+        vm.OnStatusChanged += () =>
+        {
+            if (_auth?.Profile is not null && _auth.Passphrase is not null)
+            {
+                _auth.Profile.Status = vm.SelectedStatus;
+                _auth.Profile.CustomStatus = string.IsNullOrWhiteSpace(vm.CustomStatusText) ? null : vm.CustomStatusText;
+                _notifications.OwnStatus = vm.SelectedStatus;
+                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                _conn?.Send(Rede.Core.Protocol.Msg.StatusUpdate, new System.Text.Json.Nodes.JsonObject
+                {
+                    ["status"] = vm.SelectedStatus,
+                    ["customStatus"] = _auth.Profile.CustomStatus,
+                });
+            }
+        };
+
+        // Notification settings
+        vm.NotificationsEnabled = _auth.Profile.NotificationsEnabled;
+        vm.NotificationShowContent = _auth.Profile.NotificationShowContent;
+        vm.OnNotificationSettingsChanged += () =>
+        {
+            if (_auth?.Profile is not null && _auth.Passphrase is not null)
+            {
+                _auth.Profile.NotificationsEnabled = vm.NotificationsEnabled;
+                _auth.Profile.NotificationShowContent = vm.NotificationShowContent;
+                _notifications.Enabled = vm.NotificationsEnabled;
+                _notifications.ShowContent = vm.NotificationShowContent;
+                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+            }
+        };
+
         vm.OnBackRequested += () =>
         {
             // H5: Re-wire retry handler when returning from settings

@@ -27,6 +27,37 @@ public partial class SettingsViewModel : ViewModelBase
     public string? AvatarData { get; set; }
     public string? AvatarMimeType { get; set; }
 
+    // Status / Presence
+    [ObservableProperty] private string _selectedStatus = "online";
+    [ObservableProperty] private string _customStatusText = "";
+
+    public static readonly string[] StatusOptions = new[] { "online", "away", "dnd", "invisible" };
+    public static readonly string[] StatusLabels = new[] { "Online", "Away", "Do Not Disturb", "Invisible" };
+
+    public int SelectedStatusIndex
+    {
+        get => Array.IndexOf(StatusOptions, SelectedStatus);
+        set
+        {
+            if (value >= 0 && value < StatusOptions.Length)
+                SelectedStatus = StatusOptions[value];
+        }
+    }
+
+    partial void OnSelectedStatusChanged(string value) => OnStatusChanged?.Invoke();
+    partial void OnCustomStatusTextChanged(string value) => OnStatusChanged?.Invoke();
+
+    public event Action? OnStatusChanged;
+
+    // Notifications
+    [ObservableProperty] private bool _notificationsEnabled = true;
+    [ObservableProperty] private bool _notificationShowContent; // false = privacy mode (default)
+
+    partial void OnNotificationsEnabledChanged(bool value) => OnNotificationSettingsChanged?.Invoke();
+    partial void OnNotificationShowContentChanged(bool value) => OnNotificationSettingsChanged?.Invoke();
+
+    public event Action? OnNotificationSettingsChanged;
+
     public static readonly string[] PresetColors = new[]
     {
         "#8b5cf6", // violet (default)

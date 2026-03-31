@@ -5,7 +5,7 @@
              x:DataType="vm:MainViewModel">
 
     <Panel>
-    <Grid ColumnDefinitions="Auto,*">
+    <Grid ColumnDefinitions="Auto,*,Auto">
 
         <!-- ===== SIDEBAR ===== -->
         <Border Grid.Column="0"
@@ -128,11 +128,12 @@
                                                            IsVisible="{Binding HasAvatar}" />
                                                 </Panel>
                                             </Border>
-                                            <!-- Online indicator -->
+                                            <!-- Status indicator -->
                                             <Ellipse Width="8" Height="8"
                                                      HorizontalAlignment="Right"
                                                      VerticalAlignment="Bottom"
-                                                     Fill="{Binding IsOnline, Converter={StaticResource StatusColorConverter}}" />
+                                                     Fill="{Binding StatusBrush}"
+                                                     ToolTip.Tip="{Binding StatusTooltip}" />
                                         </Panel>
                                         <!-- Name -->
                                         <TextBlock Grid.Column="2" Text="{Binding DisplayName}"
@@ -269,7 +270,7 @@
                                                      IsVisible="{Binding HasUnread}" />
                                         </Grid>
                                     </Button>
-                                    <!-- Channels (visible when expanded) -->
+                                    <!-- Channels (visible when expanded) — grouped by category -->
                                     <ItemsControl ItemsSource="{Binding Channels}"
                                                   IsVisible="{Binding IsExpanded}">
                                         <ItemsControl.ItemTemplate>
@@ -316,13 +317,30 @@
                     Background="{StaticResource RedeSurfaceBrush}"
                     BorderBrush="{StaticResource RedeBorderSubtleBrush}"
                     BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0"
-                               Text="{Binding ChatTitle}"
-                               Classes="header"
-                               VerticalAlignment="Center"
-                               IsVisible="{Binding ChatTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="2"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ChatTitle}"
+                                   Classes="header"
+                                   IsVisible="{Binding ChatTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <TextBlock Text="{Binding ChannelTopic}"
+                                   Classes="muted"
+                                   FontSize="{StaticResource RedeCaptionSize}"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="400"
+                                   IsVisible="{Binding ChannelTopic, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </StackPanel>
+                    <!-- Member list toggle -->
                     <Button Grid.Column="1"
+                            Classes="ghost"
+                            Padding="8,4"
+                            CornerRadius="4"
+                            ToolTip.Tip="Toggle member list"
+                            IsVisible="{Binding IsPlaceSelected}"
+                            Click="ToggleMemberList_Click">
+                        <TextBlock Text="&#x1D5E0;" FontSize="14" />
+                    </Button>
+                    <Button Grid.Column="2"
                             Classes="ghost"
                             Padding="8,4"
                             CornerRadius="4"
@@ -420,6 +438,17 @@
                                                            Foreground="{Binding SenderAccentBrush}"
                                                            FontWeight="{StaticResource RedeWeightMedium}"
                                                            FontSize="{StaticResource RedeSmallSize}" />
+                                                <!-- Role badge -->
+                                                <Border CornerRadius="3"
+                                                        Padding="4,1"
+                                                        Background="{Binding RoleBadgeBrush}"
+                                                        IsVisible="{Binding HasSenderRole}"
+                                                        VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding SenderRole}"
+                                                               FontSize="9"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="White" />
+                                                </Border>
                                                 <TextBlock Text="{Binding TimeString}"
                                                            Classes="muted"
                                                            FontSize="{StaticResource RedeCaptionSize}"
@@ -484,6 +513,66 @@
             </ScrollViewer>
 
         </DockPanel>
+
+        <!-- ===== MEMBER LIST PANEL ===== -->
+        <Border Grid.Column="2"
+                Width="{Binding IsMemberListVisible, Converter={StaticResource SidebarWidthConverter}}"
+                Background="{StaticResource RedeSurfaceBrush}"
+                BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                BorderThickness="1,0,0,0"
+                IsVisible="{Binding IsMemberListVisible}">
+            <DockPanel>
+                <Border DockPanel.Dock="Top" Height="30" Background="Transparent" IsHitTestVisible="False" />
+                <Border DockPanel.Dock="Top" Padding="12,8"
+                        BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,0,0,1">
+                    <TextBlock Text="Members" Classes="secondary"
+                               FontWeight="{StaticResource RedeWeightSemiBold}" />
+                </Border>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding MemberList}" Padding="4">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PlaceMemberViewModel">
+                                <Border Padding="8,4" Margin="0,1" CornerRadius="4"
+                                        PointerPressed="Member_PointerPressed">
+                                    <Grid ColumnDefinitions="Auto,8,*,Auto">
+                                        <!-- Avatar -->
+                                        <Panel Grid.Column="0" Width="24" Height="24">
+                                            <Border Width="24" Height="24" CornerRadius="12"
+                                                    Background="{Binding AccentBrush}"
+                                                    ClipToBounds="True">
+                                                <TextBlock Text="{Binding Initial}"
+                                                           FontSize="10" FontWeight="SemiBold"
+                                                           Foreground="White"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                            <Ellipse Width="7" Height="7"
+                                                     HorizontalAlignment="Right"
+                                                     VerticalAlignment="Bottom"
+                                                     Fill="{Binding StatusBrush}" />
+                                        </Panel>
+                                        <!-- Name -->
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="0">
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       FontSize="{StaticResource RedeSmallSize}" />
+                                        </StackPanel>
+                                        <!-- Role badge -->
+                                        <Border Grid.Column="3" CornerRadius="3"
+                                                Padding="4,1" VerticalAlignment="Center"
+                                                Background="{Binding RoleBrush}">
+                                            <TextBlock Text="{Binding Role}"
+                                                       FontSize="9" FontWeight="SemiBold"
+                                                       Foreground="White" />
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
 
     </Grid>
 

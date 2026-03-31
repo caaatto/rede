@@ -105,6 +105,20 @@ public class Profile
     [JsonPropertyName("avatarMimeType")]
     public string? AvatarMimeType { get; set; } // "image/png", "image/gif", "image/jpeg"
 
+    // Status / Presence
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "online"; // "online", "away", "dnd", "invisible"
+
+    [JsonPropertyName("customStatus")]
+    public string? CustomStatus { get; set; } // optional short status text
+
+    // Notifications
+    [JsonPropertyName("notificationsEnabled")]
+    public bool NotificationsEnabled { get; set; } = true;
+
+    [JsonPropertyName("notificationShowContent")]
+    public bool NotificationShowContent { get; set; } // false = privacy mode (default)
+
     // Transient (not persisted in older profiles)
     [JsonPropertyName("_deliveryToken")]
     public string? DeliveryToken { get; set; }
@@ -141,6 +155,12 @@ public class Contact
 
     [JsonPropertyName("avatarMimeType")]
     public string? AvatarMimeType { get; set; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; set; } // "online", "away", "dnd", "offline"
+
+    [JsonPropertyName("customStatus")]
+    public string? CustomStatus { get; set; }
 }
 
 public class DeviceKeys
@@ -192,6 +212,55 @@ public class Place
 
     [JsonPropertyName("iconMimeType")]
     public string? IconMimeType { get; set; }
+
+    [JsonPropertyName("emotes")]
+    public Dictionary<string, PlaceEmote> Emotes { get; set; } = new();
+
+    [JsonPropertyName("bans")]
+    public Dictionary<string, PlaceBan> Bans { get; set; } = new();
+
+    [JsonPropertyName("categories")]
+    public List<string> Categories { get; set; } = new(); // ordered category names
+
+    // Customizable role colors (hex strings)
+    [JsonPropertyName("ownerColor")]
+    public string OwnerColor { get; set; } = "#eab308"; // gold
+
+    [JsonPropertyName("adminColor")]
+    public string AdminColor { get; set; } = "#8b5cf6"; // violet
+
+    [JsonPropertyName("memberColor")]
+    public string MemberColor { get; set; } = "#6b7280"; // gray
+}
+
+public class PlaceEmote
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = ""; // e.g. "pepe", referenced as :pepe: in messages
+
+    [JsonPropertyName("imageData")]
+    public string ImageData { get; set; } = ""; // base64-encoded image (max 64KB)
+
+    [JsonPropertyName("mimeType")]
+    public string MimeType { get; set; } = "image/png"; // image/png, image/gif, image/jpeg
+
+    [JsonPropertyName("uploadedBy")]
+    public string UploadedBy { get; set; } = "";
+}
+
+public class PlaceBan
+{
+    [JsonPropertyName("userId")]
+    public string UserId { get; set; } = "";
+
+    [JsonPropertyName("bannedBy")]
+    public string BannedBy { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    [JsonPropertyName("bannedAt")]
+    public long BannedAt { get; set; }
 }
 
 public class PlaceChannel
@@ -201,6 +270,12 @@ public class PlaceChannel
 
     [JsonPropertyName("topic")]
     public string Topic { get; set; } = "";
+
+    [JsonPropertyName("category")]
+    public string? Category { get; set; } // optional grouping (e.g. "Text Channels", "Voice")
+
+    [JsonPropertyName("position")]
+    public int Position { get; set; } // ordering within category
 
     [JsonPropertyName("createdAt")]
     public long CreatedAt { get; set; }
