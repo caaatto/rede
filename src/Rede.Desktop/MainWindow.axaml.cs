@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -919,24 +920,64 @@ public partial class MainWindow : Window
         }
     }
 
+    // Track avatar data hashes to avoid redundant bitmap reloads
+    private readonly Dictionary<string, string?> _avatarDataCache = new();
+    private readonly Dictionary<string, string?> _iconDataCache = new();
+
     private void RefreshContacts()
     {
         var contacts = _contacts?.GetContacts();
         if (contacts is null) return;
 
-        _mainVm.Contacts.Clear();
+        var existingIds = new HashSet<string>();
+
+        // Update existing + add new
         foreach (var (id, c) in contacts)
         {
-            var contactVm = new ContactItemViewModel
+            existingIds.Add(id);
+            var existing = _mainVm.Contacts.FirstOrDefault(x => x.UserId == id);
+            if (existing is not null)
             {
-                UserId = id,
-                DisplayName = SanitizeDisplayString(c.DisplayName ?? id, 64),
-                AccentColor = c.AccentColor ?? "#8b5cf6",
-                Status = c.Status ?? "offline",
-                CustomStatus = c.CustomStatus,
-            };
-            contactVm.LoadAvatar(c.AvatarData);
-            _mainVm.Contacts.Add(contactVm);
+                // Differential update — only set changed properties
+                var newName = SanitizeDisplayString(c.DisplayName ?? id, 64);
+                if (existing.DisplayName != newName) existing.DisplayName = newName;
+                var newColor = c.AccentColor ?? "#8b5cf6";
+                if (existing.AccentColor != newColor) existing.AccentColor = newColor;
+                if (existing.Status != (c.Status ?? "offline")) existing.Status = c.Status ?? "offline";
+                if (existing.CustomStatus != c.CustomStatus) existing.CustomStatus = c.CustomStatus;
+                // Reload avatar only if data changed
+                _avatarDataCache.TryGetValue(id, out var cachedAvatar);
+                if (cachedAvatar != c.AvatarData)
+                {
+                    existing.LoadAvatar(c.AvatarData);
+                    _avatarDataCache[id] = c.AvatarData;
+                }
+            }
+            else
+            {
+                var contactVm = new ContactItemViewModel
+                {
+                    UserId = id,
+                    DisplayName = SanitizeDisplayString(c.DisplayName ?? id, 64),
+                    AccentColor = c.AccentColor ?? "#8b5cf6",
+                    Status = c.Status ?? "offline",
+                    CustomStatus = c.CustomStatus,
+                };
+                contactVm.LoadAvatar(c.AvatarData);
+                _avatarDataCache[id] = c.AvatarData;
+                _mainVm.Contacts.Add(contactVm);
+            }
+        }
+
+        // Remove deleted contacts
+        for (int i = _mainVm.Contacts.Count - 1; i >= 0; i--)
+        {
+            var uid = _mainVm.Contacts[i].UserId;
+            if (!existingIds.Contains(uid))
+            {
+                _mainVm.Contacts.RemoveAt(i);
+                _avatarDataCache.Remove(uid);
+            }
         }
     }
 
@@ -952,17 +993,31 @@ public partial class MainWindow : Window
             _mainVm.DeselectConversation();
         }
 
-        _mainVm.Groups.Clear();
+        var existingIds = new HashSet<string>();
         foreach (var (id, g) in groups)
         {
-            _mainVm.Groups.Add(new GroupItemViewModel
+            existingIds.Add(id);
+            var existing = _mainVm.Groups.FirstOrDefault(x => x.GroupId == id);
+            if (existing is not null)
             {
-                GroupId = id,
-                // M14: Sanitize group names consistently with contacts
-                Name = SanitizeDisplayString(g.Name, 64),
-                MemberCount = g.Members?.Count ?? 0,
-            });
+                var newName = SanitizeDisplayString(g.Name, 64);
+                if (existing.Name != newName) existing.Name = newName;
+                var mc = g.Members?.Count ?? 0;
+                if (existing.MemberCount != mc) existing.MemberCount = mc;
+            }
+            else
+            {
+                _mainVm.Groups.Add(new GroupItemViewModel
+                {
+                    GroupId = id,
+                    Name = SanitizeDisplayString(g.Name, 64),
+                    MemberCount = g.Members?.Count ?? 0,
+                });
+            }
         }
+        for (int i = _mainVm.Groups.Count - 1; i >= 0; i--)
+            if (!existingIds.Contains(_mainVm.Groups[i].GroupId))
+                _mainVm.Groups.RemoveAt(i);
     }
 
     private void RefreshPlaces()
@@ -977,48 +1032,113 @@ public partial class MainWindow : Window
             _mainVm.DeselectConversation();
         }
 
-        _mainVm.Places.Clear();
+        var existingIds = new HashSet<string>();
         foreach (var (id, p) in places)
         {
-            var channels = new System.Collections.ObjectModel.ObservableCollection<ChannelItemViewModel>();
+            existingIds.Add(id);
             var isCreator = p.CreatorId == _auth?.Profile?.UserId;
             var isAdmin = isCreator || (p.Roles.TryGetValue(_auth?.Profile?.UserId ?? "", out var myRole) && myRole >= Rede.Core.Storage.PlaceRole.Admin);
             var placeName = SanitizeDisplayString(p.Name, 64);
 
-            // Sort channels by category then position
-            var sortedChannels = p.Channels
-                .OrderBy(kv => kv.Value.Category ?? "")
-                .ThenBy(kv => kv.Value.Position)
-                .ThenBy(kv => kv.Value.CreatedAt);
+            var existing = _mainVm.Places.FirstOrDefault(x => x.PlaceId == id);
+            if (existing is not null)
+            {
+                // Differential update
+                if (existing.Name != placeName) existing.Name = placeName;
+                var mc = p.Members?.Count ?? 0;
+                if (existing.MemberCount != mc) existing.MemberCount = mc;
+                if (existing.IsCreator != isCreator) existing.IsCreator = isCreator;
+                if (existing.IsAdmin != isAdmin) existing.IsAdmin = isAdmin;
+                var ac = p.AccentColor ?? "#8b5cf6";
+                if (existing.AccentColor != ac) existing.AccentColor = ac;
+                if (existing.OwnerColor != p.OwnerColor) existing.OwnerColor = p.OwnerColor;
+                if (existing.AdminColor != p.AdminColor) existing.AdminColor = p.AdminColor;
+                if (existing.MemberColor != p.MemberColor) existing.MemberColor = p.MemberColor;
 
-            foreach (var (chId, ch) in sortedChannels)
-            {
-                channels.Add(new ChannelItemViewModel
+                // Reload icon only if data changed
+                _iconDataCache.TryGetValue(id, out var cachedIcon);
+                if (cachedIcon != p.IconData)
                 {
-                    PlaceId = id,
-                    ChannelId = chId,
-                    Name = SanitizeDisplayString(ch.Name, 64),
-                    PlaceName = placeName,
-                    IsCreator = isCreator,
-                    Category = ch.Category,
-                    Topic = ch.Topic ?? "",
-                });
+                    existing.LoadIcon(p.IconData);
+                    _iconDataCache[id] = p.IconData;
+                }
+
+                // Update channels differentially
+                var sortedChannels = p.Channels
+                    .OrderBy(kv => kv.Value.Category ?? "")
+                    .ThenBy(kv => kv.Value.Position)
+                    .ThenBy(kv => kv.Value.CreatedAt)
+                    .ToList();
+
+                var existingChIds = new HashSet<string>();
+                foreach (var (chId, ch) in sortedChannels)
+                {
+                    existingChIds.Add(chId);
+                    var existingCh = existing.Channels.FirstOrDefault(x => x.ChannelId == chId);
+                    if (existingCh is not null)
+                    {
+                        var chName = SanitizeDisplayString(ch.Name, 64);
+                        if (existingCh.Name != chName) existingCh.Name = chName;
+                        if (existingCh.Topic != (ch.Topic ?? "")) existingCh.Topic = ch.Topic ?? "";
+                        if (existingCh.Category != ch.Category) existingCh.Category = ch.Category;
+                        if (existingCh.IsCreator != isCreator) existingCh.IsCreator = isCreator;
+                    }
+                    else
+                    {
+                        existing.Channels.Add(new ChannelItemViewModel
+                        {
+                            PlaceId = id, ChannelId = chId,
+                            Name = SanitizeDisplayString(ch.Name, 64),
+                            PlaceName = placeName, IsCreator = isCreator,
+                            Category = ch.Category, Topic = ch.Topic ?? "",
+                        });
+                    }
+                }
+                for (int i = existing.Channels.Count - 1; i >= 0; i--)
+                    if (!existingChIds.Contains(existing.Channels[i].ChannelId))
+                        existing.Channels.RemoveAt(i);
             }
-            var placeVm = new PlaceItemViewModel
+            else
             {
-                PlaceId = id,
-                Name = placeName,
-                MemberCount = p.Members?.Count ?? 0,
-                IsCreator = isCreator,
-                IsAdmin = isAdmin,
-                Channels = channels,
-                AccentColor = p.AccentColor ?? "#8b5cf6",
-                OwnerColor = p.OwnerColor,
-                AdminColor = p.AdminColor,
-                MemberColor = p.MemberColor,
-            };
-            placeVm.LoadIcon(p.IconData);
-            _mainVm.Places.Add(placeVm);
+                // New place — full create
+                var channels = new System.Collections.ObjectModel.ObservableCollection<ChannelItemViewModel>();
+                var sortedChannels = p.Channels
+                    .OrderBy(kv => kv.Value.Category ?? "")
+                    .ThenBy(kv => kv.Value.Position)
+                    .ThenBy(kv => kv.Value.CreatedAt);
+                foreach (var (chId, ch) in sortedChannels)
+                {
+                    channels.Add(new ChannelItemViewModel
+                    {
+                        PlaceId = id, ChannelId = chId,
+                        Name = SanitizeDisplayString(ch.Name, 64),
+                        PlaceName = placeName, IsCreator = isCreator,
+                        Category = ch.Category, Topic = ch.Topic ?? "",
+                    });
+                }
+                var placeVm = new PlaceItemViewModel
+                {
+                    PlaceId = id, Name = placeName,
+                    MemberCount = p.Members?.Count ?? 0,
+                    IsCreator = isCreator, IsAdmin = isAdmin,
+                    Channels = channels,
+                    AccentColor = p.AccentColor ?? "#8b5cf6",
+                    OwnerColor = p.OwnerColor, AdminColor = p.AdminColor,
+                    MemberColor = p.MemberColor,
+                };
+                placeVm.LoadIcon(p.IconData);
+                _iconDataCache[id] = p.IconData;
+                _mainVm.Places.Add(placeVm);
+            }
+        }
+        for (int i = _mainVm.Places.Count - 1; i >= 0; i--)
+        {
+            var pid = _mainVm.Places[i].PlaceId;
+            if (!existingIds.Contains(pid))
+            {
+                _mainVm.Places.RemoveAt(i);
+                _iconDataCache.Remove(pid);
+            }
         }
     }
 

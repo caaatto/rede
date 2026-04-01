@@ -33,21 +33,21 @@
                     <!-- Avatar -->
                     <StackPanel Grid.Column="0" Spacing="8" HorizontalAlignment="Center">
                         <!-- Avatar circle -->
-                        <Border Width="72" Height="72" CornerRadius="36"
+                        <Border Width="88" Height="88" CornerRadius="44"
                                 Background="{Binding AccentBrush}"
                                 ClipToBounds="True"
                                 HorizontalAlignment="Center">
                             <!-- Initial letter (shown when no avatar) -->
                             <Panel>
                                 <TextBlock Text="{Binding AvatarInitial}"
-                                           FontSize="28"
+                                           FontSize="34"
                                            FontWeight="Bold"
                                            Foreground="White"
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center"
                                            IsVisible="{Binding !HasAvatar}" />
                                 <Image Source="{Binding AvatarImage}"
-                                       Width="72" Height="72"
+                                       Width="88" Height="88"
                                        Stretch="UniformToFill"
                                        IsVisible="{Binding HasAvatar}" />
                             </Panel>

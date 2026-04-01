@@ -5,18 +5,18 @@
     <Style Selector="Window">
         <Setter Property="Background" Value="{DynamicResource RedeBackgroundBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="15" />
     </Style>
 
     <!-- TextBlock defaults -->
     <Style Selector="TextBlock">
         <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="15" />
     </Style>
 
     <Style Selector="TextBlock.secondary">
         <Setter Property="Foreground" Value="{DynamicResource RedeTextSecondaryBrush}" />
-        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontSize" Value="13" />
     </Style>
 
     <Style Selector="TextBlock.muted">
@@ -24,12 +24,12 @@
     </Style>
 
     <Style Selector="TextBlock.header">
-        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontSize" Value="18" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style Selector="TextBlock.title">
-        <Setter Property="FontSize" Value="18" />
+        <Setter Property="FontSize" Value="24" />
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
 
@@ -40,8 +40,8 @@
         <Setter Property="BorderBrush" Value="{DynamicResource RedeBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="10,8" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Padding" Value="12,10" />
+        <Setter Property="FontSize" Value="15" />
         <Setter Property="CaretBrush" Value="{DynamicResource RedeAccentVioletBrush}" />
     </Style>
 
@@ -60,8 +60,8 @@
         <Setter Property="Foreground" Value="White" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="16,8" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Padding" Value="18,10" />
+        <Setter Property="FontSize" Value="15" />
         <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Cursor" Value="Hand" />
     </Style>
@@ -77,7 +77,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource RedeBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="Padding" Value="18,10" />
         <Setter Property="Cursor" Value="Hand" />
     </Style>
 
@@ -93,7 +93,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource RedeBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="Padding" Value="12,10" />
     </Style>
 
     <!-- Separator -->
