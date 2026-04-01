@@ -11,6 +11,8 @@ public class DoubleRatchet
 {
     public const int MaxSkip = 256;
     public const int MaxMkSkipped = 1000;
+    // C3: Prevent int32 counter wraparound — force ratchet reset before overflow
+    public const int MaxMessageNumber = 1_000_000_000;
 
     /// <summary>
     /// Ratchet state — serializable for profile persistence.
@@ -136,22 +138,28 @@ public class DoubleRatchet
         // If first message and we have DHr, perform DH ratchet step
         if (state.CKs is null && state.DHr is not null)
         {
-            var dhSec = Convert.FromBase64String(state.DHs!.SecretKey);
-            var dhPub = Convert.FromBase64String(state.DHr);
-            var rk = Convert.FromBase64String(state.RK!);
+            // M1: try-finally ensures secrets are zeroed even on exception
+            byte[]? dhSec = null, dhOut = null, rk = null, newRK = null, cks = null;
+            try
+            {
+                dhSec = Convert.FromBase64String(state.DHs!.SecretKey);
+                var dhPub = Convert.FromBase64String(state.DHr);
+                rk = Convert.FromBase64String(state.RK!);
 
-            var dhOut = CryptoService.Dh(dhSec, dhPub);
-            var (newRK, cks) = KdfRK(rk, dhOut);
+                dhOut = CryptoService.Dh(dhSec, dhPub);
+                (newRK, cks) = KdfRK(rk, dhOut);
 
-            CryptoService.ZeroOut(dhOut);
-            CryptoService.ZeroOut(rk);
-
-            state.RK = Convert.ToBase64String(newRK);
-            state.CKs = Convert.ToBase64String(cks);
-
-            CryptoService.ZeroOut(newRK);
-            CryptoService.ZeroOut(cks);
-            CryptoService.ZeroOut(dhSec);
+                state.RK = Convert.ToBase64String(newRK);
+                state.CKs = Convert.ToBase64String(cks);
+            }
+            finally
+            {
+                if (dhOut is not null) CryptoService.ZeroOut(dhOut);
+                if (rk is not null) CryptoService.ZeroOut(rk);
+                if (newRK is not null) CryptoService.ZeroOut(newRK);
+                if (cks is not null) CryptoService.ZeroOut(cks);
+                if (dhSec is not null) CryptoService.ZeroOut(dhSec);
+            }
         }
 
         if (state.CKs is null)
@@ -170,6 +178,9 @@ public class DoubleRatchet
         CryptoService.ZeroOut(paddedBytes);
 
         var header = new RatchetHeader(state.DHs!.PublicKey, state.PN, state.Ns);
+        // C3: Prevent counter wraparound
+        if (state.Ns >= MaxMessageNumber)
+            throw new InvalidOperationException("Message counter limit reached — session must be re-established.");
         state.Ns++;
 
         return new EncryptResult(header, Convert.ToBase64String(ciphertext), Convert.ToBase64String(nonce));
@@ -189,6 +200,10 @@ public class DoubleRatchet
         {
             var ciphertext = Convert.FromBase64String(ciphertextB64);
             var nonce = Convert.FromBase64String(nonceB64);
+
+            // H5/H6: Validate nonce and ciphertext lengths before decrypt
+            if (nonce.Length != 24) return null;
+            if (ciphertext.Length < 16) return null;
 
             // Check skipped message keys first
             var skippedKey = $"{header.Dh}:{header.N}";
@@ -229,6 +244,9 @@ public class DoubleRatchet
             CryptoService.ZeroOut(ck);
             state.CKr = Convert.ToBase64String(newCK);
             CryptoService.ZeroOut(newCK);
+            // C3: Prevent counter wraparound
+            if (state.Nr >= MaxMessageNumber)
+                throw new InvalidOperationException("Receive counter limit reached.");
             state.Nr++;
 
             var decrypted = SecretBox.Open(ciphertext, nonce, msgKey);
@@ -266,6 +284,8 @@ public class DoubleRatchet
     private static void SkipMessageKeys(RatchetState state, int until)
     {
         if (state.CKr is null) return;
+        if (until < 0 || until > MaxMessageNumber)
+            throw new InvalidOperationException("Invalid message number");
         if (until - state.Nr > MaxSkip)
             throw new InvalidOperationException("Too many skipped messages");
 
@@ -302,34 +322,49 @@ public class DoubleRatchet
         state.Nr = 0;
         state.DHr = headerDH;
 
-        var dhSec = Convert.FromBase64String(state.DHs!.SecretKey);
         var dhPub = Convert.FromBase64String(headerDH);
-        var rk = Convert.FromBase64String(state.RK!);
+        // H7: Validate DH public key length
+        if (dhPub.Length != 32)
+            throw new InvalidOperationException("Invalid DH public key length");
 
-        // Receiving chain
-        var dhOut1 = CryptoService.Dh(dhSec, dhPub);
-        var (rk1, ckr) = KdfRK(rk, dhOut1);
-        CryptoService.ZeroOut(dhOut1);
-        state.RK = Convert.ToBase64String(rk1);
-        state.CKr = Convert.ToBase64String(ckr);
-        CryptoService.ZeroOut(rk1);
-        CryptoService.ZeroOut(ckr);
+        // M3: try-finally ensures all DH intermediates are zeroed on exception
+        byte[]? dhSec = null, rk = null, dhOut1 = null, rk1 = null, ckr = null;
+        byte[]? rk2raw = null, dhOut2 = null, rk2 = null, cks = null;
+        KeyPair? newDH = null;
+        try
+        {
+            dhSec = Convert.FromBase64String(state.DHs!.SecretKey);
+            rk = Convert.FromBase64String(state.RK!);
 
-        // New DH keypair for sending
-        var newDH = PublicKeyBox.GenerateKeyPair();
-        state.DHs = new KeyPairB64(Convert.ToBase64String(newDH.PublicKey), Convert.ToBase64String(newDH.PrivateKey));
+            // Receiving chain
+            dhOut1 = CryptoService.Dh(dhSec, dhPub);
+            (rk1, ckr) = KdfRK(rk, dhOut1);
+            state.RK = Convert.ToBase64String(rk1);
+            state.CKr = Convert.ToBase64String(ckr);
 
-        // Sending chain
-        var rk2raw = Convert.FromBase64String(state.RK);
-        var dhOut2 = CryptoService.Dh(newDH.PrivateKey, dhPub);
-        var (rk2, cks) = KdfRK(rk2raw, dhOut2);
-        CryptoService.ZeroOut(dhOut2);
-        CryptoService.ZeroOut(newDH.PrivateKey);
-        state.RK = Convert.ToBase64String(rk2);
-        state.CKs = Convert.ToBase64String(cks);
-        CryptoService.ZeroOut(rk2);
-        CryptoService.ZeroOut(cks);
-        CryptoService.ZeroOut(dhSec);
-        CryptoService.ZeroOut(rk);
+            // New DH keypair for sending
+            newDH = PublicKeyBox.GenerateKeyPair();
+            state.DHs = new KeyPairB64(Convert.ToBase64String(newDH.PublicKey), Convert.ToBase64String(newDH.PrivateKey));
+
+            // Sending chain
+            rk2raw = Convert.FromBase64String(state.RK);
+            dhOut2 = CryptoService.Dh(newDH.PrivateKey, dhPub);
+            (rk2, cks) = KdfRK(rk2raw, dhOut2);
+            state.RK = Convert.ToBase64String(rk2);
+            state.CKs = Convert.ToBase64String(cks);
+        }
+        finally
+        {
+            if (dhOut1 is not null) CryptoService.ZeroOut(dhOut1);
+            if (dhOut2 is not null) CryptoService.ZeroOut(dhOut2);
+            if (rk1 is not null) CryptoService.ZeroOut(rk1);
+            if (ckr is not null) CryptoService.ZeroOut(ckr);
+            if (rk2 is not null) CryptoService.ZeroOut(rk2);
+            if (cks is not null) CryptoService.ZeroOut(cks);
+            if (dhSec is not null) CryptoService.ZeroOut(dhSec);
+            if (rk is not null) CryptoService.ZeroOut(rk);
+            if (rk2raw is not null) CryptoService.ZeroOut(rk2raw);
+            if (newDH is not null) CryptoService.ZeroOut(newDH.PrivateKey);
+        }
     }
 }

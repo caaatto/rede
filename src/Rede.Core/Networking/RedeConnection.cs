@@ -32,6 +32,7 @@ public class RedeConnection : IDisposable
     public bool ShouldReconnect { get; set; } = true;
     public int ReconnectDelay { get; set; } = 2000;
     private int _reconnectAttempts;
+    private volatile bool _isReconnecting; // M8: Guard against concurrent reconnect tasks
 
     public event Action? OnConnected;
     public event Action? OnDisconnected;
@@ -359,8 +360,9 @@ public class RedeConnection : IDisposable
         _isConnected = false;
         OnDisconnected?.Invoke();
 
-        if (ShouldReconnect)
+        if (ShouldReconnect && !_isReconnecting)
         {
+            _isReconnecting = true; // M8: Prevent concurrent reconnect tasks
             OnReconnecting?.Invoke();
             // M5: Exponential backoff — 2s, 4s, 8s, 16s, 32s, cap 60s
             var delay = Math.Min(ReconnectDelay * (1 << Math.Min(_reconnectAttempts, 5)), 60000);
@@ -370,6 +372,7 @@ public class RedeConnection : IDisposable
                 await Task.Delay(delay);
                 try { await ConnectAsync(); }
                 catch { /* retry on next interval */ }
+                finally { _isReconnecting = false; }
             });
         }
     }

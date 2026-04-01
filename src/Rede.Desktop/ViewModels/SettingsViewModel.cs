@@ -45,7 +45,16 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     partial void OnSelectedStatusChanged(string value) => OnStatusChanged?.Invoke();
-    partial void OnCustomStatusTextChanged(string value) => OnStatusChanged?.Invoke();
+    partial void OnCustomStatusTextChanged(string value)
+    {
+        // M6: Enforce 128 char max for custom status
+        if (value is not null && value.Length > 128)
+        {
+            CustomStatusText = value[..128];
+            return; // setter re-triggers this handler with truncated value
+        }
+        OnStatusChanged?.Invoke();
+    }
 
     public event Action? OnStatusChanged;
 
@@ -74,7 +83,7 @@ public partial class SettingsViewModel : ViewModelBase
         "#f43f5e", // rose
     };
 
-    public IBrush AccentBrush => Brush.Parse(AccentColor);
+    public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
 
     partial void OnAccentColorChanged(string value)
     {
@@ -131,6 +140,8 @@ public partial class SettingsViewModel : ViewModelBase
         try
         {
             var bytes = Convert.FromBase64String(base64);
+            // H2: Reject oversized avatars from network
+            if (bytes.Length > 256 * 1024) { AvatarImage = null; HasAvatar = false; return; }
             using var ms = new MemoryStream(bytes);
             AvatarImage = new Bitmap(ms);
             AvatarData = base64;
@@ -167,7 +178,9 @@ public partial class SettingsViewModel : ViewModelBase
 
     private void DebouncedAudioChange()
     {
+        // M7: Dispose previous CTS to prevent accumulation
         _debounce?.Cancel();
+        _debounce?.Dispose();
         _debounce = new CancellationTokenSource();
         var token = _debounce.Token;
         System.Threading.Tasks.Task.Delay(300, token).ContinueWith(_ =>

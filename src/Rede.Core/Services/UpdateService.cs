@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.6.0-beta";
+    private const string CurrentVersion = "2.7.0-beta";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;
@@ -115,9 +115,9 @@ public class UpdateService
     /// </summary>
     public static string? DetectRepoPath()
     {
-        // Walk up from executable location looking for .git
+        // Walk up from executable location looking for .git (max 10 levels)
         var dir = AppContext.BaseDirectory;
-        while (dir is not null)
+        for (int i = 0; dir is not null && i < 10; i++)
         {
             if (Directory.Exists(Path.Combine(dir, ".git")))
                 return dir;
@@ -126,7 +126,7 @@ public class UpdateService
 
         // Also try the working directory
         dir = Environment.CurrentDirectory;
-        while (dir is not null)
+        for (int i = 0; dir is not null && i < 10; i++)
         {
             if (Directory.Exists(Path.Combine(dir, ".git")))
                 return dir;

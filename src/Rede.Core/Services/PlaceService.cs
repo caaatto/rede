@@ -89,10 +89,15 @@ public class PlaceService
         return Convert.ToBase64String(nonce) + ":" + Convert.ToBase64String(ciphertext);
     }
 
+    // H1: Maximum decrypted metadata size (5MB) to prevent OOM
+    private const int MaxMetadataSize = 5 * 1024 * 1024;
+
     private static bool DecryptMetadata(string encrypted, string metadataKey, Place place)
     {
         try
         {
+            // H1: Reject oversized encrypted metadata before decrypting
+            if (encrypted.Length > MaxMetadataSize * 2) return false;
             var parts = encrypted.Split(':', 2);
             if (parts.Length != 2) return false;
             var nonce = Convert.FromBase64String(parts[0]);
@@ -106,31 +111,65 @@ public class PlaceService
             var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            place.Name = root.GetProperty("name").GetString() ?? "";
+            // M10: Use TryGetProperty to avoid exception on missing fields
+            if (!root.TryGetProperty("name", out var nameElem)) return false;
+            place.Name = nameElem.GetString() ?? "";
             if (root.TryGetProperty("channels", out var chElem))
-                place.Channels = JsonSerializer.Deserialize<Dictionary<string, PlaceChannel>>(chElem) ?? new();
+            {
+                var channels = JsonSerializer.Deserialize<Dictionary<string, PlaceChannel>>(chElem) ?? new();
+                // Sanitize deserialized channel data
+                foreach (var ch in channels.Values)
+                {
+                    if (ch.Name.Length > 64) ch.Name = ch.Name[..64];
+                    if (ch.Topic.Length > 200) ch.Topic = ch.Topic[..200];
+                }
+                place.Channels = channels;
+            }
             if (root.TryGetProperty("roles", out var rolesElem))
                 place.Roles = JsonSerializer.Deserialize<Dictionary<string, PlaceRole>>(rolesElem) ?? new();
             if (root.TryGetProperty("creatorId", out var creatorElem))
                 place.CreatorId = creatorElem.GetString() ?? "";
             if (root.TryGetProperty("accentColor", out var acElem))
-                place.AccentColor = acElem.GetString();
+                place.AccentColor = ValidateColor(acElem.GetString(), "#8b5cf6");
             if (root.TryGetProperty("iconData", out var iconElem))
-                place.IconData = iconElem.GetString();
+            {
+                var iconStr = iconElem.GetString();
+                place.IconData = iconStr is not null && iconStr.Length <= 350_000 ? iconStr : null;
+            }
             if (root.TryGetProperty("iconMimeType", out var iconMimeElem))
                 place.IconMimeType = iconMimeElem.GetString();
             if (root.TryGetProperty("emotes", out var emotesElem))
-                place.Emotes = JsonSerializer.Deserialize<Dictionary<string, PlaceEmote>>(emotesElem) ?? new();
+            {
+                var emotes = JsonSerializer.Deserialize<Dictionary<string, PlaceEmote>>(emotesElem) ?? new();
+                // Cap emote count AND per-emote image size (64KB base64 ≈ 87KB)
+                var filtered = new Dictionary<string, PlaceEmote>();
+                foreach (var (k, e) in emotes)
+                {
+                    if (filtered.Count >= 50) break;
+                    if (e.ImageData is not null && e.ImageData.Length > 87_000) continue;
+                    filtered[k] = e;
+                }
+                place.Emotes = filtered;
+            }
             if (root.TryGetProperty("bans", out var bansElem))
-                place.Bans = JsonSerializer.Deserialize<Dictionary<string, PlaceBan>>(bansElem) ?? new();
+            {
+                var bans = JsonSerializer.Deserialize<Dictionary<string, PlaceBan>>(bansElem) ?? new();
+                // Cap bans count + truncate reasons
+                if (bans.Count > 1000)
+                    bans = bans.Take(1000).ToDictionary(b => b.Key, b => b.Value);
+                foreach (var ban in bans.Values)
+                    if (ban.Reason is not null && ban.Reason.Length > 200) ban.Reason = ban.Reason[..200];
+                place.Bans = bans;
+            }
             if (root.TryGetProperty("categories", out var catsElem))
                 place.Categories = JsonSerializer.Deserialize<List<string>>(catsElem) ?? new();
+            // Validate color hex format — reject invalid colors with safe fallbacks
             if (root.TryGetProperty("ownerColor", out var ownerColorElem))
-                place.OwnerColor = ownerColorElem.GetString() ?? "#eab308";
+                place.OwnerColor = ValidateColor(ownerColorElem.GetString(), "#eab308");
             if (root.TryGetProperty("adminColor", out var adminColorElem))
-                place.AdminColor = adminColorElem.GetString() ?? "#8b5cf6";
+                place.AdminColor = ValidateColor(adminColorElem.GetString(), "#8b5cf6");
             if (root.TryGetProperty("memberColor", out var memberColorElem))
-                place.MemberColor = memberColorElem.GetString() ?? "#6b7280";
+                place.MemberColor = ValidateColor(memberColorElem.GetString(), "#6b7280");
             return true;
         }
         catch { return false; }
@@ -204,6 +243,14 @@ public class PlaceService
         if (!Profile.Places.TryGetValue(placeId, out var place))
         {
             OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        // Sanitize channel name
+        name = SanitizeMetadataString(name, 64);
+        if (string.IsNullOrEmpty(name))
+        {
+            OnSystemMessage?.Invoke("Channel name is required.");
             return;
         }
 
@@ -465,6 +512,9 @@ public class PlaceService
             return;
         }
 
+        // M3: Truncate ban reason to 200 chars
+        if (reason is not null && reason.Length > 200) reason = reason[..200];
+
         _conn.Send(Msg.PlaceBan, ProtocolSerializer.Payload(
             ("placeId", JsonValue.Create(placeId)),
             ("targetUserId", JsonValue.Create(targetUserId)),
@@ -568,6 +618,14 @@ public class PlaceService
             return;
         }
 
+        // M5: Sanitize category name
+        categoryName = SanitizeMetadataString(categoryName, 64);
+        if (string.IsNullOrEmpty(categoryName))
+        {
+            OnSystemMessage?.Invoke("Invalid category name.");
+            return;
+        }
+
         if (place.Categories.Contains(categoryName))
         {
             OnSystemMessage?.Invoke("Category already exists.");
@@ -634,7 +692,8 @@ public class PlaceService
             return;
         }
 
-        channel.Topic = topic;
+        // M5: Sanitize topic
+        channel.Topic = SanitizeMetadataString(topic, 200);
         Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Topic set for #{channel.Name}.");
@@ -1037,11 +1096,10 @@ public class PlaceService
     {
         if (Profile is null || Passphrase is null) return;
 
+        // C2: Only accept placekey for places we already know about (invited via server)
+        // Don't create placeholder places from arbitrary control messages
         if (!Profile.Places.TryGetValue(placeId, out var place))
-        {
-            place = new Place();
-            Profile.Places[placeId] = place;
-        }
+            return;
 
         place.MetadataKey = metadataKey;
 
@@ -1060,4 +1118,20 @@ public class PlaceService
             OnSystemMessage?.Invoke($"Failed to decrypt place metadata from {senderId}");
         }
     }
+
+    // M5/M4: Sanitize metadata strings — strip control chars, bidi overrides, enforce length
+    private static string SanitizeMetadataString(string input, int maxLength)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        // Strip control characters and Unicode bidi overrides
+        var s = System.Text.RegularExpressions.Regex.Replace(input,
+            @"[\x00-\x1f\x7f\u200E\u200F\u202A-\u202E\u2066-\u2069]", "");
+        if (s.Length > maxLength) s = s[..maxLength];
+        return s.Trim();
+    }
+
+    // Validate hex color format — returns fallback if invalid
+    private static string ValidateColor(string? color, string fallback)
+        => color is not null && System.Text.RegularExpressions.Regex.IsMatch(color, @"^#[0-9a-fA-F]{6}$")
+            ? color : fallback;
 }

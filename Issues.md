@@ -56,6 +56,84 @@
 [x] M14: MainWindow.RefreshGroups - Gruppen-Namen sanitized (konsistent mit Kontakten)
 [x] H1: MainWindow - Passphrase aus Login VM nach Auth gelöscht
 
+## Security Audit (2026-03-31) — Gefixte Findings
+
+### Critical
+[x] C1: Brush.Parse() mit User-Daten ohne Validierung — `ColorHelper.SafeParse()` mit Regex `^#[0-9a-fA-F]{6}$` + try-catch + Fallback. Alle Brush.Parse-Aufrufe in MainViewModel.cs und SettingsViewModel.cs ersetzt.
+[x] C2: PlaceService Fake-PlaceKey akzeptiert — `HandlePlaceKeyReceived()` lehnt PlaceKeys für unbekannte Places ab (nur bereits via PLACE_INVITE erstellte Placeholder akzeptiert).
+
+### High
+[x] H1: Unbounded Metadata-Größe bei Places — `DecryptMetadata()` prüft `encrypted.Length > MaxMetadataSize * 2` (10MB raw) vor Verarbeitung.
+[x] H2: Avatar/Icon-Größe nach Base64-Decode nicht validiert — `LoadAvatar()`, `LoadIcon()`, `LoadAvatarFromBase64()` prüfen `bytes.Length > 256KB` nach Decode.
+[x] H3: Unbounded Collections im Profile-Model — `AddChatMessageAsync()` evictet älteste Chat-History wenn >500 Conversations. Per-Chat bereits auf 1000 Messages limitiert.
+[x] H4: SRTP Key-Validierung fehlt — `CallService` prüft `srtpKey.Length >= 16` und `srtpSalt.Length >= 14` nach Decode.
+[x] H5: Nonce-Länge nicht validiert vor Decrypt — `DoubleRatchet.Decrypt()` und `SenderKeys.Decrypt()` prüfen `nonce.Length != 24`.
+[x] H6: Ciphertext-Mindestlänge nicht geprüft — Gleiche Stellen: `ciphertext.Length < 16` → sofort return null.
+[x] H7: DH Public Key Länge nicht validiert — `DhRatchetStep()` prüft `dhPub.Length != 32`.
+[x] H9: Pending-Outgoing-Queue unbounded — `ChatService.SendMessage()` limitiert Queue auf 100 Messages pro Target.
+
+### Medium
+[x] M1: Ephemeral Keys nicht gezeroed bei Exception — `X3dh.Initiate()`, `X3dh.Respond()`, `DoubleRatchet.Encrypt()` mit try-finally Blöcken für alle Secret Keys.
+[x] M2: ProfileEncryption.Decrypt zeroed Plaintext-Bytes nicht — `CryptoService.ZeroOut(decrypted)` nach UTF-8 Konvertierung. Auch `hmacValue` in Encrypt gezeroed.
+[x] M3: DH-Intermediates nicht gezeroed bei Exception — `DhRatchetStep()` komplett in try-finally mit Zero für alle Intermediates.
+[x] M4: Bidi-Override-Zeichen nicht gefiltert — `SanitizeDisplayString()` und `PlaceService.SanitizeMetadataString()` filtern jetzt U+200E-200F, U+202A-202E, U+2066-2069.
+[x] M5: Channel-Topic und Category-Name nicht sanitized — `AddCategory()` und `SetChannelTopic()` nutzen `SanitizeMetadataString()` (max 64/200 Chars).
+[x] M6: Custom-Status-Text ohne Längenlimit — `SettingsViewModel.OnCustomStatusTextChanged()` truncated auf 128 Chars.
+[x] M7: CancellationTokenSource Leak — `DebouncedAudioChange()` ruft `_debounce?.Dispose()` vor Neuerstellung.
+[x] M8: Reconnect-Task-Akkumulation — `_isReconnecting` volatile Flag verhindert parallele Reconnect-Tasks.
+
+### Low
+[x] L1: System-Messages ohne Längenlimit — `AddSystemMessage()` truncated auf 1000 Chars.
+
+## Security Audit (2026-03-31, Runde 3) — Gefixte Findings
+
+### Critical
+[x] C3: Int32 Counter-Wraparound in DoubleRatchet — `MaxMessageNumber = 1_000_000_000` Konstante + Guards vor Ns++/Nr++ und in SkipMessageKeys. Exception erzwingt Session-Reset vor Overflow.
+[x] C4: SenderKeys messageNumber Off-by-One — `>= MaxMessageNumber` statt `> MaxMessageNumber` verhindert Encrypt bei exakt 10000 (C-style cast zu uint wäre sonst 2^32-1).
+
+### High
+[x] H6: Command-Argument-Längenvalidierung — Group-Name max 64 Chars in `/group` Command-Handler.
+[x] H9: DH Header Field Validation — `headerNode["dh"]` auf null/empty geprüft in beiden X3DH- und Ratchet-Message-Handlern in ChatService.
+
+### Medium
+[x] M2: Avatar MIME-Type Fallback — Unbekannte Dateiendungen werden jetzt abgelehnt statt still als `image/png` akzeptiert.
+[x] M5: Directory Walk Depth Limit — `FindRepoEnv()` (LoginViewModel) und `DetectRepoPath()` (UpdateService) auf max 10 Levels begrenzt.
+[x] M9: Bitmap Disposal — `LoadAvatar()` und `LoadIcon()` disposen alte Bitmaps vor Ersetzung (Memory Leak Fix).
+[x] M10: PlaceService TryGetProperty — `root.GetProperty("name")` zu `root.TryGetProperty("name", ...)` geändert mit false return bei fehlendem Key.
+[x] M11: Proxy-URL-Validierung — `Uri.TryCreate()` Validierung für Proxy-URLs aus .env-Datei.
+[x] M12: Avatar-Größe in BroadcastProfile — Base64-Länge >350KB (~256KB decoded) wird vor Broadcast an Kontakte abgelehnt.
+
+## Security Audit (2026-03-31, Runde 4) — Gefixte Findings
+
+### High
+[x] H1: AppleScript-Injection in NotificationService — `EscapeAppleScript()` filterte keine Newlines/Control-Chars. Jetzt werden alle Control-Chars (0x00-0x1F, 0x7F) per Regex zu Space ersetzt vor dem Escaping.
+
+### Medium
+[x] M1: CustomStatusText Truncation Bug — `OnStatusChanged` wurde nach Truncation auf 128 Chars NICHT aufgerufen. Fix: return nach Truncation (setter re-triggers Handler mit gekürztem Wert).
+[x] M2: Base64 Pre-Validation — `LoadAvatar()` und `LoadIcon()` prüfen jetzt `base64.Length > 350_000` VOR `Convert.FromBase64String()` um große Heap-Allokation zu vermeiden.
+[x] M3: Ban Reason Längenlimit — `PlaceService.BanUser()` truncated `reason` auf max 200 Chars vor Senden/Speichern.
+[x] M4: Emote-Count bei Deserialize — `DecryptMetadata()` begrenzt deserialisierte Emotes auf max 50 (verhindert Metadata-Bloat durch manipulierte E2EE-Daten).
+[x] M5: Messages Collection unbounded — `AddIncomingMessage()` entfernt älteste Nachrichten wenn ≥1000 in der In-Memory Display-Collection (OOM-Schutz).
+
+## Security Audit (2026-04-01, Runde 5) — Gefixte Findings
+
+### Medium
+[x] M1: Deserialisierte E2EE-Metadata Colors nicht validiert — `DecryptMetadata()` nutzt jetzt `ValidateColor()` (Regex `^#[0-9a-fA-F]{6}$`) für ownerColor, adminColor, memberColor, accentColor. Ungültige Werte fallen auf Defaults zurück.
+[x] M2: Per-Emote ImageData unbounded — Emotes mit `ImageData.Length > 87_000` (~64KB decoded) werden bei Deserialization gefiltert.
+[x] M3: Bans Dictionary unbounded — Cap auf 1000 Bans + Reason-Truncation auf 200 Chars bei Deserialization.
+[x] M4: PlaceChannel Topic/Name unbounded nach Deserialize — Channels werden nach Deserialization sanitized: Name max 64, Topic max 200 Chars.
+[x] M5: Contact AccentColor nicht validiert — `OnProfileReceived` Handler prüft jetzt Hex-Format per Regex vor Zuweisung. Ungültige Farben behalten den vorherigen Wert.
+[x] M6: PlaceChannel Name bei CreateChannel nicht validiert — `SanitizeMetadataString(name, 64)` vor Channel-Erstellung.
+[x] M7: Place IconData unbounded bei Deserialize — `iconData.Length > 350_000` wird abgelehnt.
+
+### Nicht gefixt (architekturell / niedrige Priorität)
+[ ] C5: Race Condition in async Ratchet State Save — Task.Run Fire-and-Forget kann bei schnellen Nachrichten zu Out-of-Order Writes führen. Erfordert Save-Queue-Architektur.
+[ ] H8: Event-Handler-Akkumulation in Flyouts — Context-Menüs werden bei jedem Rechtsklick neu erstellt. Flyout-Instanzen werden vom GC aufgeräumt wenn Flyout geschlossen wird, da keine Referenzen gehalten werden. Nur bei extrem häufigem Öffnen relevant.
+[ ] H10: Device Key Injection via MITM — Server könnte theoretisch Phantom-Devices einfügen. Mitigation: Sicherheitswarnung + /confirm Required. Echte Lösung: Out-of-Band Device Verification (QR-Code o.ä.).
+[ ] H13: SealedSender Domain Separation — Ephemeral Box-Payload hat keinen Domain-Tag. Erfordert Protokolländerung.
+[ ] L2: Silent Exception-Swallowing in Avatar/Icon-Loading — Fehlerhafte Bilder werden korrekt zu null gesetzt. Debug-Logging würde Dependency auf Logging-Framework erfordern.
+[ ] L3: Fire-and-Forget Saves — Bekannte Einschränkung, erfordert Save-Queue-Architektur.
+
 ## Bekannte Einschränkungen (by design / .NET limitation)
 - Key material wird als string (base64) gespeichert - .NET strings sind immutable, können nicht gezeroed werden. Erfordert Refactoring zu byte[] (architekturell).
 - Skipped Message Keys (bis zu 1000) als base64 Strings im Heap - nicht zeroed bei Eviction (gleiche .NET string Limitation).

@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -10,11 +11,73 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Rede.Desktop.ViewModels;
 
+// C1: Safe color parsing — validates hex format before Brush.Parse to prevent UI crashes
+internal static partial class ColorHelper
+{
+    private static readonly IBrush DefaultBrush = Brush.Parse("#8b5cf6");
+
+    [GeneratedRegex(@"^#[0-9a-fA-F]{6}$")]
+    private static partial Regex HexColorRegex();
+
+    public static IBrush SafeParse(string color, string fallback = "#8b5cf6")
+    {
+        try
+        {
+            if (HexColorRegex().IsMatch(color))
+                return Brush.Parse(color);
+            return fallback == "#8b5cf6" ? DefaultBrush : Brush.Parse(fallback);
+        }
+        catch { return DefaultBrush; }
+    }
+
+    public static string Validate(string color, string fallback = "#8b5cf6")
+        => HexColorRegex().IsMatch(color) ? color : fallback;
+
+    // H2: Max avatar size on receive (256KB decoded)
+    public const int MaxAvatarBytes = 256 * 1024;
+    public const int MaxIconBytes = 256 * 1024;
+}
+
 public partial class MainViewModel : ViewModelBase
 {
     [ObservableProperty] private ViewModelBase _currentView;
     [ObservableProperty] private string _connectionStatus = "Disconnected";
     [ObservableProperty] private bool _isConnected;
+
+    // User profile (bottom-left panel)
+    [ObservableProperty] private string _ownDisplayName = "";
+    [ObservableProperty] private string _ownUserId = "";
+    [ObservableProperty] private string _ownAccentColor = "#8b5cf6";
+    [ObservableProperty] private string _ownStatus = "offline";
+    [ObservableProperty] private string? _ownCustomStatus;
+    [ObservableProperty] private Bitmap? _ownAvatarImage;
+    [ObservableProperty] private bool _hasOwnAvatar;
+
+    public string OwnInitial => string.IsNullOrEmpty(OwnDisplayName) ? "?" : OwnDisplayName[..1].ToUpperInvariant();
+    public IBrush OwnAccentBrush => ColorHelper.SafeParse(OwnAccentColor);
+    public IBrush OwnStatusBrush => OwnStatus switch
+    {
+        "online" => Brush.Parse("#22c55e"),
+        "away" => Brush.Parse("#eab308"),
+        "dnd" => Brush.Parse("#ef4444"),
+        _ => Brush.Parse("#6b7280"),
+    };
+    public string OwnStatusText => OwnCustomStatus ?? OwnStatus switch
+    {
+        "online" => "Online",
+        "away" => "Away",
+        "dnd" => "Do Not Disturb",
+        _ => "Offline",
+    };
+
+    partial void OnOwnDisplayNameChanged(string value) => OnPropertyChanged(nameof(OwnInitial));
+    partial void OnOwnAccentColorChanged(string value) => OnPropertyChanged(nameof(OwnAccentBrush));
+    partial void OnOwnStatusChanged(string value)
+    {
+        OnPropertyChanged(nameof(OwnStatusBrush));
+        OnPropertyChanged(nameof(OwnStatusText));
+    }
+    partial void OnOwnCustomStatusChanged(string? value) => OnPropertyChanged(nameof(OwnStatusText));
 
     // Sidebar state
     [ObservableProperty] private bool _isSidebarCollapsed;
@@ -150,11 +213,16 @@ public partial class MainViewModel : ViewModelBase
             SenderRole = senderRole,
             RoleBadgeColor = roleBadgeColor ?? "#8b5cf6",
         };
+        // M5: Cap in-memory message display to prevent OOM
+        while (Messages.Count >= 1000)
+            Messages.RemoveAt(0);
         Messages.Add(msg);
     }
 
     public void AddSystemMessage(string text)
     {
+        // L1: Truncate very long system messages
+        if (text.Length > 1000) text = text[..1000] + "...";
         var isAlert = text.Contains("[SECURITY]") || text.Contains("[WARNING]");
         Messages.Add(new ChatMessageViewModel
         {
@@ -196,13 +264,13 @@ public partial class ContactItemViewModel : ViewModelBase
     [ObservableProperty] private string? _customStatus;
 
     public string Initial => string.IsNullOrEmpty(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
-    public IBrush AccentBrush => Brush.Parse(AccentColor);
+    public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
     public IBrush StatusBrush => Status switch
     {
-        "online" => Brush.Parse("#22c55e"),
-        "away" => Brush.Parse("#eab308"),
-        "dnd" => Brush.Parse("#ef4444"),
-        _ => Brush.Parse("#6b7280"),
+        "online" => ColorHelper.SafeParse("#22c55e"),
+        "away" => ColorHelper.SafeParse("#eab308"),
+        "dnd" => ColorHelper.SafeParse("#ef4444"),
+        _ => ColorHelper.SafeParse("#6b7280"),
     };
     public string StatusTooltip => Status switch
     {
@@ -223,15 +291,21 @@ public partial class ContactItemViewModel : ViewModelBase
 
     public void LoadAvatar(string? base64)
     {
-        if (string.IsNullOrEmpty(base64)) { AvatarImage = null; HasAvatar = false; return; }
+        if (string.IsNullOrEmpty(base64)) { AvatarImage?.Dispose(); AvatarImage = null; HasAvatar = false; return; }
+        // M2: Pre-validate base64 length before allocation (256KB decoded ≈ 350KB base64)
+        if (base64.Length > 350_000) { AvatarImage?.Dispose(); AvatarImage = null; HasAvatar = false; return; }
         try
         {
             var bytes = Convert.FromBase64String(base64);
+            // H2: Reject oversized avatars from network
+            if (bytes.Length > ColorHelper.MaxAvatarBytes) { AvatarImage?.Dispose(); AvatarImage = null; HasAvatar = false; return; }
             using var ms = new MemoryStream(bytes);
+            var old = AvatarImage;
             AvatarImage = new Bitmap(ms);
+            old?.Dispose(); // M9: Dispose old bitmap
             HasAvatar = true;
         }
-        catch { AvatarImage = null; HasAvatar = false; }
+        catch { AvatarImage?.Dispose(); AvatarImage = null; HasAvatar = false; }
     }
 }
 
@@ -263,21 +337,27 @@ public partial class PlaceItemViewModel : ViewModelBase
     [ObservableProperty] private string _memberColor = "#6b7280";
 
     public string Initial => string.IsNullOrEmpty(Name) ? "?" : Name[..1].ToUpperInvariant();
-    public IBrush AccentBrush => Brush.Parse(AccentColor);
+    public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
 
     partial void OnAccentColorChanged(string value) => OnPropertyChanged(nameof(AccentBrush));
 
     public void LoadIcon(string? base64)
     {
-        if (string.IsNullOrEmpty(base64)) { IconImage = null; HasIcon = false; return; }
+        if (string.IsNullOrEmpty(base64)) { IconImage?.Dispose(); IconImage = null; HasIcon = false; return; }
+        // M2: Pre-validate base64 length before allocation (256KB decoded ≈ 350KB base64)
+        if (base64.Length > 350_000) { IconImage?.Dispose(); IconImage = null; HasIcon = false; return; }
         try
         {
             var bytes = Convert.FromBase64String(base64);
+            // H2: Reject oversized icons from network
+            if (bytes.Length > ColorHelper.MaxIconBytes) { IconImage?.Dispose(); IconImage = null; HasIcon = false; return; }
             using var ms = new MemoryStream(bytes);
+            var old = IconImage;
             IconImage = new Bitmap(ms);
+            old?.Dispose(); // M9: Dispose old bitmap
             HasIcon = true;
         }
-        catch { IconImage = null; HasIcon = false; }
+        catch { IconImage?.Dispose(); IconImage = null; HasIcon = false; }
     }
 }
 
@@ -303,14 +383,14 @@ public partial class PlaceMemberViewModel : ViewModelBase
     [ObservableProperty] private string _roleColor = "#6b7280"; // customizable per-place
 
     public string Initial => string.IsNullOrEmpty(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
-    public IBrush AccentBrush => Brush.Parse(AccentColor);
-    public IBrush RoleBrush => Brush.Parse(RoleColor);
+    public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
+    public IBrush RoleBrush => ColorHelper.SafeParse(RoleColor, "#6b7280");
     public IBrush StatusBrush => Status switch
     {
-        "online" => Brush.Parse("#22c55e"),
-        "away" => Brush.Parse("#eab308"),
-        "dnd" => Brush.Parse("#ef4444"),
-        _ => Brush.Parse("#6b7280"),
+        "online" => ColorHelper.SafeParse("#22c55e"),
+        "away" => ColorHelper.SafeParse("#eab308"),
+        "dnd" => ColorHelper.SafeParse("#ef4444"),
+        _ => ColorHelper.SafeParse("#6b7280"),
     };
 }
 
@@ -333,7 +413,7 @@ public partial class ChatMessageViewModel : ViewModelBase
     public string TimeString => Timestamp.ToString("h:mm tt").ToLowerInvariant();
     public bool HasTtl => Ttl > 0;
     public string TtlDisplay => Ttl > 0 ? $"{Ttl}d" : "";
-    public IBrush SenderAccentBrush => Brush.Parse(SenderAccentColor);
+    public IBrush SenderAccentBrush => ColorHelper.SafeParse(SenderAccentColor);
     public bool HasSenderRole => SenderRole is not null;
-    public IBrush RoleBadgeBrush => Brush.Parse(RoleBadgeColor);
+    public IBrush RoleBadgeBrush => ColorHelper.SafeParse(RoleBadgeColor);
 }

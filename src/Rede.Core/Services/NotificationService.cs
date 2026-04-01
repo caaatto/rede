@@ -165,6 +165,8 @@ $xml.LoadXml('<toast><visual><binding template=""ToastGeneric""><text>{EscapeXml
 
     private static string EscapeAppleScript(string text)
     {
-        return text.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        // H1: Strip control chars and newlines to prevent AppleScript injection
+        var s = System.Text.RegularExpressions.Regex.Replace(text, @"[\x00-\x1f\x7f]", " ");
+        return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 }

@@ -339,6 +339,12 @@ public class CallService : IDisposable
                                 {
                                     srtpKey = Convert.FromBase64String(keyB64);
                                     srtpSalt = Convert.FromBase64String(saltB64);
+                                    // H4: Validate SRTP key/salt lengths
+                                    if (srtpKey.Length < 16 || srtpSalt.Length < 14)
+                                    {
+                                        srtpKey = null;
+                                        srtpSalt = null;
+                                    }
                                 }
                             }
                             catch { }

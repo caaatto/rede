@@ -71,12 +71,14 @@ public static class ProfileEncryption
         using var hmacAlg = new HMACSHA256(hmacKey);
         var hmacValue = hmacAlg.ComputeHash(encrypted);
         CryptoService.ZeroOut(hmacKey);
+        var hmacHex = Convert.ToHexString(hmacValue).ToLowerInvariant();
+        CryptoService.ZeroOut(hmacValue);
 
         return new EncryptedEnvelope(
             Convert.ToBase64String(salt),
             Convert.ToBase64String(nonce),
             Convert.ToBase64String(encrypted),
-            Convert.ToHexString(hmacValue).ToLowerInvariant(),
+            hmacHex,
             ScryptNCurrent
         );
     }
@@ -115,6 +117,8 @@ public static class ProfileEncryption
             var decrypted = SecretBox.Open(encrypted, nonce, key);
             CryptoService.ZeroOut(key);
             var json = Encoding.UTF8.GetString(decrypted);
+            // M2: Zero plaintext bytes after conversion to string
+            CryptoService.ZeroOut(decrypted);
             return JsonSerializer.Deserialize<T>(json);
         }
         catch

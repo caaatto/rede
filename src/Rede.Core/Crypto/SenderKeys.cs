@@ -94,12 +94,16 @@ public static class SenderKeys
         var backup = state.DeepClone();
         try
         {
-            // Validate messageNumber range
-            if (messageNumber < 0 || messageNumber > MaxMessageNumber)
+            // Validate messageNumber range (C4: use >= to prevent off-by-one + overflow)
+            if (messageNumber < 0 || messageNumber >= MaxMessageNumber)
                 return null;
 
             var ciphertext = Convert.FromBase64String(ciphertextB64);
             var nonce = Convert.FromBase64String(nonceB64);
+
+            // H5/H6: Validate nonce and ciphertext lengths
+            if (nonce.Length != 24) return null;
+            if (ciphertext.Length < 16) return null;
 
             // Verify signature
             var sigData = new byte[ciphertext.Length + 4];

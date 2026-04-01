@@ -60,6 +60,13 @@ public class ChatService
     {
         if (Profile is null || Passphrase is null) return;
 
+        // M12: Validate avatar size before broadcasting to all contacts
+        if (avatarData is not null && avatarData.Length > 350_000) // ~256KB decoded = ~350KB base64
+        {
+            OnSystemMessage?.Invoke("Avatar too large to broadcast.");
+            return;
+        }
+
         var payload = new System.Text.Json.Nodes.JsonObject
         {
             ["__rede_ctrl"] = "profile",
@@ -111,8 +118,8 @@ public class ChatService
             sentAny = true;
         }
 
-        // Persist own message if sent via existing sessions
-        if (sentAny)
+        // Persist own message if sent via existing sessions (skip control messages)
+        if (sentAny && !text.Contains("\"__rede_ctrl\""))
         {
             var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             Task.Run(async () => await _store.AddChatMessageAsync(Profile, targetId, new ChatMessage
@@ -127,6 +134,12 @@ public class ChatService
         {
             if (!_pendingOutgoing.ContainsKey(targetId))
                 _pendingOutgoing[targetId] = new();
+            // H9: Bound pending queue to prevent memory exhaustion
+            if (_pendingOutgoing[targetId].Count >= 100)
+            {
+                OnSystemMessage?.Invoke("Too many pending messages — wait for session to establish.");
+                return;
+            }
             _pendingOutgoing[targetId].Add((text, ttl));
             _conn.Send(Msg.FetchPrekeyBundle, ProtocolSerializer.Payload(
                 ("targetUserId", JsonValue.Create(targetId))
@@ -388,8 +401,11 @@ public class ChatService
                 var headerNode = msg["header"];
                 if (headerNode is null) continue;
 
+                // H9: Validate all header fields are present
+                var dhVal = headerNode["dh"]?.GetValue<string>();
+                if (string.IsNullOrEmpty(dhVal)) continue;
                 var header = new DoubleRatchet.RatchetHeader(
-                    headerNode["dh"]?.GetValue<string>() ?? "",
+                    dhVal,
                     headerNode["pn"]?.GetValue<int>() ?? 0,
                     headerNode["n"]?.GetValue<int>() ?? 0
                 );
@@ -428,9 +444,14 @@ public class ChatService
 
         var backup = state.DeepClone();
 
-        var headerNode = msg["header"]!;
+        var headerNode = msg["header"];
+        if (headerNode is null) return null;
+
+        // H9: Validate all header fields are present
+        var dhVal = headerNode["dh"]?.GetValue<string>();
+        if (string.IsNullOrEmpty(dhVal)) return null;
         var header = new DoubleRatchet.RatchetHeader(
-            headerNode["dh"]?.GetValue<string>() ?? "",
+            dhVal,
             headerNode["pn"]?.GetValue<int>() ?? 0,
             headerNode["n"]?.GetValue<int>() ?? 0
         );
@@ -573,12 +594,15 @@ public class ChatService
 
         if (successCount > 0)
         {
-            Task.Run(async () => await _store.AddChatMessageAsync(Profile, targetUserId, new ChatMessage
+            if (!pending.Text.Contains("\"__rede_ctrl\""))
             {
-                From = Profile.UserId, Text = pending.Text, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = pending.Ttl,
-            }, Passphrase));
+                Task.Run(async () => await _store.AddChatMessageAsync(Profile, targetUserId, new ChatMessage
+                {
+                    From = Profile.UserId, Text = pending.Text, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = pending.Ttl,
+                }, Passphrase));
+                OnMessageSent?.Invoke(targetUserId, pending.Text, pending.Ttl);
+            }
             OnSystemMessage?.Invoke($"Secure session established ({successCount} device(s)).");
-            OnMessageSent?.Invoke(targetUserId, pending.Text, pending.Ttl);
 
             // H7: Send remaining queued messages via the now-established session
             for (int i = 1; i < pendingList.Count; i++)

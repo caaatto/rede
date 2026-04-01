@@ -196,8 +196,9 @@ public partial class LoginViewModel : ViewModelBase
     private static string? FindRepoEnv()
     {
         // Walk up from executable looking for .env in a rede-client dir
+        // M5: Limit depth to prevent hangs on slow/network mounts
         var dir = AppContext.BaseDirectory;
-        while (dir is not null)
+        for (int depth = 0; dir is not null && depth < 10; depth++)
         {
             var envPath = System.IO.Path.Combine(dir, ".env");
             if (System.IO.File.Exists(envPath))

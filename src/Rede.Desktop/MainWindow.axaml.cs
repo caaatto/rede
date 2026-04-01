@@ -66,7 +66,8 @@ public partial class MainWindow : Window
                 }
             }
 
-            // Standalone exe — check GitHub Releases API
+            // Always check GitHub Releases API — even if git says up to date,
+            // the running binary may be older than the latest release
             var release = await UpdateService.CheckGitHubReleaseAsync();
             if (release is not null)
             {
@@ -315,8 +316,9 @@ public partial class MainWindow : Window
                 var eq = trimmed.IndexOf('=');
                 var key = trimmed[..eq].Trim();
                 var val = trimmed[(eq + 1)..].Trim();
-                if (key == "REDE_I2P_PROXY" && !string.IsNullOrEmpty(val)) proxy.I2PProxy = val;
-                if (key == "REDE_TOR_PROXY" && !string.IsNullOrEmpty(val)) proxy.TorProxy = val;
+                // M11: Validate proxy URLs from .env
+                if (key == "REDE_I2P_PROXY" && Uri.TryCreate(val, UriKind.Absolute, out _)) proxy.I2PProxy = val;
+                if (key == "REDE_TOR_PROXY" && Uri.TryCreate(val, UriKind.Absolute, out _)) proxy.TorProxy = val;
             }
         }
 
@@ -435,8 +437,11 @@ public partial class MainWindow : Window
             if (_auth?.Profile is null || _auth.Passphrase is null) return;
             if (_auth.Profile.Contacts.TryGetValue(senderId, out var contact))
             {
-                contact.AccentColor = accentColor;
-                contact.AvatarData = avatarData;
+                // Validate received profile data
+                contact.AccentColor = accentColor is not null &&
+                    System.Text.RegularExpressions.Regex.IsMatch(accentColor, @"^#[0-9a-fA-F]{6}$")
+                    ? accentColor : contact.AccentColor;
+                contact.AvatarData = avatarData is not null && avatarData.Length <= 350_000 ? avatarData : null;
                 contact.AvatarMimeType = avatarMimeType;
                 _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
                 Dispatcher.UIThread.Post(RefreshContacts);
@@ -607,7 +612,37 @@ public partial class MainWindow : Window
             RefreshContacts();
             RefreshGroups();
             RefreshPlaces();
+            UpdateOwnProfilePanel();
         });
+    }
+
+    private void UpdateOwnProfilePanel()
+    {
+        if (_auth?.Profile is null) return;
+        var p = _auth.Profile;
+        _mainVm.OwnDisplayName = p.DisplayName;
+        _mainVm.OwnUserId = p.UserId;
+        _mainVm.OwnAccentColor = p.AccentColor ?? "#8b5cf6";
+        _mainVm.OwnStatus = p.Status ?? "online";
+        _mainVm.OwnCustomStatus = p.CustomStatus;
+
+        // Load avatar
+        if (!string.IsNullOrEmpty(p.AvatarData))
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(p.AvatarData);
+                using var ms = new System.IO.MemoryStream(bytes);
+                _mainVm.OwnAvatarImage = new Avalonia.Media.Imaging.Bitmap(ms);
+                _mainVm.HasOwnAvatar = true;
+            }
+            catch { _mainVm.OwnAvatarImage = null; _mainVm.HasOwnAvatar = false; }
+        }
+        else
+        {
+            _mainVm.OwnAvatarImage = null;
+            _mainVm.HasOwnAvatar = false;
+        }
     }
 
     private void SendOwnStatus()
@@ -681,7 +716,10 @@ public partial class MainWindow : Window
                 break;
 
             case "group" when args.Length >= 1:
-                _groups?.CreateGroup(string.Join(" ", args));
+                // H6: Validate joined arg length
+                var groupName = string.Join(" ", args);
+                if (groupName.Length > 64) { _mainVm.AddSystemMessage("Group name too long (max 64 chars)."); break; }
+                _groups?.CreateGroup(groupName);
                 break;
 
             case "ginvite" when args.Length >= 2:
@@ -1170,6 +1208,7 @@ public partial class MainWindow : Window
                     ["status"] = vm.SelectedStatus,
                     ["customStatus"] = _auth.Profile.CustomStatus,
                 });
+                UpdateOwnProfilePanel();
             }
         };
 
@@ -1280,6 +1319,7 @@ public partial class MainWindow : Window
                 _auth.Profile.AvatarMimeType = vm.AvatarMimeType;
                 _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
                 _chat?.BroadcastProfile(vm.AccentColor, vm.AvatarData, vm.AvatarMimeType);
+                UpdateOwnProfilePanel();
             }
         };
 
@@ -1316,14 +1356,21 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var ext = file.Name.Split('.').LastOrDefault()?.ToLowerInvariant();
+            // M2: Validate extension — reject unknown formats instead of silent fallback
+            var fileName = System.IO.Path.GetFileName(file.Name);
+            var ext = fileName.Split('.').LastOrDefault()?.ToLowerInvariant();
             var mime = ext switch
             {
                 "png" => "image/png",
                 "gif" => "image/gif",
                 "jpg" or "jpeg" => "image/jpeg",
-                _ => "image/png",
+                _ => (string?)null,
             };
+            if (mime is null)
+            {
+                _mainVm.AddSystemMessage("Invalid avatar format. Use PNG, GIF, or JPEG.");
+                return;
+            }
 
             vm.SetAvatarFromBytes(data, mime);
         };
@@ -1378,8 +1425,9 @@ public partial class MainWindow : Window
     private static string SanitizeDisplayString(string input, int maxLength = 255)
     {
         if (string.IsNullOrEmpty(input)) return input;
-        // Strip control characters
-        var s = System.Text.RegularExpressions.Regex.Replace(input, @"[\x00-\x1f\x7f]", "");
+        // M4: Strip control characters AND Unicode bidi overrides (anti-spoofing)
+        var s = System.Text.RegularExpressions.Regex.Replace(input,
+            @"[\x00-\x1f\x7f\u200E\u200F\u202A-\u202E\u2066-\u2069]", "");
         if (s.Length > maxLength) s = s[..maxLength];
         return s.Trim();
     }

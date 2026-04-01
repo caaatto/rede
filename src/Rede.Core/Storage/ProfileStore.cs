@@ -311,6 +311,16 @@ public class ProfileStore
 
         profile.ChatHistory[chatId].Add(message);
 
+        // H3: Cap total chat history entries to prevent unbounded growth
+        if (profile.ChatHistory.Count > 500)
+        {
+            var oldest = profile.ChatHistory.Keys
+                .Where(k => k != chatId)
+                .OrderBy(k => profile.ChatHistory[k].LastOrDefault()?.Ts ?? 0)
+                .First();
+            profile.ChatHistory.Remove(oldest);
+        }
+
         if (profile.ChatHistory[chatId].Count > 1000)
             profile.ChatHistory[chatId] = profile.ChatHistory[chatId].TakeLast(1000).ToList();
 
