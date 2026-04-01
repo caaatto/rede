@@ -910,8 +910,16 @@ public partial class MainWindow : Window
                 ShowSettings();
                 break;
 
+            case "discord" when args.Length >= 2:
+                _ = ImportDiscordAsync(args[0], args[1]);
+                break;
+
+            case "discord":
+                _mainVm.AddSystemMessage("Usage: /discord <bot-token> <guild-id>");
+                break;
+
             case "help":
-                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id>, /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pban <place> <uid> [reason], /punban <place> <uid>, /prole <place> <uid> <admin|member>, /ptopic <place> <chId> <text>, /pcategory <place> <name>, /pcategoryrm <place> <name>, /pleave <place>, /prekey <place>");
+                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id>, /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pban <place> <uid> [reason], /punban <place> <uid>, /prole <place> <uid> <admin|member>, /ptopic <place> <chId> <text>, /pcategory <place> <name>, /pcategoryrm <place> <name>, /pleave <place>, /prekey <place>, /discord <token> <guild-id>");
                 break;
 
             default:
@@ -1587,5 +1595,26 @@ public partial class MainWindow : Window
         foreach (var c in id)
             if (char.IsControl(c)) return false;
         return true;
+    }
+
+    private async Task ImportDiscordAsync(string token, string guildId)
+    {
+        if (_places is null)
+        {
+            _mainVm.AddSystemMessage("Place service not initialized.");
+            return;
+        }
+
+        var importer = new DiscordImportService();
+        importer.OnStatus += msg => Dispatcher.UIThread.Post(() => _mainVm.AddSystemMessage(msg));
+        importer.OnError += msg => Dispatcher.UIThread.Post(() => _mainVm.AddSystemMessage($"Error: {msg}"));
+
+        _mainVm.AddSystemMessage("Starting Discord import...");
+
+        var data = await importer.FetchServerAsync(token, guildId);
+        if (data is null) return;
+
+        await importer.ImportToPlaceAsync(data, _places, _chat);
+        Dispatcher.UIThread.Post(RefreshPlaces);
     }
 }
