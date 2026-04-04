@@ -62,6 +62,9 @@
                         <TextBlock Text="Profile" FontSize="{StaticResource RedeBodySize}" />
                     </ListBoxItem>
                     <ListBoxItem>
+                        <TextBlock Text="Appearance" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
                         <TextBlock Text="Presence" FontSize="{StaticResource RedeBodySize}" />
                     </ListBoxItem>
                     <ListBoxItem>
@@ -79,7 +82,7 @@
             <!-- Content area -->
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="32,8,32,24">
                 <Grid MaxWidth="560" HorizontalAlignment="Center"
-                      RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
 
                     <!-- =========================================================== -->
                     <!-- PROFILE Category                                             -->
@@ -155,9 +158,33 @@
                     </StackPanel>
 
                     <!-- =========================================================== -->
+                    <!-- APPEARANCE Category                                          -->
+                    <!-- =========================================================== -->
+                    <StackPanel Grid.Row="1" Spacing="16" IsVisible="{Binding IsAppearanceCategory}">
+                        <TextBlock Text="Appearance" Classes="header" />
+                        <TextBlock Text="Choose a theme variant for the entire app. Changes apply instantly."
+                                   Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+
+                        <Grid ColumnDefinitions="160,*">
+                            <TextBlock Grid.Column="0" Text="Theme" Classes="secondary" VerticalAlignment="Center" />
+                            <ComboBox Grid.Column="1"
+                                      SelectedIndex="{Binding SelectedThemeIndex}"
+                                      MinWidth="220">
+                                <ComboBoxItem Content="Dark (default)" />
+                                <ComboBoxItem Content="Midnight" />
+                                <ComboBoxItem Content="Dim" />
+                                <ComboBoxItem Content="Light" />
+                            </ComboBox>
+                        </Grid>
+
+                        <TextBlock Text="Dark — default near-black cinematic. Midnight — pure black, higher contrast. Dim — softer dark gray. Light — white/gray for bright environments."
+                                   Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                    </StackPanel>
+
+                    <!-- =========================================================== -->
                     <!-- PRESENCE Category                                            -->
                     <!-- =========================================================== -->
-                    <StackPanel Grid.Row="1" Spacing="12" IsVisible="{Binding IsPresenceCategory}">
+                    <StackPanel Grid.Row="2" Spacing="12" IsVisible="{Binding IsPresenceCategory}">
                         <TextBlock Text="Presence" Classes="header" />
                         <TextBlock Text="Set your presence status. Contacts will see when you're online, away, or busy."
                                    Classes="secondary" TextWrapping="Wrap" FontSize="11" />
@@ -205,7 +232,7 @@
                     <!-- =========================================================== -->
                     <!-- NOTIFICATIONS Category                                       -->
                     <!-- =========================================================== -->
-                    <StackPanel Grid.Row="2" Spacing="12" IsVisible="{Binding IsNotificationsCategory}">
+                    <StackPanel Grid.Row="3" Spacing="12" IsVisible="{Binding IsNotificationsCategory}">
                         <TextBlock Text="Notifications" Classes="header" />
                         <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Desktop Notifications"
@@ -227,7 +254,7 @@
                     <!-- =========================================================== -->
                     <!-- VOICE & AUDIO Category                                       -->
                     <!-- =========================================================== -->
-                    <StackPanel Grid.Row="3" Spacing="24" IsVisible="{Binding IsVoiceCategory}">
+                    <StackPanel Grid.Row="4" Spacing="24" IsVisible="{Binding IsVoiceCategory}">
 
                         <!-- Voice Calls -->
                         <StackPanel Spacing="12">
@@ -295,7 +322,7 @@
                     <!-- =========================================================== -->
                     <!-- SECURITY Category                                            -->
                     <!-- =========================================================== -->
-                    <StackPanel Grid.Row="4" Spacing="24" IsVisible="{Binding IsSecurityCategory}">
+                    <StackPanel Grid.Row="5" Spacing="24" IsVisible="{Binding IsSecurityCategory}">
 
                         <!-- Fingerprint -->
                         <StackPanel Spacing="12">

@@ -105,6 +105,9 @@ public class Profile
     [JsonPropertyName("avatarMimeType")]
     public string? AvatarMimeType { get; set; } // "image/png", "image/gif", "image/jpeg"
 
+    [JsonPropertyName("themeVariant")]
+    public string? ThemeVariant { get; set; } // "dark" (default), "midnight", "dim", "light"
+
     // Status / Presence
     [JsonPropertyName("status")]
     public string Status { get; set; } = "online"; // "online", "away", "dnd", "invisible"

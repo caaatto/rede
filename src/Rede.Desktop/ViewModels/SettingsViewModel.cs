@@ -21,19 +21,45 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private int _selectedCategoryIndex;
 
     public bool IsProfileCategory => SelectedCategoryIndex == 0;
-    public bool IsPresenceCategory => SelectedCategoryIndex == 1;
-    public bool IsNotificationsCategory => SelectedCategoryIndex == 2;
-    public bool IsVoiceCategory => SelectedCategoryIndex == 3;
-    public bool IsSecurityCategory => SelectedCategoryIndex == 4;
+    public bool IsAppearanceCategory => SelectedCategoryIndex == 1;
+    public bool IsPresenceCategory => SelectedCategoryIndex == 2;
+    public bool IsNotificationsCategory => SelectedCategoryIndex == 3;
+    public bool IsVoiceCategory => SelectedCategoryIndex == 4;
+    public bool IsSecurityCategory => SelectedCategoryIndex == 5;
 
     partial void OnSelectedCategoryIndexChanged(int value)
     {
         OnPropertyChanged(nameof(IsProfileCategory));
+        OnPropertyChanged(nameof(IsAppearanceCategory));
         OnPropertyChanged(nameof(IsPresenceCategory));
         OnPropertyChanged(nameof(IsNotificationsCategory));
         OnPropertyChanged(nameof(IsVoiceCategory));
         OnPropertyChanged(nameof(IsSecurityCategory));
     }
+
+    // Appearance: theme variant (live-applies on change, saved via OnThemeChanged)
+    [ObservableProperty] private string _themeVariant = "dark";
+
+    public static readonly string[] ThemeVariants = new[] { "dark", "midnight", "dim", "light" };
+    public static readonly string[] ThemeVariantLabels = new[] { "Dark (default)", "Midnight", "Dim", "Light" };
+
+    public int SelectedThemeIndex
+    {
+        get => Math.Max(0, Array.IndexOf(ThemeVariants, ThemeVariant));
+        set
+        {
+            if (value >= 0 && value < ThemeVariants.Length)
+                ThemeVariant = ThemeVariants[value];
+        }
+    }
+
+    partial void OnThemeVariantChanged(string value)
+    {
+        Themes.ThemeService.Apply(value);
+        OnThemeChanged?.Invoke();
+    }
+
+    public event Action? OnThemeChanged;
 
     // Profile customization (local-only until Apply)
     [ObservableProperty] private string _accentColor = "#8b5cf6";

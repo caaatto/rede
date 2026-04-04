@@ -661,6 +661,9 @@ public partial class MainWindow : Window
         _notifications.ShowContent = p.NotificationShowContent;
         _notifications.OwnStatus = p.Status ?? "online";
 
+        // Apply saved theme variant (live-swap color resources)
+        Themes.ThemeService.Apply(p.ThemeVariant);
+
         // Send own status (server broadcasts to all — no contact list leaked)
         SendOwnStatus();
 
@@ -1388,6 +1391,7 @@ public partial class MainWindow : Window
             AvatarInitial = string.IsNullOrEmpty(p.DisplayName) ? "?" : p.DisplayName[..1].ToUpperInvariant(),
             SelectedStatus = p.Status ?? "online",
             CustomStatusText = p.CustomStatus ?? "",
+            ThemeVariant = p.ThemeVariant ?? "dark",
         };
         vm.LoadAvatarFromBase64(p.AvatarData, p.AvatarMimeType);
 
@@ -1420,6 +1424,16 @@ public partial class MainWindow : Window
                 _auth.Profile.NotificationShowContent = vm.NotificationShowContent;
                 _notifications.Enabled = vm.NotificationsEnabled;
                 _notifications.ShowContent = vm.NotificationShowContent;
+                _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+            }
+        };
+
+        // Theme variant — live-apply is done in ViewModel; persist here
+        vm.OnThemeChanged += () =>
+        {
+            if (_auth?.Profile is not null && _auth.Passphrase is not null)
+            {
+                _auth.Profile.ThemeVariant = vm.ThemeVariant;
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
             }
         };
