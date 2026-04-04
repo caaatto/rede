@@ -108,6 +108,9 @@ public class Profile
     [JsonPropertyName("themeVariant")]
     public string? ThemeVariant { get; set; } // "dark" (default), "midnight", "dim", "light"
 
+    [JsonPropertyName("lastServerName")]
+    public string? LastServerName { get; set; } // remembered server choice for quick login
+
     // Status / Presence
     [JsonPropertyName("status")]
     public string Status { get; set; } = "online"; // "online", "away", "dnd", "invisible"

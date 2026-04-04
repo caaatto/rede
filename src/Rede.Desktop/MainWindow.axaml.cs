@@ -108,11 +108,29 @@ public partial class MainWindow : Window
         _loginVm.IsLoading = false;
         // K1: Unsubscribe before subscribing to prevent duplicate handlers on repeated ShowLogin calls
         _loginVm.OnLoginRequested -= OnLogin;
+        _loginVm.OnQuickLoginRequested -= OnQuickLogin;
         _loginVm.OnRegisterRequested -= OnRegister;
         _loginVm.OnUpdateRequested -= OnUpdateRequested;
         _loginVm.OnLoginRequested += OnLogin;
+        _loginVm.OnQuickLoginRequested += OnQuickLogin;
         _loginVm.OnRegisterRequested += OnRegister;
         _loginVm.OnUpdateRequested += OnUpdateRequested;
+
+        // Enable quick-login mode if a profile hint exists from a previous session
+        var hint = _store.ReadLastProfileHint();
+        if (hint is not null)
+        {
+            _loginVm.QuickLoginHash = hint.Hash;
+            _loginVm.HasQuickLogin = true;
+            if (hint.ServerName is not null && _loginVm.ServerOptions.Contains(hint.ServerName))
+                _loginVm.SelectedServer = hint.ServerName;
+        }
+        else
+        {
+            _loginVm.HasQuickLogin = false;
+            _loginVm.QuickLoginHash = "";
+        }
+
         var loginView = new LoginView { DataContext = _loginVm };
         RootContent.Content = loginView;
     }
@@ -238,6 +256,71 @@ public partial class MainWindow : Window
     private void OnLogin(string userId, string passphrase, string serverUrl, string transport)
     {
         LoginAsync(userId, passphrase, serverUrl, transport);
+    }
+
+    private void OnQuickLogin(string hash, string passphrase, string serverUrl, string transport)
+    {
+        QuickLoginAsync(hash, passphrase, serverUrl, transport);
+    }
+
+    private void SaveLoginHint(Rede.Core.Storage.Profile profile, string serverName)
+    {
+        try
+        {
+            _store.SaveLastProfileHint(profile.UserId, serverName);
+            if (profile.LastServerName != serverName)
+            {
+                profile.LastServerName = serverName;
+                if (_auth?.Passphrase is not null)
+                    _store.SaveProfileDebounced(profile, _auth.Passphrase);
+            }
+        }
+        catch { }
+    }
+
+    private async void QuickLoginAsync(string hash, string passphrase, string serverUrl, string transport)
+    {
+        try
+        {
+            _loginVm.IsLoading = true;
+            _loginVm.ErrorMessage = "";
+            _lastServerUrl = serverUrl;
+            _lastTransport = transport;
+            _isNewUser = false;
+
+            // Decrypt profile locally first so we can extract userId for the boot animation.
+            // LoginByHashAsync will do this again via AuthService but that's acceptable — scrypt
+            // is cached after first derivation, so the second call is ~1ms.
+            var probe = await _store.LoadProfileByHashAsync(hash, passphrase);
+            if (probe is null)
+            {
+                Dispatcher.UIThread.Post(() => { _loginVm.IsLoading = false; _loginVm.ErrorMessage = "Wrong passphrase."; });
+                return;
+            }
+
+            Dispatcher.UIThread.Post(() => StartBootAnimation(probe.UserId));
+
+            InitServices(serverUrl, transport);
+            WireQueueEvents();
+
+            await _conn!.ConnectAsync();
+            await WaitForQueueIfNeeded();
+            var ok = await _auth!.LoginByHashAsync(hash, passphrase);
+            if (!ok)
+            {
+                Dispatcher.UIThread.Post(() =>
+                    ShowBootFail("Profile not found or wrong passphrase."));
+                return;
+            }
+
+            Dispatcher.UIThread.Post(() => _loginVm.Passphrase = "");
+            PropagateProfile();
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.UIThread.Post(() =>
+                ShowBootFail(SanitizeErrorMessage(ex)));
+        }
     }
 
     private void OnRegister(string displayName, string passphrase, string serverUrl, string transport, string inviteCode)
@@ -448,6 +531,8 @@ public partial class MainWindow : Window
         // Auth events
         _auth.OnAuthSuccess += () => Dispatcher.UIThread.Post(() =>
         {
+            if (_auth?.Profile is not null)
+                SaveLoginHint(_auth.Profile, _loginVm.SelectedServer);
             PropagateProfile();
             ShowMain();
         });

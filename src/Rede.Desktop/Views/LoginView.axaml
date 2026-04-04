@@ -30,8 +30,43 @@
 
                 <Separator Margin="0,2" />
 
-                <!-- Mode tabs -->
-                <Grid ColumnDefinitions="*,*">
+                <!-- === QUICK LOGIN MODE (profile hint exists) === -->
+                <StackPanel Spacing="10" IsVisible="{Binding HasQuickLogin}" Width="320">
+                    <TextBlock Text="Welcome back"
+                               Classes="secondary"
+                               HorizontalAlignment="Center" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Passphrase" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightMedium}" />
+                        <TextBox Text="{Binding Passphrase}"
+                                 PasswordChar="*"
+                                 Watermark="enter passphrase"
+                                 IsEnabled="{Binding !IsLoading}" />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Server" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightMedium}" />
+                        <ComboBox ItemsSource="{Binding ServerOptions}"
+                                  SelectedItem="{Binding SelectedServer}"
+                                  HorizontalAlignment="Stretch"
+                                  IsEnabled="{Binding !IsLoading}" />
+                    </StackPanel>
+                    <Button Content="Unlock"
+                            Command="{Binding QuickLoginCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            IsEnabled="{Binding !IsLoading}" />
+                    <Button Content="Use different account"
+                            Classes="ghost"
+                            Command="{Binding UseDifferentAccountCommand}"
+                            HorizontalAlignment="Center"
+                            FontSize="{StaticResource RedeSmallSize}"
+                            Padding="8,4"
+                            IsEnabled="{Binding !IsLoading}" />
+                </StackPanel>
+
+                <!-- Mode tabs (hidden in quick-login mode) -->
+                <Grid ColumnDefinitions="*,*" IsVisible="{Binding !HasQuickLogin}">
                     <Border Grid.Column="0"
                             BorderThickness="0,0,0,2"
                             Padding="0,0,0,8"
@@ -59,7 +94,13 @@
                 </Grid>
 
                 <!-- === LOGIN MODE: single column === -->
-                <StackPanel Spacing="10" IsVisible="{Binding !IsRegisterMode}" Width="320">
+                <StackPanel Spacing="10" Width="320">
+                    <StackPanel.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="!IsRegisterMode" />
+                            <Binding Path="!HasQuickLogin" />
+                        </MultiBinding>
+                    </StackPanel.IsVisible>
 
                     <!-- User ID -->
                     <StackPanel Spacing="4">
@@ -105,7 +146,13 @@
                 </StackPanel>
 
                 <!-- === REGISTER MODE: two columns === -->
-                <Grid ColumnDefinitions="*,16,*" IsVisible="{Binding IsRegisterMode}" Width="520">
+                <Grid ColumnDefinitions="*,16,*" Width="520">
+                    <Grid.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="IsRegisterMode" />
+                            <Binding Path="!HasQuickLogin" />
+                        </MultiBinding>
+                    </Grid.IsVisible>
 
                     <!-- Left column: identity -->
                     <StackPanel Grid.Column="0" Spacing="10">
@@ -170,8 +217,14 @@
                         HorizontalAlignment="Center"
                         HorizontalContentAlignment="Center"
                         MinWidth="200"
-                        IsVisible="{Binding IsRegisterMode}"
-                        IsEnabled="{Binding !IsLoading}" />
+                        IsEnabled="{Binding !IsLoading}">
+                    <Button.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="IsRegisterMode" />
+                            <Binding Path="!HasQuickLogin" />
+                        </MultiBinding>
+                    </Button.IsVisible>
+                </Button>
 
                 <!-- Error message -->
                 <TextBlock Text="{Binding ErrorMessage}"

@@ -53,6 +53,18 @@ public class AuthService
         return true;
     }
 
+    /// <summary>Quick login by file hash — UserId is recovered from the decrypted profile.</summary>
+    public async Task<bool> LoginByHashAsync(string hashHex, string passphrase)
+    {
+        Passphrase = passphrase;
+        Profile = await _store.LoadProfileByHashAsync(hashHex, passphrase);
+        if (Profile is null) return false;
+
+        _conn.On(Msg.AuthChallenge, HandleAuthChallenge);
+        SendAuth();
+        return true;
+    }
+
     /// <summary>Register a new account.</summary>
     public async Task RegisterAsync(string displayName, string passphrase, string inviteCode)
     {

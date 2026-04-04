@@ -122,20 +122,92 @@ public class ProfileStore
                 return null;
         }
 
-        var json = await File.ReadAllTextAsync(p);
+        return await DecryptProfileFileAsync(p, passphrase);
+    }
+
+    /// <summary>
+    /// Load a profile directly by its file hash (sha256 hex of userId) without needing
+    /// the plaintext userId. The decrypted profile contains UserId internally.
+    /// Used by quick-login flow.
+    /// </summary>
+    public async Task<Profile?> LoadProfileByHashAsync(string hashHex, string passphrase)
+    {
+        EnsureDir();
+        // Validate hash format: 64 hex chars (no path traversal)
+        if (hashHex.Length != 64 || !IsHexLower(hashHex)) return null;
+        var p = Path.Combine(DataDir, $"{hashHex}.enc");
+        if (!File.Exists(p)) return null;
+        return await DecryptProfileFileAsync(p, passphrase);
+    }
+
+    private static bool IsHexLower(string s)
+    {
+        foreach (var c in s)
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+        return true;
+    }
+
+    private async Task<Profile?> DecryptProfileFileAsync(string path, string passphrase)
+    {
+        var json = await File.ReadAllTextAsync(path);
         var envelope = JsonSerializer.Deserialize<ProfileEncryption.EncryptedEnvelope>(json, JsonOpts);
         if (envelope is null) return null;
 
         var profile = ProfileEncryption.Decrypt<Profile>(envelope, passphrase);
         if (profile is not null)
         {
-            // Cache the scrypt-derived key so subsequent saves skip scrypt (~1ms vs 0.5-2s)
             CacheKey(passphrase);
-
             if (MigrateProfile(profile))
                 await SaveProfileAsync(profile, passphrase);
         }
         return profile;
+    }
+
+    // --- Quick-login hint: remembers the last profile's filename (sha256 hex of userId)
+    // so the user only needs to type their passphrase on next launch. The hash is already
+    // the .enc filename on disk, so this file leaks no information beyond directory listing.
+
+    private static string HintPath => Path.Combine(DataDir, ".lastprofile");
+
+    public record LastProfileHint(string Hash, string? ServerName);
+
+    public void SaveLastProfileHint(string userId, string? serverName = null)
+    {
+        try
+        {
+            EnsureDir();
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(userId))).ToLowerInvariant();
+            // Line 1: hash, Line 2 (optional): server name (one of hardcoded options, not sensitive)
+            var content = serverName is null ? hash : $"{hash}\n{serverName}";
+            File.WriteAllText(HintPath, content);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(HintPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch { }
+    }
+
+    public LastProfileHint? ReadLastProfileHint()
+    {
+        try
+        {
+            if (!File.Exists(HintPath)) return null;
+            var content = File.ReadAllText(HintPath);
+            var lines = content.Split('\n', StringSplitOptions.TrimEntries);
+            if (lines.Length == 0) return null;
+            var hash = lines[0];
+            if (hash.Length != 64 || !IsHexLower(hash)) return null;
+            var p = Path.Combine(DataDir, $"{hash}.enc");
+            if (!File.Exists(p)) return null;
+            var server = lines.Length > 1 && !string.IsNullOrWhiteSpace(lines[1]) ? lines[1] : null;
+            return new LastProfileHint(hash, server);
+        }
+        catch { return null; }
+    }
+
+    public void ClearLastProfileHint()
+    {
+        try { if (File.Exists(HintPath)) File.Delete(HintPath); }
+        catch { }
     }
 
     /// <summary>

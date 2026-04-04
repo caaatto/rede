@@ -19,6 +19,12 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private bool _isRegistering;
     [ObservableProperty] private bool _isRegisterMode;
 
+    // Quick login: set when a profile hint exists from a previous session.
+    // Only the passphrase field is shown — the userId is recovered from the
+    // decrypted profile file so it never needs to be entered again.
+    [ObservableProperty] private bool _hasQuickLogin;
+    [ObservableProperty] private string _quickLoginHash = "";
+
     public static readonly (string Name, string Url, string Transport)[] Servers =
     {
         ("I2Pd Nürnberg", "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p", "I2P"),
@@ -51,6 +57,8 @@ public partial class LoginViewModel : ViewModelBase
 
     // (userId, passphrase, serverUrl, transport)
     public event Action<string, string, string, string>? OnLoginRequested;
+    // (hashHex, passphrase, serverUrl, transport)
+    public event Action<string, string, string, string>? OnQuickLoginRequested;
     // (displayName, passphrase, serverUrl, transport, inviteCode)
     public event Action<string, string, string, string, string>? OnRegisterRequested;
     public event Action? OnUpdateRequested;
@@ -100,6 +108,36 @@ public partial class LoginViewModel : ViewModelBase
     private void TriggerUpdate()
     {
         OnUpdateRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private void QuickLogin()
+    {
+        if (string.IsNullOrWhiteSpace(Passphrase))
+        {
+            ErrorMessage = "Passphrase required.";
+            return;
+        }
+        ErrorMessage = "";
+        IsLoading = true;
+        try
+        {
+            OnQuickLoginRequested?.Invoke(QuickLoginHash, Passphrase, ServerUrl, Transport);
+        }
+        catch
+        {
+            ErrorMessage = "Login failed. Please try again.";
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand]
+    private void UseDifferentAccount()
+    {
+        HasQuickLogin = false;
+        QuickLoginHash = "";
+        Passphrase = "";
+        ErrorMessage = "";
     }
 
     [RelayCommand]
