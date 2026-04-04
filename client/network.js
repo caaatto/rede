@@ -251,6 +251,19 @@ class RedeConnection {
             return;
           }
         }
+        // Queue messages
+        if (msg.type === 'queue_position') {
+          this._isQueued = true;
+          console.log(`[QUEUE] Position ${msg.position}/${msg.total} — waiting for slot...`);
+          if (this.onQueuePosition) this.onQueuePosition(msg.position, msg.total);
+          return;
+        }
+        if (msg.type === 'queue_admit') {
+          this._isQueued = false;
+          console.log('[QUEUE] Admitted — proceeding with auth');
+          if (this.onQueueAdmit) this.onQueueAdmit();
+          return;
+        }
         const handler = this.handlers.get(msg.type);
         if (handler) handler(msg);
       });

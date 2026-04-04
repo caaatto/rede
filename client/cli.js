@@ -178,6 +178,14 @@ async function connectAndAuth(profile, passphrase) {
       reject(new Error('Connection timeout'));
     }, opts.i2p ? 120000 : 30000);
 
+    // Queue handling
+    conn.onQueuePosition = (pos, total) => {
+      spinner.update(`QUEUE ${pos}/${total}`);
+    };
+    conn.onQueueAdmit = () => {
+      spinner.update('ADMITTED');
+    };
+
     conn.on(MSG.AUTH_CHALLENGE, (msg) => {
       // Domain-separated: sign "AUTH_CHALLENGE:<base64>" to prevent cross-protocol signature reuse
       const signature = cryptoMod.signString('AUTH_CHALLENGE:' + msg.challenge, profile.signingSecretKey);

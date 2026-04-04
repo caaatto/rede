@@ -100,6 +100,10 @@ public static class Msg
     public const string StatusSubscribe = "status_subscribe";
     public const string StatusChange = "status_change";
 
+    // Queue
+    public const string QueuePosition = "queue_position";
+    public const string QueueAdmit = "queue_admit";
+
     // System
     public const string Error = "error";
     public const string PendingMessages = "pending_messages";

@@ -45,6 +45,23 @@ public partial class MainWindow : Window
             ShowLogin();
             CheckForUpdatesAsync();
         };
+        Closing += OnWindowClosing;
+    }
+
+    private bool _flushingOnClose;
+    private async void OnWindowClosing(object? sender, Avalonia.Controls.WindowClosingEventArgs e)
+    {
+        // Flush any pending debounced saves before window closes — otherwise
+        // recent profile edits (accent color, avatar, status) can be lost if
+        // the user closes within the 500ms debounce window.
+        if (_flushingOnClose) return;
+        if (_auth?.Profile is null || _auth?.Passphrase is null) return;
+        e.Cancel = true;
+        _flushingOnClose = true;
+        try { await _store.FlushAsync(_auth.Profile, _auth.Passphrase); }
+        catch { }
+        _conn?.Dispose();
+        Close();
     }
 
     private async void CheckForUpdatesAsync()
@@ -228,6 +245,35 @@ public partial class MainWindow : Window
         RegisterAsync(displayName, passphrase, serverUrl, transport, inviteCode);
     }
 
+    private TaskCompletionSource? _queueAdmitTcs;
+    private bool _isQueued;
+
+    private void WireQueueEvents()
+    {
+        _isQueued = false;
+        _queueAdmitTcs = new TaskCompletionSource();
+
+        _conn!.OnQueuePosition += (pos, total) =>
+        {
+            _isQueued = true;
+            Dispatcher.UIThread.Post(() => _bootView?.UpdateQueueStatus(pos, total));
+        };
+
+        _conn!.OnQueueAdmit += () =>
+        {
+            Dispatcher.UIThread.Post(() => _bootView?.ShowQueueAdmitted());
+            _queueAdmitTcs?.TrySetResult();
+        };
+    }
+
+    private async Task WaitForQueueIfNeeded()
+    {
+        // Give server a moment to send QUEUE_POSITION if we're queued
+        await Task.Delay(200);
+        if (_isQueued)
+            await (_queueAdmitTcs?.Task ?? Task.CompletedTask);
+    }
+
     private async void LoginAsync(string userId, string passphrase, string serverUrl, string transport)
     {
         try
@@ -242,8 +288,10 @@ public partial class MainWindow : Window
             Dispatcher.UIThread.Post(() => StartBootAnimation(userId));
 
             InitServices(serverUrl, transport);
+            WireQueueEvents();
 
             await _conn!.ConnectAsync();
+            await WaitForQueueIfNeeded();
             var ok = await _auth!.LoginAsync(userId, passphrase);
             if (!ok)
             {
@@ -277,8 +325,10 @@ public partial class MainWindow : Window
             Dispatcher.UIThread.Post(() => StartBootAnimation(displayName));
 
             InitServices(serverUrl, transport);
+            WireQueueEvents();
 
             await _conn!.ConnectAsync();
+            await WaitForQueueIfNeeded();
             await _auth!.RegisterAsync(displayName, passphrase, inviteCode);
 
             // H1: Clear sensitive fields from login VM after successful registration

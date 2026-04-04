@@ -38,6 +38,8 @@ public class RedeConnection : IDisposable
     public event Action? OnDisconnected;
     public event Action? OnReconnecting;
     public event Action<string>? OnError;
+    public event Action<int, int>? OnQueuePosition; // position, total
+    public event Action? OnQueueAdmit;
 
     private bool _isConnected;
     public bool IsConnected => _isConnected;
@@ -365,6 +367,21 @@ public class RedeConnection : IDisposable
                     }
 
                     var type = ProtocolSerializer.GetType(msg);
+
+                    // Queue messages — fire events directly (no handler registration needed)
+                    if (type == Msg.QueuePosition)
+                    {
+                        var pos = ProtocolSerializer.GetInt(msg, "position");
+                        var total = ProtocolSerializer.GetInt(msg, "total");
+                        OnQueuePosition?.Invoke(pos, total);
+                        continue;
+                    }
+                    if (type == Msg.QueueAdmit)
+                    {
+                        OnQueueAdmit?.Invoke();
+                        continue;
+                    }
+
                     if (type is not null && _handlers.TryGetValue(type, out var handler))
                     {
                         try { handler(msg); }

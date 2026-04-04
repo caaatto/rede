@@ -282,5 +282,50 @@ public partial class BootView : UserControl
         return result;
     }
 
+    /// <summary>
+    /// Update queue position display during boot. Called from MainWindow when server is full.
+    /// </summary>
+    public void UpdateQueueStatus(int position, int total)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            // Replace or append queue line
+            var queueLine = $"  [QUEUE   ] ... Position {position}/{total} — waiting for slot";
+            var text = _buffer.ToString();
+            var idx = text.IndexOf("  [QUEUE   ]", StringComparison.Ordinal);
+            if (idx >= 0)
+            {
+                var end = text.IndexOf('\n', idx);
+                if (end < 0) end = text.Length;
+                _buffer.Remove(idx, end - idx);
+                _buffer.Insert(idx, queueLine);
+            }
+            else
+            {
+                _buffer.AppendLine(queueLine);
+            }
+            _bootText.Text = _buffer.ToString();
+            _scroller.ScrollToEnd();
+        });
+    }
+
+    public void ShowQueueAdmitted()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var text = _buffer.ToString();
+            var idx = text.IndexOf("  [QUEUE   ]", StringComparison.Ordinal);
+            if (idx >= 0)
+            {
+                var end = text.IndexOf('\n', idx);
+                if (end < 0) end = text.Length;
+                _buffer.Remove(idx, end - idx);
+                _buffer.Insert(idx, "  [QUEUE   ] ... ADMITTED — connecting");
+            }
+            _bootText.Text = _buffer.ToString();
+            _scroller.ScrollToEnd();
+        });
+    }
+
     private static Task Delay(int ms) => Task.Delay(ms);
 }

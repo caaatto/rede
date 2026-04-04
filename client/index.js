@@ -163,6 +163,23 @@ async function main() {
     return;
   }
 
+  // Wait for queue admission if server is full
+  conn.onQueuePosition = (pos, total) => {
+    ui.setStatus(`Queue: ${pos}/${total} — waiting for slot...`);
+    ui.render();
+  };
+  await new Promise(resolve => {
+    // Give server a moment to send QUEUE_POSITION
+    setTimeout(() => {
+      if (!conn._isQueued) return resolve();
+      conn.onQueueAdmit = () => {
+        ui.setStatus('Admitted — authenticating...');
+        ui.render();
+        resolve();
+      };
+    }, 200);
+  });
+
   // Re-authenticate on reconnect
   conn.onReconnect = () => {
     ui.setStatus('Reconnecting...');

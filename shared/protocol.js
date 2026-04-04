@@ -99,6 +99,10 @@ const MSG = {
   STATUS_SUBSCRIBE: 'status_subscribe',
   STATUS_CHANGE: 'status_change',
 
+  // Queue
+  QUEUE_POSITION: 'queue_position',   // server → client: { position, estimated_wait }
+  QUEUE_ADMIT: 'queue_admit',         // server → client: you're in, proceed with auth
+
   // System
   ERROR: 'error',
   PENDING_MESSAGES: 'pending_messages',

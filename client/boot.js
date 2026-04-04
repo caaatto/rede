@@ -8,6 +8,7 @@ const C = {
   bold: '\x1b[1m',
   red: '\x1b[31m',
   brightRed: '\x1b[91m',
+  yellow: '\x1b[33m',
 };
 
 function randomHex(len) {
@@ -185,6 +186,9 @@ async function cliBoot(options = {}) {
   }, 80);
 
   return {
+    update: (status) => {
+      process.stderr.write(`\r${C.dim}${C.red}>>>>${C.reset} ${C.bold}${C.red}R3D3${C.reset} ${C.dim}${C.red}::${C.reset} ${C.red}${command}${C.reset} ${C.dim}${C.red}::${C.reset} ${C.yellow}${status}${C.reset}   `);
+    },
     stop: (status = 'OK') => {
       clearInterval(spinner);
       process.stderr.write(`\r${C.dim}${C.red}>>>>${C.reset} ${C.bold}${C.red}R3D3${C.reset} ${C.dim}${C.red}::${C.reset} ${C.red}${command}${C.reset} ${C.dim}${C.red}::${C.reset} ${C.red}${userId}${C.reset} ${C.dim}${C.red}::${C.reset} ${C.red}${status}${C.reset}\n`);
