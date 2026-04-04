@@ -35,28 +35,31 @@ public partial class SettingsView : UserControl
         foreach (var hex in SettingsViewModel.PresetColors)
         {
             var color = hex;
-            var swatch = new Border
+            var btn = new Button
             {
-                Width = 32,
-                Height = 32,
-                CornerRadius = new CornerRadius(16),
+                Width = 36,
+                Height = 36,
+                MinWidth = 0,
+                MinHeight = 0,
+                CornerRadius = new CornerRadius(18),
                 Background = Brush.Parse(color),
                 Margin = new Thickness(4),
                 Cursor = new Cursor(StandardCursorType.Hand),
-                BorderThickness = new Thickness(2),
+                BorderThickness = new Thickness(3),
                 BorderBrush = vm.AccentColor == color
                     ? Brush.Parse("#e0e0e8")
                     : Brushes.Transparent,
+                Padding = new Thickness(0),
                 Tag = color,
             };
 
-            swatch.PointerPressed += (s, _) =>
+            btn.Click += (s, _) =>
             {
-                if (DataContext is SettingsViewModel v && s is Border b && b.Tag is string c)
+                if (DataContext is SettingsViewModel v && s is Button b && b.Tag is string c)
                     v.AccentColor = c;
             };
 
-            ColorPalette.Children.Add(swatch);
+            ColorPalette.Children.Add(btn);
         }
     }
 
@@ -71,7 +74,7 @@ public partial class SettingsView : UserControl
         if (ColorPalette is null || DataContext is not SettingsViewModel vm) return;
         foreach (var child in ColorPalette.Children)
         {
-            if (child is Border b && b.Tag is string hex)
+            if (child is Button b && b.Tag is string hex)
                 b.BorderBrush = vm.AccentColor == hex ? Brush.Parse("#e0e0e8") : Brushes.Transparent;
         }
     }

@@ -396,6 +396,8 @@
                              KeyDown="InputBox_KeyDown" />
                     <Button Grid.Column="2"
                             Content="Send"
+                            Background="{Binding OwnAccentBrush}"
+                            Foreground="White"
                             Command="{Binding SendMessageCommand}" />
                 </Grid>
             </Border>
