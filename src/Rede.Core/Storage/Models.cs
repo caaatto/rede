@@ -336,3 +336,13 @@ public class ArchivedSignedPreKey
     [JsonPropertyName("archivedAt")]
     public long ArchivedAt { get; set; }
 }
+
+/// <summary>
+/// Source-generated JSON serializer for Profile — eliminates reflection overhead on every save.
+/// </summary>
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    WriteIndented = false)]
+[JsonSerializable(typeof(Profile))]
+internal partial class ProfileJsonContext : JsonSerializerContext { }

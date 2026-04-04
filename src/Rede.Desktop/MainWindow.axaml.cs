@@ -363,6 +363,12 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage($"[Error] {err}");
         });
 
+        // Surface profile save errors to UI
+        _store.OnSaveError += err => Dispatcher.UIThread.Post(() =>
+        {
+            _mainVm.AddSystemMessage($"[WARNING] {err}");
+        });
+
         // Status / Presence handler — server broadcasts to all, client filters locally
         _conn.On(Rede.Core.Protocol.Msg.StatusChange, msg =>
         {
@@ -617,6 +623,8 @@ public partial class MainWindow : Window
         });
     }
 
+    private string? _ownAvatarDataCache; // track own avatar data to avoid redundant bitmap decode
+
     private void UpdateOwnProfilePanel()
     {
         if (_auth?.Profile is null) return;
@@ -627,26 +635,30 @@ public partial class MainWindow : Window
         _mainVm.OwnStatus = p.Status ?? "online";
         _mainVm.OwnCustomStatus = p.CustomStatus;
 
-        // Load avatar
-        if (!string.IsNullOrEmpty(p.AvatarData))
+        // Only re-decode avatar bitmap if data actually changed
+        if (p.AvatarData != _ownAvatarDataCache)
         {
-            try
+            _ownAvatarDataCache = p.AvatarData;
+            if (!string.IsNullOrEmpty(p.AvatarData))
             {
-                var bytes = Convert.FromBase64String(p.AvatarData);
-                using var ms = new System.IO.MemoryStream(bytes);
-                var oldBmp = _mainVm.OwnAvatarImage;
-                _mainVm.OwnAvatarImage = new Avalonia.Media.Imaging.Bitmap(ms);
-                _mainVm.HasOwnAvatar = true;
-                oldBmp?.Dispose(); // M3: Dispose previous bitmap
+                try
+                {
+                    var bytes = Convert.FromBase64String(p.AvatarData);
+                    using var ms = new System.IO.MemoryStream(bytes);
+                    var oldBmp = _mainVm.OwnAvatarImage;
+                    _mainVm.OwnAvatarImage = new Avalonia.Media.Imaging.Bitmap(ms);
+                    _mainVm.HasOwnAvatar = true;
+                    oldBmp?.Dispose();
+                }
+                catch { _mainVm.OwnAvatarImage = null; _mainVm.HasOwnAvatar = false; }
             }
-            catch { _mainVm.OwnAvatarImage = null; _mainVm.HasOwnAvatar = false; }
-        }
-        else
-        {
-            var oldBmp = _mainVm.OwnAvatarImage;
-            _mainVm.OwnAvatarImage = null;
-            _mainVm.HasOwnAvatar = false;
-            oldBmp?.Dispose();
+            else
+            {
+                var oldBmp = _mainVm.OwnAvatarImage;
+                _mainVm.OwnAvatarImage = null;
+                _mainVm.HasOwnAvatar = false;
+                oldBmp?.Dispose();
+            }
         }
     }
 
@@ -932,9 +944,11 @@ public partial class MainWindow : Window
         }
     }
 
-    // Track avatar data hashes to avoid redundant bitmap reloads
+    // Track avatar/icon data to avoid redundant bitmap reloads
     private readonly Dictionary<string, string?> _avatarDataCache = new();
     private readonly Dictionary<string, string?> _iconDataCache = new();
+    // O(1) index for contact VMs by userId
+    private readonly Dictionary<string, ContactItemViewModel> _contactIndex = new();
 
     private void RefreshContacts()
     {
@@ -947,8 +961,7 @@ public partial class MainWindow : Window
         foreach (var (id, c) in contacts)
         {
             existingIds.Add(id);
-            var existing = _mainVm.Contacts.FirstOrDefault(x => x.UserId == id);
-            if (existing is not null)
+            if (_contactIndex.TryGetValue(id, out var existing))
             {
                 // Differential update — only set changed properties
                 var newName = SanitizeDisplayString(c.DisplayName ?? id, 64);
@@ -977,6 +990,7 @@ public partial class MainWindow : Window
                 };
                 contactVm.LoadAvatar(c.AvatarData);
                 _avatarDataCache[id] = c.AvatarData;
+                _contactIndex[id] = contactVm;
                 _mainVm.Contacts.Add(contactVm);
             }
         }
@@ -988,6 +1002,7 @@ public partial class MainWindow : Window
             if (!existingIds.Contains(uid))
             {
                 _mainVm.Contacts.RemoveAt(i);
+                _contactIndex.Remove(uid);
                 _avatarDataCache.Remove(uid);
             }
         }

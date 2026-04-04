@@ -890,13 +890,20 @@ function verifyServerSignature(msg, serverSigningKeyB64) {
 
 // Encrypt an inner payload so only the recipient can unseal it.
 // Uses a one-time ephemeral key for the outer box.
+const SEALED_SENDER_DOMAIN_TAG = naclUtil.decodeUTF8('SEALED_SENDER_V1:');
+
 function sealMessage(innerPayloadJson, recipientIdentityPubKeyB64) {
   const ephKP = nacl.box.keyPair();
   const recipPub = naclUtil.decodeBase64(recipientIdentityPubKeyB64);
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const plaintext = naclUtil.decodeUTF8(innerPayloadJson);
+  const jsonBytes = naclUtil.decodeUTF8(innerPayloadJson);
+  // Prepend domain tag for domain separation
+  const plaintext = new Uint8Array(SEALED_SENDER_DOMAIN_TAG.length + jsonBytes.length);
+  plaintext.set(SEALED_SENDER_DOMAIN_TAG, 0);
+  plaintext.set(jsonBytes, SEALED_SENDER_DOMAIN_TAG.length);
   const ciphertext = nacl.box(plaintext, nonce, recipPub, ephKP.secretKey);
   zeroOut(ephKP.secretKey);
+  zeroOut(plaintext);
   return {
     ephemeralKey: naclUtil.encodeBase64(ephKP.publicKey),
     nonce: naclUtil.encodeBase64(nonce),
@@ -913,7 +920,13 @@ function unsealMessage(sealedEnvelope, recipientIdentitySecretKeyB64) {
     const secretKey = naclUtil.decodeBase64(recipientIdentitySecretKeyB64);
     const decrypted = nacl.box.open(ciphertext, nonce, ephPub, secretKey);
     if (!decrypted) return null;
-    const result = naclUtil.encodeUTF8(decrypted);
+    // Verify and strip domain separation tag
+    if (decrypted.length < SEALED_SENDER_DOMAIN_TAG.length) { zeroOut(decrypted); return null; }
+    for (let i = 0; i < SEALED_SENDER_DOMAIN_TAG.length; i++) {
+      if (decrypted[i] !== SEALED_SENDER_DOMAIN_TAG[i]) { zeroOut(decrypted); return null; }
+    }
+    const jsonBytes = decrypted.subarray(SEALED_SENDER_DOMAIN_TAG.length);
+    const result = naclUtil.encodeUTF8(jsonBytes);
     zeroOut(decrypted);
     return JSON.parse(result);
   } catch {

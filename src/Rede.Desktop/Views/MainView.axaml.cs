@@ -426,6 +426,7 @@ public partial class MainView : UserControl
         menu.Items.Add(kickItem);
 
         btn.ContextMenu = menu;
+        menu.Closed += (_, _) => btn.ContextMenu = null;
         menu.Open(btn);
         e.Handled = true;
     }
@@ -902,6 +903,7 @@ public partial class MainView : UserControl
         menu.Items.Add(leaveItem);
 
         btn.ContextMenu = menu;
+        menu.Closed += (_, _) => btn.ContextMenu = null;
         menu.Open(btn);
         e.Handled = true;
     }
@@ -991,6 +993,7 @@ public partial class MainView : UserControl
         if (menu.Items.Count == 0) return;
 
         btn.ContextMenu = menu;
+        menu.Closed += (_, _) => btn.ContextMenu = null;
         menu.Open(btn);
         e.Handled = true;
     }
@@ -1059,6 +1062,7 @@ public partial class MainView : UserControl
         }
 
         border.ContextMenu = menu;
+        menu.Closed += (_, _) => border.ContextMenu = null;
         menu.Open(border);
         e.Handled = true;
     }
@@ -1116,6 +1120,7 @@ public partial class MainView : UserControl
         menu.Items.Add(fpItem);
 
         btn.ContextMenu = menu;
+        menu.Closed += (_, _) => btn.ContextMenu = null;
         menu.Open(btn);
         e.Handled = true;
     }

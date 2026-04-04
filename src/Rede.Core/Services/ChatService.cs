@@ -76,10 +76,13 @@ public class ChatService
         if (avatarMimeType is not null) payload["avatarMimeType"] = avatarMimeType;
 
         var text = payload.ToJsonString();
-        foreach (var contactId in Profile.Contacts.Keys)
+        // Send to all contacts in background — avoids blocking UI with many contacts
+        var contactIds = Profile.Contacts.Keys.ToList();
+        Task.Run(() =>
         {
-            SendMessage(contactId, text, 0);
-        }
+            foreach (var contactId in contactIds)
+                SendMessage(contactId, text, 0);
+        });
     }
 
     public void SendMessage(string targetId, string text, int ttl = 0)

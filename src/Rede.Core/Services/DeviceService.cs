@@ -91,6 +91,13 @@ public class DeviceService
         Profile.OwnDevices[deviceId] = new DeviceKeys { PublicKey = publicKey, SigningKey = signingKey };
         await _store.SaveProfileAsync(Profile, Passphrase);
 
+        // H10: Show device fingerprint for out-of-band verification
+        var fingerprintBytes = SHA256.HashData(Convert.FromBase64String(signingKey));
+        var fingerprint = Convert.ToHexString(fingerprintBytes[..8]).ToLowerInvariant();
+        var formatted = string.Join(":", Enumerable.Range(0, fingerprint.Length / 2)
+            .Select(i => fingerprint.Substring(i * 2, 2)));
         OnSystemMessage?.Invoke($"New device linked: {deviceId}");
+        OnSystemMessage?.Invoke($"[SECURITY] Device fingerprint: {formatted}");
+        OnSystemMessage?.Invoke("[SECURITY] Verify this fingerprint matches the new device. Use /devices to review all linked devices.");
     }
 }

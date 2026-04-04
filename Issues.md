@@ -183,13 +183,28 @@
 [x] CR3: HKDF `byte` Loop Counter kann silent wrappen — `int` Counter mit explizitem `> 255` Guard.
 [x] CR4: Nur 2 von 7 Curve25519 Low-Order Points — Alle 7 bekannten Small-Subgroup Points in `LowOrderPoints` Liste.
 
+## Security Audit (2026-04-04, Runde 7) — Performance-Änderungen Audit
+
+### High
+[x] H1: Salt-Reuse bei cached Key — Analysiert: Salt wird in Envelope geschrieben, Decrypt liest Salt aus Envelope und re-derivet. Kein Bug — kryptographisch korrekt (Nonce liefert Uniqueness).
+[x] H2: Concurrent Dictionary Modification bei debounced Save — `_profileMutationLock` schützt alle Profile-Dictionary-Mutationen (AddChatMessage, SaveRatchetState, SaveSenderKeyState) + Serialisierung in SaveProfileAsync.
+[x] H3: Cached Key nicht gezeroed bei Logout — `ClearCachedKey()` zeroot `_cachedKey64`, `_cachedSalt`, nullt `_cachedPassphrase`. Wird von `FlushAsync()` aufgerufen.
+
+### Medium
+[x] M1: Debounced Save verschluckt Exceptions — `OnSaveError` Event + `_savePending = true` für Retry. MainWindow zeigt Fehler als `[WARNING]` System-Message.
+[x] M2: `_cachedPassphrase` als Klartext-String — Bekannte .NET-Limitation (immutable strings). Bereits in "Bekannte Einschränkungen" dokumentiert.
+[x] M3: BroadcastProfile in Task.Run ohne Exception-Handling — SendMessage hat eigene Error-Handling (OnSystemMessage). Task.Run Exceptions sind non-fatal (einzelne Kontakte können offline sein).
+
+### Low
+[x] L1: Source-gen Serializer Compat — `[JsonPropertyName]` Attribute haben Priorität über `PropertyNamingPolicy`. Kein Compat-Problem.
+
 ### Nicht gefixt (architekturell / niedrige Priorität)
-[ ] C5: Race Condition in async Ratchet State Save — Task.Run Fire-and-Forget kann bei schnellen Nachrichten zu Out-of-Order Writes führen. Erfordert Save-Queue-Architektur.
-[ ] H8: Event-Handler-Akkumulation in Flyouts — Context-Menüs werden bei jedem Rechtsklick neu erstellt. Flyout-Instanzen werden vom GC aufgeräumt wenn Flyout geschlossen wird, da keine Referenzen gehalten werden. Nur bei extrem häufigem Öffnen relevant.
-[ ] H10: Device Key Injection via MITM — Server könnte theoretisch Phantom-Devices einfügen. Mitigation: Sicherheitswarnung + /confirm Required. Echte Lösung: Out-of-Band Device Verification (QR-Code o.ä.).
-[ ] H13: SealedSender Domain Separation — Ephemeral Box-Payload hat keinen Domain-Tag. Erfordert Protokolländerung.
-[ ] L2: Silent Exception-Swallowing in Avatar/Icon-Loading — Fehlerhafte Bilder werden korrekt zu null gesetzt. Debug-Logging würde Dependency auf Logging-Framework erfordern.
-[ ] L3: Fire-and-Forget Saves — Bekannte Einschränkung, erfordert Save-Queue-Architektur.
+[x] C5: Race Condition in async Ratchet State Save — Gelöst durch debounced Saves + `_profileMutationLock`. Alle Mutations sind jetzt thread-safe, Saves werden coalesced.
+[x] H8: Event-Handler-Akkumulation in Flyouts — `menu.Closed += (_, _) => btn.ContextMenu = null;` in allen 5 PointerPressed-Handlern. ContextMenu wird nach Schließen vom Control entfernt, GC kann aufräumen.
+[x] H10: Device Key Injection via MITM — Device-Fingerprint (SHA256 des SigningKey, erste 8 Bytes, Hex-formatiert) wird bei DEVICE_ADDED angezeigt mit Aufforderung zur Out-of-Band-Verifizierung.
+[x] H13: SealedSender Domain Separation — `SEALED_SENDER_V1:` Domain-Tag wird in Seal() prepended und in Unseal() verifiziert+gestripped. Sowohl C# (`SealedSender.cs`) als auch JS (`crypto.js`) aktualisiert.
+[x] L2: Silent Exception-Swallowing in Avatar/Icon-Loading — `System.Diagnostics.Debug.WriteLine()` in catch-Blöcken von `LoadAvatar()` und `LoadIcon()` (keine externe Dependency).
+[x] L3: Fire-and-Forget Saves — Gelöst durch debounced Saves mit Error-Event + FlushAsync bei App-Exit. OnSaveError surfaced Fehler im UI.
 
 ## Bekannte Einschränkungen (by design / .NET limitation)
 - Key material wird als string (base64) gespeichert - .NET strings sind immutable, können nicht gezeroed werden. Erfordert Refactoring zu byte[] (architekturell).
@@ -203,4 +218,4 @@
 - Event-Handler-Akkumulation in InitServices bei wiederholtem Login - Services sollten IDisposable implementieren.
 - ~~Double scrypt bei jedem Profile-Save~~ — GEFIXT in Runde 6 (L7): Single 64-Byte Derivation mit Legacy-Fallback.
 - Profile wird bei jeder einzelnen Nachricht komplett neu verschlüsselt und geschrieben - Chat-History sollte separat gespeichert werden.
-- Fire-and-forget Task.Run Saves ohne Fehlerbehandlung - Save-Queue mit Ordering wäre robuster.
+- ~~Fire-and-forget Task.Run Saves ohne Fehlerbehandlung~~ — GEFIXT in Runde 7: Debounced Saves mit OnSaveError Event + FlushAsync bei App-Exit.

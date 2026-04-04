@@ -308,7 +308,7 @@ public partial class ContactItemViewModel : ViewModelBase
             old?.Dispose(); // M9: Dispose old bitmap
             HasAvatar = true;
         }
-        catch { AvatarImage?.Dispose(); AvatarImage = null; HasAvatar = false; }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoadAvatar failed: {ex.Message}"); AvatarImage?.Dispose(); AvatarImage = null; HasAvatar = false; }
     }
 }
 
@@ -360,7 +360,7 @@ public partial class PlaceItemViewModel : ViewModelBase
             old?.Dispose(); // M9: Dispose old bitmap
             HasIcon = true;
         }
-        catch { IconImage?.Dispose(); IconImage = null; HasIcon = false; }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoadIcon failed: {ex.Message}"); IconImage?.Dispose(); IconImage = null; HasIcon = false; }
     }
 }
 

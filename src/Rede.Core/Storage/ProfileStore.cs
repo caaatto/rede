@@ -23,6 +23,8 @@ public class ProfileStore
     };
 
     private readonly SemaphoreSlim _saveLock = new(1, 1);
+    // H2: Lock to prevent concurrent Profile dictionary mutation during serialization
+    private readonly object _profileMutationLock = new();
 
     // --- Performance: cached scrypt key + debounced saves ---
     private byte[]? _cachedKey64;       // 64-byte derived key (32 enc + 32 hmac)
@@ -163,18 +165,20 @@ public class ProfileStore
         await _saveLock.WaitAsync();
         try
         {
-            // Use cached key — skips scrypt entirely (~1ms vs 0.5-2s)
-            var envelope = _cachedKey64 is not null
-                ? ProfileEncryption.EncryptWithDerivedKey(profile, _cachedKey64, _cachedSalt)
-                : ProfileEncryption.Encrypt(profile, passphrase);
-            var json = JsonSerializer.Serialize(envelope, JsonOpts);
+            // H2: Hold mutation lock during serialization to prevent concurrent dict modification
+            byte[] bytes;
+            lock (_profileMutationLock)
+            {
+                var envelope = _cachedKey64 is not null
+                    ? ProfileEncryption.EncryptWithDerivedKey(profile, _cachedKey64, _cachedSalt)
+                    : ProfileEncryption.Encrypt(profile, passphrase);
+                bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOpts);
+            }
 
             // Atomic write: temp file, fsync, then rename
             var tmpFile = p + ".tmp";
-            // L2: Write via FileStream and flush to disk before rename
             await using (var fs = new FileStream(tmpFile, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                var bytes = System.Text.Encoding.UTF8.GetBytes(json);
                 await fs.WriteAsync(bytes);
                 fs.Flush(flushToDisk: true);
             }
@@ -198,6 +202,9 @@ public class ProfileStore
     /// Use this for high-frequency mutations (message receive, ratchet state, etc.)
     /// The profile object is snapshotted at write time, so mutations between calls are captured.
     /// </summary>
+    /// <summary>Event raised when a debounced save fails (disk error, etc.)</summary>
+    public event Action<string>? OnSaveError;
+
     public void SaveProfileDebounced(Profile profile, string passphrase)
     {
         _savePending = true;
@@ -216,6 +223,12 @@ public class ProfileStore
                 await SaveProfileAsync(profile, passphrase);
             }
             catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                // M1: Surface save errors instead of silently losing data
+                _savePending = true; // Mark as still pending so flush retries
+                OnSaveError?.Invoke($"Profile save failed: {ex.Message}");
+            }
         });
     }
 
@@ -232,6 +245,18 @@ public class ProfileStore
             _savePending = false;
             await SaveProfileAsync(profile, passphrase);
         }
+        // H3: Zero cached key material on flush/logout
+        ClearCachedKey();
+    }
+
+    /// <summary>
+    /// Zero and discard cached key material. Call on logout or app exit.
+    /// </summary>
+    public void ClearCachedKey()
+    {
+        if (_cachedKey64 is not null) { CryptoService.ZeroOut(_cachedKey64); _cachedKey64 = null; }
+        if (_cachedSalt is not null) { CryptoService.ZeroOut(_cachedSalt); _cachedSalt = null; }
+        _cachedPassphrase = null;
     }
 
     public async Task<Profile> CreateProfileAsync(string internalId, string displayName, string passphrase)
@@ -395,24 +420,26 @@ public class ProfileStore
 
     public void AddChatMessage(Profile profile, string chatId, ChatMessage message, string passphrase)
     {
-        if (!profile.ChatHistory.ContainsKey(chatId))
-            profile.ChatHistory[chatId] = new();
-
-        profile.ChatHistory[chatId].Add(message);
-
-        // H3: Cap total chat history entries to prevent unbounded growth
-        if (profile.ChatHistory.Count > 500)
+        lock (_profileMutationLock)
         {
-            var oldest = profile.ChatHistory.Keys
-                .Where(k => k != chatId)
-                .OrderBy(k => profile.ChatHistory[k].LastOrDefault()?.Ts ?? 0)
-                .First();
-            profile.ChatHistory.Remove(oldest);
+            if (!profile.ChatHistory.ContainsKey(chatId))
+                profile.ChatHistory[chatId] = new();
+
+            profile.ChatHistory[chatId].Add(message);
+
+            // H3: Cap total chat history entries to prevent unbounded growth
+            if (profile.ChatHistory.Count > 500)
+            {
+                var oldest = profile.ChatHistory.Keys
+                    .Where(k => k != chatId)
+                    .OrderBy(k => profile.ChatHistory[k].LastOrDefault()?.Ts ?? 0)
+                    .First();
+                profile.ChatHistory.Remove(oldest);
+            }
+
+            if (profile.ChatHistory[chatId].Count > 1000)
+                profile.ChatHistory[chatId] = profile.ChatHistory[chatId].TakeLast(1000).ToList();
         }
-
-        if (profile.ChatHistory[chatId].Count > 1000)
-            profile.ChatHistory[chatId] = profile.ChatHistory[chatId].TakeLast(1000).ToList();
-
         SaveProfileDebounced(profile, passphrase);
     }
 
@@ -457,8 +484,8 @@ public class ProfileStore
 
     public Task SaveRatchetStateAsync(Profile profile, string contactId, JsonElement state, string passphrase, string? deviceId = null)
     {
-        var key = RatchetKey(contactId, deviceId);
-        profile.RatchetStates[key] = state;
+        var rk = RatchetKey(contactId, deviceId);
+        lock (_profileMutationLock) { profile.RatchetStates[rk] = state; }
         SaveProfileDebounced(profile, passphrase);
         return Task.CompletedTask;
     }
@@ -485,7 +512,7 @@ public class ProfileStore
 
     public Task SaveSenderKeyStateAsync(Profile profile, string groupId, JsonElement state, string passphrase)
     {
-        profile.SenderKeys[groupId] = state;
+        lock (_profileMutationLock) { profile.SenderKeys[groupId] = state; }
         SaveProfileDebounced(profile, passphrase);
         return Task.CompletedTask;
     }

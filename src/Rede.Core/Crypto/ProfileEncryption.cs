@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Rede.Core.Storage;
 using Sodium;
 
 namespace Rede.Core.Crypto;
@@ -57,7 +58,6 @@ public static class ProfileEncryption
     public static EncryptedEnvelope Encrypt(object data, string passphrase)
     {
         var salt = SodiumCore.GetRandomBytes(16);
-        // L7: Single 64-byte scrypt derivation for both encryption key and HMAC key
         var combined = DeriveKey(passphrase, salt, ScryptNCurrent, 64);
         var envelope = EncryptWithDerivedKey(data, combined, salt);
         CryptoService.ZeroOut(combined);
@@ -79,8 +79,10 @@ public static class ProfileEncryption
         Buffer.BlockCopy(cachedKey64, 32, hmacKey, 0, 32);
 
         var nonce = SodiumCore.GetRandomBytes(24);
-        var jsonStr = JsonSerializer.Serialize(data);
-        var plaintext = Encoding.UTF8.GetBytes(jsonStr);
+        // Use source-generated serializer + direct UTF-8 bytes (no intermediate string)
+        var plaintext = data is Profile profile
+            ? JsonSerializer.SerializeToUtf8Bytes(profile, ProfileJsonContext.Default.Profile)
+            : JsonSerializer.SerializeToUtf8Bytes(data);
         var encrypted = SecretBox.Create(plaintext, nonce, key);
         CryptoService.ZeroOut(key);
         CryptoService.ZeroOut(plaintext);
