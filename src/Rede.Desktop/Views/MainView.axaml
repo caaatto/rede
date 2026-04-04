@@ -23,23 +23,17 @@
                 <!-- Collapse toggle (always at top) -->
                 <Border DockPanel.Dock="Top" Padding="4,6" Background="{StaticResource RedeSurfaceBrush}">
                     <Grid ColumnDefinitions="*,Auto">
-                        <!-- Status dot + text (hidden when collapsed) -->
-                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8"
-                                    VerticalAlignment="Center" Margin="8,0,0,0">
-                            <Ellipse Width="8" Height="8"
-                                     Fill="{Binding IsConnected, Converter={StaticResource StatusColorConverter}}" />
-                            <TextBlock Text="{Binding ConnectionStatus}"
-                                       Classes="secondary"
-                                       VerticalAlignment="Center"
-                                       IsVisible="{Binding !IsSidebarCollapsed}" />
-                            <Button Classes="ghost"
-                                    Content="Retry"
-                                    Padding="4,2"
-                                    FontSize="{StaticResource RedeSmallSize}"
-                                    Foreground="{StaticResource RedeAccentVioletBrush}"
-                                    IsVisible="{Binding !IsConnected}"
-                                    Click="RetryConnection_Click" />
-                        </StackPanel>
+                        <!-- Retry button (only visible when disconnected) -->
+                        <Button Grid.Column="0"
+                                Classes="ghost"
+                                Content="Retry"
+                                Padding="8,2"
+                                Margin="8,0,0,0"
+                                HorizontalAlignment="Left"
+                                FontSize="{StaticResource RedeSmallSize}"
+                                Foreground="{StaticResource RedeAccentVioletBrush}"
+                                IsVisible="{Binding !IsConnected}"
+                                Click="RetryConnection_Click" />
                         <!-- Toggle button -->
                         <Button Grid.Column="1" Classes="ghost"
                                 Command="{Binding ToggleSidebarCommand}"
