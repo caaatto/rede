@@ -4,293 +4,346 @@
              x:Class="Rede.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,36,0,24">
-    <Border Background="{StaticResource RedeSurfaceBrush}"
-            Padding="32">
-        <StackPanel Spacing="24" MaxWidth="480" HorizontalAlignment="Center">
+    <UserControl.Styles>
+        <Style Selector="ListBox.settings-nav">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem">
+            <Setter Property="Padding" Value="14,10" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource RedeTextSecondaryBrush}" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource RedeSurfaceBrush}" />
+            <Setter Property="TextElement.Foreground" Value="{StaticResource RedeTextPrimaryBrush}" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource RedeAccentVioletBrush}" />
+            <Setter Property="TextElement.Foreground" Value="White" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem:selected:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource RedeAccentVioletBrush}" />
+            <Setter Property="TextElement.Foreground" Value="White" />
+        </Style>
+    </UserControl.Styles>
 
-            <!-- Header -->
-            <Grid ColumnDefinitions="Auto,*">
-                <Button Grid.Column="0" Classes="ghost"
-                        Content="← Back"
-                        Command="{Binding BackCommand}"
-                        Padding="8,4" />
-                <TextBlock Grid.Column="1"
-                           Text="Settings"
-                           Classes="title"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center" />
-            </Grid>
+    <Border Background="{StaticResource RedeSurfaceBrush}">
+    <Grid RowDefinitions="Auto,*" Margin="0,36,0,0">
 
-            <Separator />
+        <!-- Header -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="24,0,24,16">
+            <Button Grid.Column="0" Classes="ghost"
+                    Content="← Back"
+                    Command="{Binding BackCommand}"
+                    Padding="8,4" />
+            <TextBlock Grid.Column="1"
+                       Text="Settings"
+                       Classes="title"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+            <!-- spacer to balance Back button -->
+            <Border Grid.Column="2" Width="60" />
+        </Grid>
 
-            <!-- Profile section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Profile" Classes="header" />
+        <!-- Sidebar + Content -->
+        <Grid Grid.Row="1" ColumnDefinitions="200,*">
 
-                <!-- Avatar + Identity side by side -->
-                <Grid ColumnDefinitions="Auto,16,*">
-                    <!-- Avatar -->
-                    <StackPanel Grid.Column="0" Spacing="8" HorizontalAlignment="Center">
-                        <!-- Avatar circle -->
-                        <Border Width="88" Height="88" CornerRadius="44"
-                                Background="{Binding AccentBrush}"
-                                ClipToBounds="True"
-                                HorizontalAlignment="Center">
-                            <!-- Initial letter (shown when no avatar) -->
-                            <Panel>
-                                <TextBlock Text="{Binding AvatarInitial}"
-                                           FontSize="34"
-                                           FontWeight="Bold"
-                                           Foreground="White"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           IsVisible="{Binding !HasAvatar}" />
-                                <Image Source="{Binding AvatarImage}"
-                                       Width="88" Height="88"
-                                       Stretch="UniformToFill"
-                                       IsVisible="{Binding HasAvatar}" />
-                            </Panel>
-                        </Border>
-                        <!-- Avatar buttons -->
-                        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
-                            <Button Classes="ghost" Content="Upload"
-                                    Padding="8,3" FontSize="11"
-                                    Command="{Binding PickAvatarCommand}" />
-                            <Button Classes="ghost" Content="Remove"
-                                    Padding="8,3" FontSize="11"
-                                    Foreground="{StaticResource RedeErrorBrush}"
-                                    Command="{Binding RemoveAvatarCommand}"
-                                    IsVisible="{Binding HasAvatar}" />
+            <!-- Category Sidebar -->
+            <Border Grid.Column="0"
+                    Background="{StaticResource RedeBackgroundBrush}"
+                    Padding="12,8">
+                <ListBox Classes="settings-nav"
+                         SelectedIndex="{Binding SelectedCategoryIndex}">
+                    <ListBoxItem>
+                        <TextBlock Text="Profile" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Presence" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Notifications" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Voice &amp; Audio" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Security" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                </ListBox>
+            </Border>
+
+            <!-- Content area -->
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="32,8,32,24">
+                <Panel MaxWidth="560" HorizontalAlignment="Center">
+
+                    <!-- =========================================================== -->
+                    <!-- PROFILE Category                                             -->
+                    <!-- =========================================================== -->
+                    <StackPanel Spacing="24" IsVisible="{Binding IsProfileCategory}">
+
+                        <!-- Avatar + Identity -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Profile" Classes="header" />
+                            <Grid ColumnDefinitions="Auto,16,*">
+                                <StackPanel Grid.Column="0" Spacing="8" HorizontalAlignment="Center">
+                                    <Border Width="88" Height="88" CornerRadius="44"
+                                            Background="{Binding AccentBrush}"
+                                            ClipToBounds="True"
+                                            HorizontalAlignment="Center">
+                                        <Panel>
+                                            <TextBlock Text="{Binding AvatarInitial}"
+                                                       FontSize="34"
+                                                       FontWeight="Bold"
+                                                       Foreground="White"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       IsVisible="{Binding !HasAvatar}" />
+                                            <Image Source="{Binding AvatarImage}"
+                                                   Width="88" Height="88"
+                                                   Stretch="UniformToFill"
+                                                   IsVisible="{Binding HasAvatar}" />
+                                        </Panel>
+                                    </Border>
+                                    <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                        <Button Classes="ghost" Content="Upload"
+                                                Padding="8,3" FontSize="11"
+                                                Command="{Binding PickAvatarCommand}" />
+                                        <Button Classes="ghost" Content="Remove"
+                                                Padding="8,3" FontSize="11"
+                                                Foreground="{StaticResource RedeErrorBrush}"
+                                                Command="{Binding RemoveAvatarCommand}"
+                                                IsVisible="{Binding HasAvatar}" />
+                                    </StackPanel>
+                                    <TextBlock Text="PNG, JPEG, GIF (max 256KB)"
+                                               Classes="muted" FontSize="10"
+                                               HorizontalAlignment="Center" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2" Spacing="6" VerticalAlignment="Center">
+                                    <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto">
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="User ID" Classes="secondary" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding UserId}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Display Name" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DisplayName}" Margin="0,8,0,0" />
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Device ID" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DeviceId}" Margin="0,8,0,0" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
-                        <TextBlock Text="PNG, JPEG, GIF (max 256KB)"
-                                   Classes="muted" FontSize="10"
-                                   HorizontalAlignment="Center" />
+
+                        <Separator />
+
+                        <!-- Accent Color -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Accent Color" Classes="header" />
+                            <TextBlock Text="Choose your profile accent color. Contacts will see your messages in this color."
+                                       Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                            <WrapPanel x:Name="ColorPalette" Orientation="Horizontal" />
+                            <Button Content="Apply"
+                                    Command="{Binding ApplyProfileCommand}"
+                                    IsEnabled="{Binding ProfileDirty}"
+                                    HorizontalAlignment="Left"
+                                    Padding="16,6"
+                                    Margin="0,4,0,0" />
+                        </StackPanel>
                     </StackPanel>
 
-                    <!-- Identity info -->
-                    <StackPanel Grid.Column="2" Spacing="6" VerticalAlignment="Center">
-                        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="User ID" Classes="secondary" VerticalAlignment="Center" />
-                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding UserId}" />
+                    <!-- =========================================================== -->
+                    <!-- PRESENCE Category                                            -->
+                    <!-- =========================================================== -->
+                    <StackPanel Spacing="12" IsVisible="{Binding IsPresenceCategory}">
+                        <TextBlock Text="Presence" Classes="header" />
+                        <TextBlock Text="Set your presence status. Contacts will see when you're online, away, or busy."
+                                   Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                        <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Status" Classes="secondary" VerticalAlignment="Center" />
+                            <ComboBox Grid.Row="0" Grid.Column="1"
+                                      SelectedIndex="{Binding SelectedStatusIndex}"
+                                      MinWidth="200">
+                                <ComboBoxItem>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Ellipse Width="10" Height="10" Fill="#22c55e" VerticalAlignment="Center" />
+                                        <TextBlock Text="Online" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ComboBoxItem>
+                                <ComboBoxItem>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Ellipse Width="10" Height="10" Fill="#eab308" VerticalAlignment="Center" />
+                                        <TextBlock Text="Away" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ComboBoxItem>
+                                <ComboBoxItem>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Ellipse Width="10" Height="10" Fill="#ef4444" VerticalAlignment="Center" />
+                                        <TextBlock Text="Do Not Disturb" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ComboBoxItem>
+                                <ComboBoxItem>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Ellipse Width="10" Height="10" Fill="#6b7280" VerticalAlignment="Center" />
+                                        <TextBlock Text="Invisible" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ComboBoxItem>
+                            </ComboBox>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Display Name" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
-                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DisplayName}" Margin="0,8,0,0" />
-
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Device ID" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
-                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DeviceId}" Margin="0,8,0,0" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Custom Status" Classes="secondary"
+                                       VerticalAlignment="Center" Margin="0,12,0,0" />
+                            <TextBox Grid.Row="1" Grid.Column="1"
+                                     Text="{Binding CustomStatusText}"
+                                     Watermark="What are you up to?"
+                                     MaxLength="128"
+                                     Margin="0,12,0,0" />
                         </Grid>
                     </StackPanel>
-                </Grid>
-            </StackPanel>
 
-            <Separator />
+                    <!-- =========================================================== -->
+                    <!-- NOTIFICATIONS Category                                       -->
+                    <!-- =========================================================== -->
+                    <StackPanel Spacing="12" IsVisible="{Binding IsNotificationsCategory}">
+                        <TextBlock Text="Notifications" Classes="header" />
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Desktop Notifications"
+                                       VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Row="0" Grid.Column="1"
+                                          IsChecked="{Binding NotificationsEnabled}"
+                                          OnContent="On" OffContent="Off" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Show Sender &amp; Content"
+                                       VerticalAlignment="Center" Margin="0,8,0,0" />
+                            <ToggleSwitch Grid.Row="1" Grid.Column="1"
+                                          IsChecked="{Binding NotificationShowContent}"
+                                          OnContent="On" OffContent="Off"
+                                          Margin="0,8,0,0" />
+                        </Grid>
+                        <TextBlock Text="When 'Show Sender &amp; Content' is off (default), notifications only say 'New message' — no metadata is leaked to the OS notification system. Suppressed when status is Do Not Disturb."
+                                   Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                    </StackPanel>
 
-            <!-- Status section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Status" Classes="header" />
-                <TextBlock Text="Set your presence status. Contacts will see when you're online, away, or busy."
-                           Classes="secondary" TextWrapping="Wrap" FontSize="11" />
-                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Status" Classes="secondary" VerticalAlignment="Center" />
-                    <ComboBox Grid.Row="0" Grid.Column="1"
-                              SelectedIndex="{Binding SelectedStatusIndex}"
-                              MinWidth="200">
-                        <ComboBoxItem>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Ellipse Width="10" Height="10" Fill="#22c55e" VerticalAlignment="Center" />
-                                <TextBlock Text="Online" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </ComboBoxItem>
-                        <ComboBoxItem>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Ellipse Width="10" Height="10" Fill="#eab308" VerticalAlignment="Center" />
-                                <TextBlock Text="Away" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </ComboBoxItem>
-                        <ComboBoxItem>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Ellipse Width="10" Height="10" Fill="#ef4444" VerticalAlignment="Center" />
-                                <TextBlock Text="Do Not Disturb" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </ComboBoxItem>
-                        <ComboBoxItem>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Ellipse Width="10" Height="10" Fill="#6b7280" VerticalAlignment="Center" />
-                                <TextBlock Text="Invisible" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </ComboBoxItem>
-                    </ComboBox>
+                    <!-- =========================================================== -->
+                    <!-- VOICE & AUDIO Category                                       -->
+                    <!-- =========================================================== -->
+                    <StackPanel Spacing="24" IsVisible="{Binding IsVoiceCategory}">
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Custom Status" Classes="secondary"
-                               VerticalAlignment="Center" Margin="0,12,0,0" />
-                    <TextBox Grid.Row="1" Grid.Column="1"
-                             Text="{Binding CustomStatusText}"
-                             Watermark="What are you up to?"
-                             MaxLength="128"
-                             Margin="0,12,0,0" />
-                </Grid>
-            </StackPanel>
+                        <!-- Voice Calls -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Voice Calls" Classes="header" />
+                            <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Transport" Classes="secondary" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="0" Grid.Column="1"
+                                           Text="{Binding CallTransport}"
+                                           Foreground="{StaticResource RedeTextPrimaryBrush}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                           Text="Voice calls use E2EE (SRTP) over your current transport. I2P/Tor: anonymous with higher latency. Direct: low latency, server sees your IP."
+                                           Classes="secondary" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11" />
+                            </Grid>
+                        </StackPanel>
 
-            <Separator />
+                        <Separator />
 
-            <!-- Notifications section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Notifications" Classes="header" />
-                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Desktop Notifications"
-                               VerticalAlignment="Center" />
-                    <ToggleSwitch Grid.Row="0" Grid.Column="1"
-                                  IsChecked="{Binding NotificationsEnabled}"
-                                  OnContent="On" OffContent="Off" />
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Show Sender &amp; Content"
-                               VerticalAlignment="Center" Margin="0,8,0,0" />
-                    <ToggleSwitch Grid.Row="1" Grid.Column="1"
-                                  IsChecked="{Binding NotificationShowContent}"
-                                  OnContent="On" OffContent="Off"
-                                  Margin="0,8,0,0" />
-                </Grid>
-                <TextBlock Text="When 'Show Sender &amp; Content' is off (default), notifications only say 'New message' — no metadata is leaked to the OS notification system. Suppressed when status is Do Not Disturb."
-                           Classes="secondary" TextWrapping="Wrap" FontSize="11" />
-            </StackPanel>
+                        <!-- Audio Devices -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Audio" Classes="header" />
+                            <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Microphone" Classes="secondary" VerticalAlignment="Center" />
+                                <ComboBox Grid.Row="0" Grid.Column="1"
+                                          ItemsSource="{Binding InputDevices}"
+                                          SelectedIndex="{Binding SelectedInputDeviceIndex}"
+                                          MinWidth="220" />
 
-            <Separator />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Speaker" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0" />
+                                <ComboBox Grid.Row="1" Grid.Column="1"
+                                          ItemsSource="{Binding OutputDevices}"
+                                          SelectedIndex="{Binding SelectedOutputDeviceIndex}"
+                                          MinWidth="220" Margin="0,12,0,0" />
 
-            <!-- Accent Color section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Accent Color" Classes="header" />
-                <TextBlock Text="Choose your profile accent color. Contacts will see your messages in this color."
-                           Classes="secondary" TextWrapping="Wrap" FontSize="11" />
-                <WrapPanel x:Name="ColorPalette" Orientation="Horizontal">
-                    <!-- Color swatches populated in code-behind -->
-                </WrapPanel>
-                <Button Content="Apply"
-                        Command="{Binding ApplyProfileCommand}"
-                        IsEnabled="{Binding ProfileDirty}"
-                        HorizontalAlignment="Left"
-                        Padding="16,6"
-                        Margin="0,4,0,0" />
-            </StackPanel>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
+                                    <Run Text="Mic Volume " /><Run Text="{Binding InputVolumeText}" />
+                                </TextBlock>
+                                <Slider Grid.Row="2" Grid.Column="1"
+                                        Minimum="0" Maximum="200" Value="{Binding InputVolume}"
+                                        TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Margin="0,12,0,0" />
 
-            <Separator />
+                                <TextBlock Grid.Row="3" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
+                                    <Run Text="Output Volume " /><Run Text="{Binding OutputVolumeText}" />
+                                </TextBlock>
+                                <Slider Grid.Row="3" Grid.Column="1"
+                                        Minimum="0" Maximum="200" Value="{Binding OutputVolume}"
+                                        TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Margin="0,12,0,0" />
 
-            <!-- Fingerprint section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Fingerprint" Classes="header" />
-                <TextBlock Text="Verify this fingerprint out-of-band to ensure secure communication."
-                           Classes="secondary" TextWrapping="Wrap" />
-                <Border Background="{StaticResource RedeBackgroundBrush}"
-                        CornerRadius="8"
-                        Padding="16,12">
-                    <Grid RowDefinitions="Auto,8,Auto">
-                        <TextBlock Grid.Row="0"
-                                   Text="{Binding Fingerprint}"
-                                   FontFamily="Courier New, monospace"
-                                   FontSize="15"
-                                   Foreground="{StaticResource RedeAccentVioletBrush}"
-                                   HorizontalAlignment="Center"
-                                   TextWrapping="Wrap" />
-                        <Button Grid.Row="2"
-                                Classes="ghost"
-                                Content="Copy"
-                                HorizontalAlignment="Center"
-                                Padding="16,4"
-                                FontSize="{StaticResource RedeSmallSize}"
-                                Click="CopyFingerprint_Click" />
-                    </Grid>
-                </Border>
-            </StackPanel>
+                                <TextBlock Grid.Row="4" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
+                                    <Run Text="Noise Gate " /><Run Text="{Binding NoiseGateText}" />
+                                </TextBlock>
+                                <Slider Grid.Row="4" Grid.Column="1"
+                                        Minimum="0" Maximum="100" Value="{Binding NoiseGateThreshold}"
+                                        TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Margin="0,12,0,0" />
+                            </Grid>
 
-            <Separator />
+                            <TextBlock Text="Noise gate mutes mic when input is below threshold. 0 = off. Volumes above 100% amplify the signal."
+                                       Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                        </StackPanel>
+                    </StackPanel>
 
-            <!-- Voice Calls section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Voice Calls" Classes="header" />
+                    <!-- =========================================================== -->
+                    <!-- SECURITY Category                                            -->
+                    <!-- =========================================================== -->
+                    <StackPanel Spacing="24" IsVisible="{Binding IsSecurityCategory}">
 
-                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Transport" Classes="secondary" VerticalAlignment="Center" />
-                    <TextBlock Grid.Row="0" Grid.Column="1"
-                               Text="{Binding CallTransport}"
-                               Foreground="{StaticResource RedeTextPrimaryBrush}"
-                               VerticalAlignment="Center" />
+                        <!-- Fingerprint -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Fingerprint" Classes="header" />
+                            <TextBlock Text="Verify this fingerprint out-of-band to ensure secure communication."
+                                       Classes="secondary" TextWrapping="Wrap" />
+                            <Border Background="{StaticResource RedeBackgroundBrush}"
+                                    CornerRadius="8"
+                                    Padding="16,12">
+                                <Grid RowDefinitions="Auto,8,Auto">
+                                    <TextBlock Grid.Row="0"
+                                               Text="{Binding Fingerprint}"
+                                               FontFamily="Courier New, monospace"
+                                               FontSize="15"
+                                               Foreground="{StaticResource RedeAccentVioletBrush}"
+                                               HorizontalAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                    <Button Grid.Row="2"
+                                            Classes="ghost"
+                                            Content="Copy"
+                                            HorizontalAlignment="Center"
+                                            Padding="16,4"
+                                            FontSize="{StaticResource RedeSmallSize}"
+                                            Click="CopyFingerprint_Click" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                               Text="Voice calls use E2EE (SRTP) over your current transport. I2P/Tor: anonymous with higher latency. Direct: low latency, server sees your IP."
-                               Classes="secondary" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11" />
-                </Grid>
-            </StackPanel>
+                        <Separator />
 
-            <Separator />
+                        <!-- Public Key -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Public Key" Classes="header" />
+                            <Border Background="{StaticResource RedeBackgroundBrush}"
+                                    CornerRadius="8"
+                                    Padding="16,12">
+                                <TextBlock Text="{Binding PublicKey}"
+                                           FontFamily="Courier New, monospace"
+                                           FontSize="11"
+                                           Classes="secondary"
+                                           HorizontalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
 
-            <!-- Audio section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Audio" Classes="header" />
-
-                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
-                    <!-- Input device -->
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Microphone" Classes="secondary" VerticalAlignment="Center" />
-                    <ComboBox Grid.Row="0" Grid.Column="1"
-                              ItemsSource="{Binding InputDevices}"
-                              SelectedIndex="{Binding SelectedInputDeviceIndex}"
-                              MinWidth="220" />
-
-                    <!-- Output device -->
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Speaker" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0" />
-                    <ComboBox Grid.Row="1" Grid.Column="1"
-                              ItemsSource="{Binding OutputDevices}"
-                              SelectedIndex="{Binding SelectedOutputDeviceIndex}"
-                              MinWidth="220" Margin="0,12,0,0" />
-
-                    <!-- Input volume -->
-                    <TextBlock Grid.Row="2" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
-                        <Run Text="Mic Volume " /><Run Text="{Binding InputVolumeText}" />
-                    </TextBlock>
-                    <Slider Grid.Row="2" Grid.Column="1"
-                            Minimum="0" Maximum="200" Value="{Binding InputVolume}"
-                            TickFrequency="1" IsSnapToTickEnabled="True"
-                            Margin="0,12,0,0" />
-
-                    <!-- Output volume -->
-                    <TextBlock Grid.Row="3" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
-                        <Run Text="Output Volume " /><Run Text="{Binding OutputVolumeText}" />
-                    </TextBlock>
-                    <Slider Grid.Row="3" Grid.Column="1"
-                            Minimum="0" Maximum="200" Value="{Binding OutputVolume}"
-                            TickFrequency="1" IsSnapToTickEnabled="True"
-                            Margin="0,12,0,0" />
-
-                    <!-- Noise gate -->
-                    <TextBlock Grid.Row="4" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
-                        <Run Text="Noise Gate " /><Run Text="{Binding NoiseGateText}" />
-                    </TextBlock>
-                    <Slider Grid.Row="4" Grid.Column="1"
-                            Minimum="0" Maximum="100" Value="{Binding NoiseGateThreshold}"
-                            TickFrequency="1" IsSnapToTickEnabled="True"
-                            Margin="0,12,0,0" />
-                </Grid>
-
-                <TextBlock Text="Noise gate mutes mic when input is below threshold. 0 = off. Volumes above 100% amplify the signal."
-                           Classes="secondary" TextWrapping="Wrap" FontSize="11" />
-            </StackPanel>
-
-            <Separator />
-
-            <!-- Public Key section -->
-            <StackPanel Spacing="12">
-                <TextBlock Text="Public Key" Classes="header" />
-                <Border Background="{StaticResource RedeBackgroundBrush}"
-                        CornerRadius="8"
-                        Padding="16,12">
-                    <TextBlock Text="{Binding PublicKey}"
-                               FontFamily="Courier New, monospace"
-                               FontSize="11"
-                               Classes="secondary"
-                               HorizontalAlignment="Center"
-                               TextWrapping="Wrap" />
-                </Border>
-            </StackPanel>
-
-        </StackPanel>
+                </Panel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
     </Border>
-    </ScrollViewer>
 </UserControl>

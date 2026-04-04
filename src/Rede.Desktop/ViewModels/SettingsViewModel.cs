@@ -17,6 +17,24 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _fingerprint = "";
     [ObservableProperty] private string _publicKey = "";
 
+    // Settings categories
+    [ObservableProperty] private int _selectedCategoryIndex;
+
+    public bool IsProfileCategory => SelectedCategoryIndex == 0;
+    public bool IsPresenceCategory => SelectedCategoryIndex == 1;
+    public bool IsNotificationsCategory => SelectedCategoryIndex == 2;
+    public bool IsVoiceCategory => SelectedCategoryIndex == 3;
+    public bool IsSecurityCategory => SelectedCategoryIndex == 4;
+
+    partial void OnSelectedCategoryIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsProfileCategory));
+        OnPropertyChanged(nameof(IsPresenceCategory));
+        OnPropertyChanged(nameof(IsNotificationsCategory));
+        OnPropertyChanged(nameof(IsVoiceCategory));
+        OnPropertyChanged(nameof(IsSecurityCategory));
+    }
+
     // Profile customization (local-only until Apply)
     [ObservableProperty] private string _accentColor = "#8b5cf6";
     [ObservableProperty] private Bitmap? _avatarImage;
