@@ -123,8 +123,10 @@ public partial class SettingsViewModel : ViewModelBase
         AvatarMimeType = mimeType;
 
         using var ms = new MemoryStream(data);
+        var oldBmp = AvatarImage;
         AvatarImage = new Bitmap(ms);
         HasAvatar = true;
+        oldBmp?.Dispose(); // M4: Dispose previous bitmap
         ProfileDirty = true;
     }
 
@@ -143,7 +145,9 @@ public partial class SettingsViewModel : ViewModelBase
             // H2: Reject oversized avatars from network
             if (bytes.Length > 256 * 1024) { AvatarImage = null; HasAvatar = false; return; }
             using var ms = new MemoryStream(bytes);
+            var oldBmp = AvatarImage;
             AvatarImage = new Bitmap(ms);
+            oldBmp?.Dispose(); // M5: Dispose previous bitmap
             AvatarData = base64;
             AvatarMimeType = mimeType;
             HasAvatar = true;

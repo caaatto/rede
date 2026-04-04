@@ -47,6 +47,10 @@ public static class SenderKeys
     /// </summary>
     public static EncryptResult Encrypt(SenderKeyState state, string plaintext, string signingSecretKeyB64)
     {
+        // M7: Bounds check BEFORE mutating state
+        if (state.MessageNumber >= MaxMessageNumber)
+            throw new InvalidOperationException("Sender key message limit reached — rekey required.");
+
         var ck = Convert.FromBase64String(state.ChainKey);
         var (newCK, msgKey) = DoubleRatchet.KdfCK(ck);
         CryptoService.ZeroOut(ck);
@@ -66,9 +70,6 @@ public static class SenderKeys
         var signature = CryptoService.SignBytes(sigData, signingSecretKeyB64);
 
         var messageNumber = state.MessageNumber;
-        // M5: Bounds check — trigger rekey before receivers reject
-        if (messageNumber >= MaxMessageNumber)
-            throw new InvalidOperationException("Sender key message limit reached — rekey required.");
         state.MessageNumber++;
 
         return new EncryptResult(

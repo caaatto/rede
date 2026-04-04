@@ -31,17 +31,19 @@ public static class ProfileEncryption
     /// Derive a 32-byte key using scrypt. Mirrors: deriveKey(passphrase, salt, scryptN)
     /// Uses N/r=8/p=1 parameters matching the JS client's crypto.scryptSync call.
     /// </summary>
-    public static byte[] DeriveKey(string passphrase, byte[] salt, int scryptN = 0)
+    public static byte[] DeriveKey(string passphrase, byte[] salt, int scryptN = 0, int outputLen = 32)
     {
         int N = scryptN > 0 ? scryptN : ScryptNCurrent;
         var password = Encoding.UTF8.GetBytes(passphrase);
-        var output = new byte[32];
+        var output = new byte[outputLen];
 
         var result = crypto_pwhash_scryptsalsa208sha256_ll(
             password, (nuint)password.Length,
             salt, (nuint)salt.Length,
             (ulong)N, 8, 1,  // N, r=8, p=1
             output, (nuint)output.Length);
+
+        CryptoService.ZeroOut(password); // M6: Zero password bytes after use
 
         if (result != 0)
             throw new CryptographicException("scrypt key derivation failed");
@@ -55,7 +57,27 @@ public static class ProfileEncryption
     public static EncryptedEnvelope Encrypt(object data, string passphrase)
     {
         var salt = SodiumCore.GetRandomBytes(16);
-        var key = DeriveKey(passphrase, salt, ScryptNCurrent);
+        // L7: Single 64-byte scrypt derivation for both encryption key and HMAC key
+        var combined = DeriveKey(passphrase, salt, ScryptNCurrent, 64);
+        var envelope = EncryptWithDerivedKey(data, combined, salt);
+        CryptoService.ZeroOut(combined);
+        return envelope;
+    }
+
+    /// <summary>
+    /// Encrypt using a pre-derived 64-byte key (32 enc + 32 hmac), skipping scrypt.
+    /// The salt must be the same salt used to derive the key, OR a fresh random salt
+    /// if the caller is providing a cached key (in which case pass cachedSalt=null and
+    /// a fresh salt will be embedded in the envelope for decryption bookkeeping).
+    /// </summary>
+    public static EncryptedEnvelope EncryptWithDerivedKey(object data, byte[] cachedKey64, byte[]? salt = null)
+    {
+        salt ??= SodiumCore.GetRandomBytes(16);
+        var key = new byte[32];
+        var hmacKey = new byte[32];
+        Buffer.BlockCopy(cachedKey64, 0, key, 0, 32);
+        Buffer.BlockCopy(cachedKey64, 32, hmacKey, 0, 32);
+
         var nonce = SodiumCore.GetRandomBytes(24);
         var jsonStr = JsonSerializer.Serialize(data);
         var plaintext = Encoding.UTF8.GetBytes(jsonStr);
@@ -64,10 +86,6 @@ public static class ProfileEncryption
         CryptoService.ZeroOut(plaintext);
 
         // HMAC for integrity check
-        var hmacSalt = new byte[salt.Length + 4];
-        Buffer.BlockCopy(salt, 0, hmacSalt, 0, salt.Length);
-        Encoding.UTF8.GetBytes("hmac").CopyTo(hmacSalt, salt.Length);
-        var hmacKey = DeriveKey(passphrase, hmacSalt, ScryptNCurrent);
         using var hmacAlg = new HMACSHA256(hmacKey);
         var hmacValue = hmacAlg.ComputeHash(encrypted);
         CryptoService.ZeroOut(hmacKey);
@@ -94,30 +112,50 @@ public static class ProfileEncryption
             var encrypted = Convert.FromBase64String(envelope.Data);
             var scryptN = envelope.ScryptN > 0 ? envelope.ScryptN : ScryptNLegacy;
 
+            // L7: Try single 64-byte derivation first (new format), fall back to separate salt (legacy)
+            var combined = DeriveKey(passphrase, salt, scryptN, 64);
+            var key = new byte[32];
+            var hmacKey = new byte[32];
+            Buffer.BlockCopy(combined, 0, key, 0, 32);
+            Buffer.BlockCopy(combined, 32, hmacKey, 0, 32);
+            CryptoService.ZeroOut(combined);
+
             // HMAC verification
             if (!string.IsNullOrEmpty(envelope.Hmac))
             {
-                var hmacSalt = new byte[salt.Length + 4];
-                Buffer.BlockCopy(salt, 0, hmacSalt, 0, salt.Length);
-                Encoding.UTF8.GetBytes("hmac").CopyTo(hmacSalt, salt.Length);
-                var hmacKey = DeriveKey(passphrase, hmacSalt, scryptN);
                 using var hmacAlg = new HMACSHA256(hmacKey);
                 var expected = Convert.ToHexString(hmacAlg.ComputeHash(encrypted)).ToLowerInvariant();
-                CryptoService.ZeroOut(hmacKey);
                 if (!CryptographicOperations.FixedTimeEquals(
                     Encoding.UTF8.GetBytes(envelope.Hmac),
                     Encoding.UTF8.GetBytes(expected)))
                 {
-                    return null;
+                    // Legacy fallback: HMAC key derived with separate salt+"hmac"
+                    CryptoService.ZeroOut(hmacKey);
+                    var hmacSalt = new byte[salt.Length + 4];
+                    Buffer.BlockCopy(salt, 0, hmacSalt, 0, salt.Length);
+                    Encoding.UTF8.GetBytes("hmac").CopyTo(hmacSalt, salt.Length);
+                    hmacKey = DeriveKey(passphrase, hmacSalt, scryptN);
+                    using var hmacAlg2 = new HMACSHA256(hmacKey);
+                    expected = Convert.ToHexString(hmacAlg2.ComputeHash(encrypted)).ToLowerInvariant();
+                    CryptoService.ZeroOut(hmacKey);
+                    if (!CryptographicOperations.FixedTimeEquals(
+                        Encoding.UTF8.GetBytes(envelope.Hmac),
+                        Encoding.UTF8.GetBytes(expected)))
+                    {
+                        CryptoService.ZeroOut(key);
+                        return null;
+                    }
+                    // Legacy format uses separate 32-byte key derivation
+                    CryptoService.ZeroOut(key);
+                    key = DeriveKey(passphrase, salt, scryptN);
                 }
             }
+            CryptoService.ZeroOut(hmacKey);
 
-            var key = DeriveKey(passphrase, salt, scryptN);
             var nonce = Convert.FromBase64String(envelope.Nonce);
             var decrypted = SecretBox.Open(encrypted, nonce, key);
             CryptoService.ZeroOut(key);
             var json = Encoding.UTF8.GetString(decrypted);
-            // M2: Zero plaintext bytes after conversion to string
             CryptoService.ZeroOut(decrypted);
             return JsonSerializer.Deserialize<T>(json);
         }

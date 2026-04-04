@@ -192,6 +192,9 @@ public partial class MainViewModel : ViewModelBase
 
     public void AddIncomingMessage(string from, string text, DateTime timestamp, bool isSystem = false, string? senderRole = null, string? roleBadgeColor = null)
     {
+        // M10: Truncate incoming message text before rendering
+        if (text.Length > 8192) text = text[..8192] + "…";
+
         // Look up sender's profile customization from contacts
         var contact = Contacts.FirstOrDefault(c => c.UserId == from);
         var accentColor = contact?.AccentColor ?? "#8b5cf6";

@@ -26,12 +26,14 @@ public static class Hkdf
         var t = Array.Empty<byte>();
         int offset = 0;
 
-        for (byte i = 1; offset < length; i++)
+        // M3: Use int counter to prevent silent byte overflow; cast to byte for HMAC input
+        for (int i = 1; offset < length; i++)
         {
+            if (i > 255) throw new InvalidOperationException("HKDF counter overflow");
             using var hmac = new HMACSHA256(prk);
             hmac.TransformBlock(t, 0, t.Length, null, 0);
             hmac.TransformBlock(info, 0, info.Length, null, 0);
-            hmac.TransformFinalBlock(new[] { i }, 0, 1);
+            hmac.TransformFinalBlock(new[] { (byte)i }, 0, 1);
             t = hmac.Hash!;
             int toCopy = Math.Min(t.Length, length - offset);
             Buffer.BlockCopy(t, 0, okm, offset, toCopy);

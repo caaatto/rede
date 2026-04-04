@@ -117,11 +117,11 @@ public class PlaceService
             if (root.TryGetProperty("channels", out var chElem))
             {
                 var channels = JsonSerializer.Deserialize<Dictionary<string, PlaceChannel>>(chElem) ?? new();
-                // Sanitize deserialized channel data
+                // M15: Sanitize deserialized channel data (including bidi overrides)
                 foreach (var ch in channels.Values)
                 {
-                    if (ch.Name.Length > 64) ch.Name = ch.Name[..64];
-                    if (ch.Topic.Length > 200) ch.Topic = ch.Topic[..200];
+                    ch.Name = SanitizeMetadataString(ch.Name, 64);
+                    ch.Topic = SanitizeMetadataString(ch.Topic, 200);
                 }
                 place.Channels = channels;
             }
@@ -162,7 +162,12 @@ public class PlaceService
                 place.Bans = bans;
             }
             if (root.TryGetProperty("categories", out var catsElem))
-                place.Categories = JsonSerializer.Deserialize<List<string>>(catsElem) ?? new();
+            {
+                var cats = JsonSerializer.Deserialize<List<string>>(catsElem) ?? new();
+                // M16: Cap categories count
+                if (cats.Count > 100) cats = cats.Take(100).ToList();
+                place.Categories = cats;
+            }
             // Validate color hex format — reject invalid colors with safe fallbacks
             if (root.TryGetProperty("ownerColor", out var ownerColorElem))
                 place.OwnerColor = ValidateColor(ownerColorElem.GetString(), "#eab308");
@@ -181,11 +186,11 @@ public class PlaceService
     {
         if (Profile is null) return;
         _conn.Send(Msg.PlaceCreate, ProtocolSerializer.Payload());
-        // Name is stored only in encrypted metadata, not sent to server
-        _pendingPlaceName = name;
+        // H10: Use queue instead of single-slot to handle rapid creation
+        _pendingPlaceNames.Enqueue(name);
     }
 
-    private string? _pendingPlaceName;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _pendingPlaceNames = new();
 
     public void InviteToPlace(string placeId, string userId, ChatService? chatService = null)
     {
@@ -267,7 +272,7 @@ public class PlaceService
             Name = name,
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         };
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         // Distribute updated metadata to all members
         DistributeMetadata(placeId, place, chatService);
@@ -302,10 +307,12 @@ public class PlaceService
             return;
         }
 
-        place.AccentColor = accentColor;
+        // M7: Validate on sending side too
+        place.AccentColor = ValidateColor(accentColor, place.AccentColor ?? "#8b5cf6");
+        if (iconData is not null && iconData.Length > 350_000) return; // reject oversized icons
         place.IconData = iconData;
         place.IconMimeType = iconMimeType;
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Place profile updated for \"{place.Name}\".");
@@ -327,10 +334,11 @@ public class PlaceService
             return;
         }
 
-        place.OwnerColor = ownerColor;
-        place.AdminColor = adminColor;
-        place.MemberColor = memberColor;
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        // M8: Validate colors on sending side
+        place.OwnerColor = ValidateColor(ownerColor, "#eab308");
+        place.AdminColor = ValidateColor(adminColor, "#8b5cf6");
+        place.MemberColor = ValidateColor(memberColor, "#6b7280");
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Role colors updated for \"{place.Name}\".");
@@ -398,7 +406,7 @@ public class PlaceService
             UploadedBy = Profile.UserId,
         };
 
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Emote :{safeName}: added to \"{place.Name}\".");
         OnPlacesChanged?.Invoke();
@@ -426,7 +434,7 @@ public class PlaceService
             return;
         }
 
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke("Emote removed.");
         OnPlacesChanged?.Invoke();
@@ -474,7 +482,7 @@ public class PlaceService
 
         // Update local E2EE metadata
         place.Roles[targetUserId] = role;
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         DistributeMetadata(placeId, place, chatService);
 
         var roleName = role switch { PlaceRole.Admin => "Admin", PlaceRole.Owner => "Owner", _ => "Member" };
@@ -531,7 +539,7 @@ public class PlaceService
         };
         place.Members.Remove(targetUserId);
         place.Roles.Remove(targetUserId);
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Banned {targetUserId} from \"{place.Name}\".");
@@ -560,7 +568,7 @@ public class PlaceService
         ));
 
         place.Bans.Remove(targetUserId);
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Unbanned {targetUserId} from \"{place.Name}\".");
@@ -596,7 +604,7 @@ public class PlaceService
         if (category is not null && !place.Categories.Contains(category))
             place.Categories.Add(category);
 
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Channel #{channel.Name} moved to category \"{category ?? "None"}\".");
         OnPlacesChanged?.Invoke();
@@ -633,7 +641,7 @@ public class PlaceService
         }
 
         place.Categories.Add(categoryName);
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Category \"{categoryName}\" added to \"{place.Name}\".");
         OnPlacesChanged?.Invoke();
@@ -662,7 +670,7 @@ public class PlaceService
             if (ch.Category == categoryName) ch.Category = null;
         }
 
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Category \"{categoryName}\" removed.");
         OnPlacesChanged?.Invoke();
@@ -694,7 +702,7 @@ public class PlaceService
 
         // M5: Sanitize topic
         channel.Topic = SanitizeMetadataString(topic, 200);
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Topic set for #{channel.Name}.");
         OnPlacesChanged?.Invoke();
@@ -711,7 +719,7 @@ public class PlaceService
         }
 
         place.MetadataKey = CryptoService.GenerateGroupKey();
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Metadata key rotated for \"{place.Name}\".");
@@ -791,11 +799,8 @@ public class PlaceService
                 ["messageNumber"] = skState.MessageNumber,
             }
         };
-        Task.Run(async () =>
-        {
-            var elem = JsonSerializer.SerializeToElement(stateObj);
-            await _store.SaveSenderKeyStateAsync(Profile, skKey, elem, Passphrase);
-        });
+        var skElem = JsonSerializer.SerializeToElement(stateObj);
+        _store.SaveSenderKeyStateAsync(Profile, skKey, skElem, Passphrase);
 
         var payload = ProtocolSerializer.Payload(
             ("placeId", JsonValue.Create(placeId)),
@@ -814,10 +819,10 @@ public class PlaceService
 
         var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var chatKey = ChatKey(placeId, channelId);
-        Task.Run(async () => await _store.AddChatMessageAsync(Profile, chatKey, new ChatMessage
+        _store.AddChatMessage(Profile, chatKey, new ChatMessage
         {
             From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
-        }, Passphrase));
+        }, Passphrase);
         OnChannelMessageSent?.Invoke(chatKey, text, ttl);
     }
 
@@ -825,15 +830,15 @@ public class PlaceService
 
     // --- Handlers ---
 
-    private async void HandlePlaceCreateOk(JsonObject msg)
+    private void HandlePlaceCreateOk(JsonObject msg)
     {
         if (Profile is null || Passphrase is null) return;
 
         var placeId = ProtocolSerializer.GetString(msg, "placeId");
         if (placeId is null) return;
 
-        var name = _pendingPlaceName ?? "Unnamed";
-        _pendingPlaceName = null;
+        _pendingPlaceNames.TryDequeue(out var name);
+        name ??= "Unnamed";
 
         var metadataKey = CryptoService.GenerateGroupKey();
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
@@ -866,13 +871,13 @@ public class PlaceService
         };
 
         Profile.Places[placeId] = place;
-        await _store.SaveProfileAsync(Profile, Passphrase);
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         OnSystemMessage?.Invoke($"Place \"{name}\" created with #general channel.");
         OnPlacesChanged?.Invoke();
     }
 
-    private async void HandlePlaceInvite(JsonObject msg)
+    private void HandlePlaceInvite(JsonObject msg)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -888,14 +893,14 @@ public class PlaceService
                 Name = placeId, // Temporary until metadata arrives
                 MetadataKey = "",
             };
-            await _store.SaveProfileAsync(Profile, Passphrase);
+            _store.SaveProfileDebounced(Profile, Passphrase);
         }
 
         OnSystemMessage?.Invoke($"You were invited to a Place by {from ?? "unknown"}");
         OnPlacesChanged?.Invoke();
     }
 
-    private async void HandlePlaceKickOk(JsonObject msg)
+    private void HandlePlaceKickOk(JsonObject msg)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -907,13 +912,13 @@ public class PlaceService
         {
             place.Members.Remove(targetUserId);
             place.Roles.Remove(targetUserId);
-            await _store.SaveProfileAsync(Profile, Passphrase);
+            _store.SaveProfileDebounced(Profile, Passphrase);
         }
 
         OnSystemMessage?.Invoke($"Removed {targetUserId} from place {placeId}");
     }
 
-    private async void HandlePlaceLeaveOk(JsonObject msg)
+    private void HandlePlaceLeaveOk(JsonObject msg)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -921,7 +926,7 @@ public class PlaceService
         if (placeId is null) return;
 
         Profile.Places.Remove(placeId);
-        await _store.SaveProfileAsync(Profile, Passphrase);
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         OnSystemMessage?.Invoke("Left place.");
         OnPlacesChanged?.Invoke();
@@ -932,7 +937,7 @@ public class PlaceService
         // Channel already added locally in CreateChannel
     }
 
-    private async void HandlePlaceChannelRemoveOk(JsonObject msg)
+    private void HandlePlaceChannelRemoveOk(JsonObject msg)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -943,7 +948,7 @@ public class PlaceService
         if (Profile.Places.TryGetValue(placeId, out var place))
         {
             place.Channels.Remove(channelId);
-            await _store.SaveProfileAsync(Profile, Passphrase);
+            _store.SaveProfileDebounced(Profile, Passphrase);
         }
 
         OnPlacesChanged?.Invoke();
@@ -1033,7 +1038,7 @@ public class PlaceService
                 };
                 parsed["members"] = membersNode;
                 var elem = JsonSerializer.SerializeToElement(parsed);
-                Task.Run(async () => await _store.SaveSenderKeyStateAsync(Profile, skKey, elem, Passphrase));
+                _store.SaveSenderKeyStateAsync(Profile, skKey, elem, Passphrase);
             }
         }
 
@@ -1041,16 +1046,16 @@ public class PlaceService
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var chatKey = ChatKey(placeId, channelId);
 
-        Task.Run(async () => await _store.AddChatMessageAsync(Profile, chatKey, new ChatMessage
+        _store.AddChatMessage(Profile, chatKey, new ChatMessage
         {
             From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"),
             Ttl = ProtocolSerializer.GetInt(msg, "ttl"),
-        }, Passphrase));
+        }, Passphrase);
 
         OnChannelMessageReceived?.Invoke(placeId, channelId, from, sanitized, ts);
     }
 
-    private async void HandlePlaceRoleSetOk(JsonObject msg)
+    private void HandlePlaceRoleSetOk(JsonObject msg)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -1065,7 +1070,7 @@ public class PlaceService
         {
             var newRole = role == "admin" ? PlaceRole.Admin : PlaceRole.Member;
             place.Roles[Profile.UserId] = newRole;
-            await _store.SaveProfileAsync(Profile, Passphrase);
+            _store.SaveProfileDebounced(Profile, Passphrase);
             var roleName = newRole == PlaceRole.Admin ? "Admin" : "Member";
             OnSystemMessage?.Invoke($"Your role in \"{place.Name}\" was changed to {roleName} by {from ?? "owner"}.");
             OnPlacesChanged?.Invoke();
@@ -1092,14 +1097,20 @@ public class PlaceService
     /// Called when a placekey control message arrives via ratcheted DM.
     /// Decrypts metadata and updates local Place.
     /// </summary>
-    public async Task HandlePlaceKeyReceived(string placeId, string metadataKey, string encryptedMetadata, string senderId)
+    public Task HandlePlaceKeyReceived(string placeId, string metadataKey, string encryptedMetadata, string senderId)
     {
-        if (Profile is null || Passphrase is null) return;
+        if (Profile is null || Passphrase is null) return Task.CompletedTask;
 
         // C2: Only accept placekey for places we already know about (invited via server)
-        // Don't create placeholder places from arbitrary control messages
         if (!Profile.Places.TryGetValue(placeId, out var place))
-            return;
+            return Task.CompletedTask;
+
+        // H11: Validate metadataKey format (must be exactly 32 bytes base64)
+        try
+        {
+            if (Convert.FromBase64String(metadataKey).Length != 32) return Task.CompletedTask;
+        }
+        catch { return Task.CompletedTask; }
 
         place.MetadataKey = metadataKey;
 
@@ -1109,7 +1120,7 @@ public class PlaceService
             if (!place.Members.Contains(Profile.UserId))
                 place.Members.Add(Profile.UserId);
 
-            await _store.SaveProfileAsync(Profile, Passphrase);
+            _store.SaveProfileDebounced(Profile, Passphrase);
             OnSystemMessage?.Invoke($"Received metadata for \"{place.Name}\"");
             OnPlacesChanged?.Invoke();
         }
@@ -1117,6 +1128,7 @@ public class PlaceService
         {
             OnSystemMessage?.Invoke($"Failed to decrypt place metadata from {senderId}");
         }
+        return Task.CompletedTask;
     }
 
     // M5/M4: Sanitize metadata strings — strip control chars, bidi overrides, enforce length

@@ -444,7 +444,7 @@ public partial class MainWindow : Window
                     ? accentColor : contact.AccentColor;
                 contact.AvatarData = avatarData is not null && avatarData.Length <= 350_000 ? avatarData : null;
                 contact.AvatarMimeType = avatarMimeType;
-                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
                 Dispatcher.UIThread.Post(RefreshContacts);
             }
         };
@@ -634,15 +634,19 @@ public partial class MainWindow : Window
             {
                 var bytes = Convert.FromBase64String(p.AvatarData);
                 using var ms = new System.IO.MemoryStream(bytes);
+                var oldBmp = _mainVm.OwnAvatarImage;
                 _mainVm.OwnAvatarImage = new Avalonia.Media.Imaging.Bitmap(ms);
                 _mainVm.HasOwnAvatar = true;
+                oldBmp?.Dispose(); // M3: Dispose previous bitmap
             }
             catch { _mainVm.OwnAvatarImage = null; _mainVm.HasOwnAvatar = false; }
         }
         else
         {
+            var oldBmp = _mainVm.OwnAvatarImage;
             _mainVm.OwnAvatarImage = null;
             _mainVm.HasOwnAvatar = false;
+            oldBmp?.Dispose();
         }
     }
 
@@ -1330,7 +1334,7 @@ public partial class MainWindow : Window
                 _auth.Profile.Status = vm.SelectedStatus;
                 _auth.Profile.CustomStatus = string.IsNullOrWhiteSpace(vm.CustomStatusText) ? null : vm.CustomStatusText;
                 _notifications.OwnStatus = vm.SelectedStatus;
-                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
                 _conn?.Send(Rede.Core.Protocol.Msg.StatusUpdate, new System.Text.Json.Nodes.JsonObject
                 {
                     ["status"] = vm.SelectedStatus,
@@ -1351,7 +1355,7 @@ public partial class MainWindow : Window
                 _auth.Profile.NotificationShowContent = vm.NotificationShowContent;
                 _notifications.Enabled = vm.NotificationsEnabled;
                 _notifications.ShowContent = vm.NotificationShowContent;
-                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
             }
         };
 
@@ -1415,7 +1419,7 @@ public partial class MainWindow : Window
                 _auth.Profile.OutputVolume = (float)(vm.OutputVolume / 100.0);
                 _auth.Profile.NoiseGateThreshold = (float)(vm.NoiseGateThreshold / 100.0);
 
-                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
 
                 // Apply to running audio engine
                 if (_call?.Audio is not null)
@@ -1445,7 +1449,7 @@ public partial class MainWindow : Window
                 _auth.Profile.AccentColor = vm.AccentColor;
                 _auth.Profile.AvatarData = vm.AvatarData;
                 _auth.Profile.AvatarMimeType = vm.AvatarMimeType;
-                _ = _store.SaveProfileAsync(_auth.Profile, _auth.Passphrase);
+                _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
                 _chat?.BroadcastProfile(vm.AccentColor, vm.AvatarData, vm.AvatarMimeType);
                 UpdateOwnProfilePanel();
             }
@@ -1507,10 +1511,13 @@ public partial class MainWindow : Window
         RootContent.Content = settingsView;
     }
 
-    private void Window_KeyDown(object? sender, KeyEventArgs e)
+    private async void Window_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Q && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
+            // Flush any pending debounced saves before exit
+            if (_auth?.Profile is not null && _auth?.Passphrase is not null)
+                await _store.FlushAsync(_auth.Profile, _auth.Passphrase);
             _conn?.Dispose();
             Close();
         }
@@ -1584,7 +1591,7 @@ public partial class MainWindow : Window
             _pendingDevices.TryRemove(key, out _);
 
         if (accepted.Count > 0)
-            Task.Run(async () => await _store.SaveProfileAsync(profile, passphrase));
+            _store.SaveProfileDebounced(profile, passphrase);
     }
 
     // K3: Validate user ID format (name#hash, max 255 chars, no control chars)

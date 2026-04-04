@@ -122,10 +122,10 @@ public class ChatService
         if (sentAny && !text.Contains("\"__rede_ctrl\""))
         {
             var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            Task.Run(async () => await _store.AddChatMessageAsync(Profile, targetId, new ChatMessage
+            _store.AddChatMessage(Profile, targetId, new ChatMessage
             {
                 From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
-            }, Passphrase));
+            }, Passphrase);
             OnMessageSent?.Invoke(targetId, text, ttl);
         }
 
@@ -188,13 +188,13 @@ public class ChatService
         {
             // Restore ratchet state on failure
             var backupJson = JsonSerializer.SerializeToElement(backup);
-            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, targetId, backupJson, Passphrase, devId));
+            _store.SaveRatchetStateAsync(Profile, targetId, backupJson, Passphrase, devId);
             OnSystemMessage?.Invoke("Message not sent — connection lost. Ratchet state preserved.");
             return;
         }
 
         var stateElement = JsonSerializer.SerializeToElement(state);
-        Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, targetId, stateElement, Passphrase, devId));
+        _store.SaveRatchetStateAsync(Profile, targetId, stateElement, Passphrase, devId);
     }
 
     private bool TrySealedSend(string targetId, string? devId, JsonObject innerPayload, int ttl, Contact contact)
@@ -258,11 +258,11 @@ public class ChatService
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var ttl = ProtocolSerializer.GetInt(msg, "ttl");
 
-        // Store chat history
-        Task.Run(async () => await _store.AddChatMessageAsync(Profile, from, new ChatMessage
+        // Store chat history (debounced)
+        _store.AddChatMessage(Profile, from, new ChatMessage
         {
             From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"), Ttl = ttl,
-        }, Passphrase));
+        }, Passphrase);
 
         OnMessageReceived?.Invoke(from, sanitized, from, ts, false);
     }
@@ -279,17 +279,22 @@ public class ChatService
         if (sealedNonce is null) return;
         if (!_nonceTracker.Check(sealedNonce)) return;
 
-        var envelope = new SealedSender.SealedEnvelope(
-            sealedNode["ephemeralKey"]?.GetValue<string>() ?? "",
-            sealedNonce ?? "",
-            sealedNode["ciphertext"]?.GetValue<string>() ?? ""
-        );
+        // M13: Fail fast on missing fields instead of passing empty strings
+        var ephKey = sealedNode["ephemeralKey"]?.GetValue<string>();
+        var sealedCt = sealedNode["ciphertext"]?.GetValue<string>();
+        if (string.IsNullOrEmpty(ephKey) || string.IsNullOrEmpty(sealedCt)) return;
+
+        var envelope = new SealedSender.SealedEnvelope(ephKey, sealedNonce, sealedCt);
 
         var inner = SealedSender.Unseal(envelope, Profile.SecretKey);
         if (inner is null) return;
 
         var innerObj = JsonObject.Create(inner.Value);
         if (innerObj is null) return;
+
+        // M14: Also check inner message nonce to prevent cross-type replay
+        var innerNonce = ProtocolSerializer.GetString(innerObj, "nonce");
+        if (innerNonce is not null && !_nonceTracker.Check(innerNonce)) return;
 
         // Process as normal message
         var from = ProtocolSerializer.GetString(innerObj, "from");
@@ -304,10 +309,10 @@ public class ChatService
         var sanitized = EscapeContent(plaintext);
         var ts = DateTime.Now;
 
-        Task.Run(async () => await _store.AddChatMessageAsync(Profile, from, new ChatMessage
+        _store.AddChatMessage(Profile, from, new ChatMessage
         {
             From = from, Text = sanitized, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = 0,
-        }, Passphrase));
+        }, Passphrase);
 
         OnMessageReceived?.Invoke(from, sanitized, from, ts, true);
     }
@@ -365,7 +370,7 @@ public class ChatService
             {
                 otpkSecret = Profile.OneTimePreKeys[idx].SecretKey;
                 Profile.OneTimePreKeys.RemoveAt(idx);
-                Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+                _store.SaveProfileDebounced(Profile, Passphrase);
             }
         }
 
@@ -418,7 +423,7 @@ public class ChatService
                 if (plaintext is not null)
                 {
                     var stateJson = JsonSerializer.SerializeToElement(ratchetState);
-                    Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, from, stateJson, Passphrase, fromDeviceId));
+                    _store.SaveRatchetStateAsync(Profile, from, stateJson, Passphrase, fromDeviceId);
                     return plaintext;
                 }
             }
@@ -465,7 +470,7 @@ public class ChatService
         // K2 fix: rollback on failed decrypt
         var toSave = plaintext is not null ? state : backup;
         var saveJson = JsonSerializer.SerializeToElement(toSave);
-        Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, from, saveJson, Passphrase, fromDeviceId));
+        _store.SaveRatchetStateAsync(Profile, from, saveJson, Passphrase, fromDeviceId);
 
         return plaintext;
     }
@@ -566,7 +571,7 @@ public class ChatService
             var result = DoubleRatchet.Encrypt(ratchetState, pending.Text);
 
             var stateJson = JsonSerializer.SerializeToElement(ratchetState);
-            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, targetUserId, stateJson, Passphrase, devId));
+            _store.SaveRatchetStateAsync(Profile, targetUserId, stateJson, Passphrase, devId);
 
             var payload = ProtocolSerializer.Payload(
                 ("to", JsonValue.Create(targetUserId)),
@@ -596,10 +601,10 @@ public class ChatService
         {
             if (!pending.Text.Contains("\"__rede_ctrl\""))
             {
-                Task.Run(async () => await _store.AddChatMessageAsync(Profile, targetUserId, new ChatMessage
+                _store.AddChatMessage(Profile, targetUserId, new ChatMessage
                 {
                     From = Profile.UserId, Text = pending.Text, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = pending.Ttl,
-                }, Passphrase));
+                }, Passphrase);
                 OnMessageSent?.Invoke(targetUserId, pending.Text, pending.Ttl);
             }
             OnSystemMessage?.Invoke($"Secure session established ({successCount} device(s)).");

@@ -240,14 +240,14 @@ public class AuthService
         OnSystemMessage?.Invoke("Device linked successfully!");
         OnSystemMessage?.Invoke($"Linked to: {Profile.UserId}");
 
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
         OnAuthSuccess?.Invoke();
     }
 
     private void HandleDeviceLinkFail(JsonObject msg)
     {
         var error = ProtocolSerializer.GetString(msg, "error") ?? "Device link failed";
-        OnAuthFailed?.Invoke(error);
+        OnAuthFailed?.Invoke(SanitizeServerError(error)); // H12: Sanitize like other handlers
     }
 
     private static bool IsValidBase64Key(string key, int expectedBytes)
@@ -288,7 +288,7 @@ public class AuthService
         }
         Profile.NextPreKeyId = startId + bundle.PrivateKeys.OneTimePreKeys.Count;
 
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         // Upload public bundle
         var otpkArray = new JsonArray();

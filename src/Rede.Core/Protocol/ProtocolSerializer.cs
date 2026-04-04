@@ -33,7 +33,8 @@ public static class ProtocolSerializer
     {
         try
         {
-            var node = JsonNode.Parse(raw);
+            // M7: Limit JSON nesting depth to prevent stack overflow from malicious messages
+            var node = JsonNode.Parse(raw, nodeOptions: null, new JsonDocumentOptions { MaxDepth = 15 });
             return node?.AsObject();
         }
         catch

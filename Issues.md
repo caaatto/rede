@@ -126,6 +126,63 @@
 [x] M6: PlaceChannel Name bei CreateChannel nicht validiert — `SanitizeMetadataString(name, 64)` vor Channel-Erstellung.
 [x] M7: Place IconData unbounded bei Deserialize — `iconData.Length > 350_000` wird abgelehnt.
 
+## Security Audit (2026-04-04, Runde 6) — Gefixte Findings
+
+### Critical
+[x] C1: pg-store.js fehlende place_admins/place_bans Tabellen + Funktionen — Schema + async Functions (`addPlaceAdmin`, `removePlaceAdmin`, `isPlaceAdmin`, `addPlaceBan`, `removePlaceBan`, `isPlaceBanned`, `getPlaceBans`) + `getPlace()` returns `admins` array.
+[x] C2: index.js sync/async Mismatch mit PG-Backend — Alle Handler-Funktionen `async`, alle `store.*()` Aufrufe mit `await`, Message-Handler-Callback `async`, `deliverPending` async + awaited, Cleanup-Intervals mit `async () =>` Wrapper.
+[x] C3: SRTP Binary Relay ohne per-Connection Call-Tracking — `wsActiveCall` WeakMap trackt aktiven Call pro WebSocket. Binary Frames nur relayed wenn `wsActiveCall` gesetzt + Call-Membership verifiziert. 8KB Größenlimit für Binary Frames.
+[x] C4: CallService akzeptiert Calls von Nicht-Kontakten — `HandleCallOffer()` prüft `Profile.Contacts.ContainsKey(incomingFrom)` vor Verarbeitung.
+
+### High
+[x] H1: `clearPendingPlaceMessages` Argumente vertauscht — Reihenfolge korrigiert zu `(targetUserId, placeId)`.
+[x] H2: Call-Signaling forwarded alle JSON-Felder — Whitelist: nur `callId`, `to`, `from`, `fromDeviceId`, `mode`, `sdp`, `candidate`, `srtpParams`, `reason`, `muted`.
+[x] H3: `activeCalls` Map unbounded — Cap auf 500 + max 2 aktive Calls pro User.
+[x] H4: `userStatuses` Map Memory Leak — Cleanup im 60s-Interval: Entfernt Einträge für User die nicht mehr in `clients` sind.
+[x] H5: Status-Broadcast DoS Amplification — Rate Limit 5/Minute pro User für `STATUS_UPDATE`.
+[x] H6: Oversized WebSocket Message Frames nicht gedrained — Drain-Loop liest und verwirft Frames bis `EndOfMessage` bei Überschreitung.
+[x] H7: `SendAsync()` ohne Outgoing Size Limit — `MaxOutgoingSize` (512KB) Check hinzugefügt, konsistent mit sync `Send()`.
+[x] H8: TOFU null-Cert für wss:// über Proxy akzeptiert — Null-Certs nur noch für non-wss:// akzeptiert (Proxy ändert nichts).
+[x] H9: CallService DH Header Feld nicht validiert — `string.IsNullOrEmpty(dhVal)` Check vor Header-Konstruktion.
+[x] H10: Race auf `_pendingPlaceName` bei schneller Place-Erstellung — `ConcurrentQueue<string>` statt Single-Slot.
+[x] H11: `HandlePlaceKeyReceived` MetadataKey Format nicht validiert — Base64 + 32-Byte Längencheck vor Übernahme.
+[x] H12: `HandleDeviceLinkFail` Server-Error nicht sanitized — `SanitizeServerError()` angewendet.
+[x] H13: Self-Call nicht verhindert — `if (to === senderId) return;` Check in Call-Signaling.
+
+### Medium
+[x] M1: `invite.js` hardcoded SQLite Store — Respektiert jetzt `REDE_DB_BACKEND=pg`.
+[x] M2: WebSocket/CTS Leak bei Reconnect — `Dispose()` auf alte `_ws`/`_cts` vor Neuerstellung.
+[x] M3: Group Creator per `members[0]` Array-Position — `creator_id` Spalte in `groups_` Tabelle + Migration für bestehende DBs + Fallback auf `members[0]`.
+[x] M4: Sealed Message Nonce-Validierung fehlt — `validateNonce(sealedPayload.nonce)` hinzugefügt.
+[x] M5: Sealed Messages ohne Replay-Schutz — SHA256-Hash aus `ephemeralKey+nonce+ciphertext[:64]` als Nonce-Key in `checkNonce()`.
+[x] M6: ProfileEncryption Password Bytes nicht gezeroed — `CryptoService.ZeroOut(password)` nach scrypt.
+[x] M7: ProtocolSerializer JSON Depth unbounded — `MaxDepth = 15` in `JsonDocumentOptions`.
+[x] M8: LIKE Queries mit User-Input ohne Wildcard-Escaping — `escapeLike()` escaoed `%` und `_` in both stores.
+[x] M9: DH Public Key in DhRatchetStep nicht gegen Low-Order Points validiert — `CryptoService.IsValidDhPublicKey()` Check hinzugefügt.
+[x] M10: Incoming Messages ohne Längenlimit vor Markdown-Rendering — Truncation auf 8192 Chars in `AddIncomingMessage()` + `UpdateInlines()`.
+[x] M11: Stale .tmp Files nach Crash — `EnsureDir()` löscht `*.tmp` beim Start.
+[x] M12: .enc Dateien ohne Unix File Permissions — `SetUnixFileMode(UserRead|UserWrite)` nach Rename.
+[x] M13: Sealed Envelope Empty-String-Felder — Null/Empty-Check für `ephemeralKey` und `ciphertext` vor Unseal.
+[x] M14: Cross-Type Nonce Replay Gap (Sealed→Regular) — Inner Message Nonce nach Unseal auch gegen NonceTracker geprüft.
+[x] M15: Deserialisierte Channel Names nicht durch `SanitizeMetadataString` — Jetzt `SanitizeMetadataString()` statt einfacher Truncation.
+[x] M16: Categories List unbounded nach Deserialize — Cap auf 100 Einträge.
+[x] M17: Place Profile/Role Colors nicht auf Sender-Seite validiert — `ValidateColor()` + IconData-Größencheck vor Distribute.
+
+### Low
+[x] L1: Dead Code `_origHandlePlaceInvite` — Entfernt.
+[x] L2: MarkdownTextBlock Regex ReDoS — Regex Timeout (100ms) + `RegexMatchTimeoutException` Catch mit Plaintext-Fallback.
+[x] L3: OwnAvatarImage Bitmap nicht disposed — `oldBmp?.Dispose()` vor Replacement in `UpdateOwnProfilePanel()`.
+[x] L4: SettingsViewModel Avatar Bitmaps nicht disposed — `oldBmp?.Dispose()` in `SetAvatarFromBytes()` und `LoadAvatarFromBase64()`.
+[x] L5: `SendBinaryAsync` ohne Size Limit — 8KB Limit für SRTP Packets.
+[x] L6: SecureOverwrite vor Rename — Reihenfolge korrigiert (Rename zuerst, dann optional Overwrite).
+[x] L7: Double scrypt bei ProfileEncryption — Single 64-Byte Derivation für Encryption + HMAC Key, mit Legacy-Fallback beim Decrypt.
+
+### Crypto
+[x] CR1: SenderKeys.Encrypt Chain Key mutiert vor Overflow-Check — Bounds-Check an den Anfang von `Encrypt()` verschoben.
+[x] CR2: DoubleRatchet.Encrypt Counter-Check nach State-Mutation — Check an den Anfang verschoben, vor Chain-Key-Derivation.
+[x] CR3: HKDF `byte` Loop Counter kann silent wrappen — `int` Counter mit explizitem `> 255` Guard.
+[x] CR4: Nur 2 von 7 Curve25519 Low-Order Points — Alle 7 bekannten Small-Subgroup Points in `LowOrderPoints` Liste.
+
 ### Nicht gefixt (architekturell / niedrige Priorität)
 [ ] C5: Race Condition in async Ratchet State Save — Task.Run Fire-and-Forget kann bei schnellen Nachrichten zu Out-of-Order Writes führen. Erfordert Save-Queue-Architektur.
 [ ] H8: Event-Handler-Akkumulation in Flyouts — Context-Menüs werden bei jedem Rechtsklick neu erstellt. Flyout-Instanzen werden vom GC aufgeräumt wenn Flyout geschlossen wird, da keine Referenzen gehalten werden. Nur bei extrem häufigem Öffnen relevant.
@@ -144,6 +201,6 @@
 - ProfileEncryption HMAC ist optional für Legacy-Profile - nach Migrationszeitraum sollte HMAC required werden.
 - Passphrase wird als string an 5+ Service-Objekte propagiert - .NET SecureString ist deprecated, byte[] erfordert Refactoring.
 - Event-Handler-Akkumulation in InitServices bei wiederholtem Login - Services sollten IDisposable implementieren.
-- Double scrypt bei jedem Profile-Save (Encryption + HMAC Key) - könnte zu Single 64-Byte Derivation optimiert werden.
+- ~~Double scrypt bei jedem Profile-Save~~ — GEFIXT in Runde 6 (L7): Single 64-Byte Derivation mit Legacy-Fallback.
 - Profile wird bei jeder einzelnen Nachricht komplett neu verschlüsselt und geschrieben - Chat-History sollte separat gespeichert werden.
 - Fire-and-forget Task.Run Saves ohne Fehlerbehandlung - Save-Queue mit Ordering wäre robuster.

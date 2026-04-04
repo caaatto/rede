@@ -135,15 +135,20 @@ public class RedeConnection : IDisposable
             await CheckSocksProxyAsync(proxyUrl); // throws InvalidOperationException if unreachable
         }
 
+        // M2: Dispose previous WS and CTS to prevent resource leak on reconnect
+        _cts?.Cancel();
+        _cts?.Dispose();
+        try { _ws?.Dispose(); } catch { }
+
         _cts = new CancellationTokenSource();
         _ws = new ClientWebSocket();
 
         // TLS cert validation via TOFU pinning
         bool TofuValidation(object sender, X509Certificate? cert, X509Chain? chain, SslPolicyErrors errors)
         {
-            // M7: Only accept null cert for non-TLS or proxied connections
+            // M7: Only accept null cert for non-TLS connections (not for wss:// even through proxy)
             if (cert is null)
-                return !_serverUrl.StartsWith("wss://") || _proxySettings.UseI2P || _proxySettings.UseTor;
+                return !_serverUrl.StartsWith("wss://");
             var fp = cert.GetCertHashString(HashAlgorithmName.SHA256);
             if (_pinnedCertFingerprint is null)
             {
@@ -241,6 +246,7 @@ public class RedeConnection : IDisposable
     {
         if (_ws?.State != WebSocketState.Open)
             return false;
+        if (data.Length > 8192) return false; // SRTP packets should be well under 8KB
         try
         {
             await _ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Binary, true,
@@ -265,6 +271,14 @@ public class RedeConnection : IDisposable
 
         var msg = ProtocolSerializer.CreateClientMessage(type, payload);
         var bytes = Encoding.UTF8.GetBytes(msg);
+
+        // H7: Outgoing size limit (same as sync Send)
+        if (bytes.Length > MaxOutgoingSize)
+        {
+            OnError?.Invoke("[WARNING] Outgoing message too large — dropped.");
+            return false;
+        }
+
         try
         {
             await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true,
@@ -309,6 +323,12 @@ public class RedeConnection : IDisposable
 
                 if (oversized)
                 {
+                    // H6: Drain remaining frames of oversized message to prevent frame desync
+                    while (!result.EndOfMessage)
+                    {
+                        result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                        if (result.MessageType == WebSocketMessageType.Close) goto exit;
+                    }
                     OnError?.Invoke("[SECURITY] Oversized message dropped.");
                     messageBuffer.SetLength(0);
                     continue;

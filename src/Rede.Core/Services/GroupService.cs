@@ -110,7 +110,7 @@ public class GroupService
 
         var newKey = CryptoService.GenerateGroupKey();
         group.Key = newKey;
-        Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+        _store.SaveProfileDebounced(Profile, Passphrase);
 
         int sent = 0;
         if (group.Members is not null && chatService is not null)
@@ -169,7 +169,7 @@ public class GroupService
 
         var result = SenderKeys.Encrypt(skState, text, Profile.SigningSecretKey);
 
-        // Save updated state
+        // Save updated state (debounced — no scrypt, no Task.Run needed)
         var stateObj = new JsonObject
         {
             ["own"] = new JsonObject
@@ -178,11 +178,8 @@ public class GroupService
                 ["messageNumber"] = skState.MessageNumber,
             }
         };
-        Task.Run(async () =>
-        {
-            var elem = JsonSerializer.SerializeToElement(stateObj);
-            await _store.SaveSenderKeyStateAsync(Profile, groupId, elem, Passphrase);
-        });
+        var elem = JsonSerializer.SerializeToElement(stateObj);
+        _store.SaveSenderKeyStateAsync(Profile, groupId, elem, Passphrase);
 
         var payload = ProtocolSerializer.Payload(
             ("groupId", JsonValue.Create(groupId)),
@@ -198,12 +195,12 @@ public class GroupService
 
         _conn.Send(Msg.GroupMessage, payload);
 
-        // Persist own group message
+        // Persist own group message (debounced)
         var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        Task.Run(async () => await _store.AddChatMessageAsync(Profile, groupId, new ChatMessage
+        _store.AddChatMessage(Profile, groupId, new ChatMessage
         {
             From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
-        }, Passphrase));
+        }, Passphrase);
         OnGroupMessageSent?.Invoke(groupId, text, ttl);
     }
 
@@ -258,7 +255,7 @@ public class GroupService
         if (Profile.Groups.TryGetValue(groupId, out var group) && group.Members is not null)
         {
             group.Members.Remove(userId);
-            Task.Run(async () => await _store.SaveProfileAsync(Profile, Passphrase));
+            _store.SaveProfileDebounced(Profile, Passphrase);
         }
 
         OnSystemMessage?.Invoke($"Removed {userId} from group {groupId}");
@@ -349,8 +346,8 @@ public class GroupService
                     ["messageNumber"] = memberState.MessageNumber,
                 };
                 parsed["members"] = membersNode;
-                var elem = JsonSerializer.SerializeToElement(parsed);
-                Task.Run(async () => await _store.SaveSenderKeyStateAsync(Profile, groupId, elem, Passphrase));
+                var skElem = JsonSerializer.SerializeToElement(parsed);
+                _store.SaveSenderKeyStateAsync(Profile, groupId, skElem, Passphrase);
             }
         }
 
@@ -358,11 +355,11 @@ public class GroupService
         var sanitized = ChatService.EscapeContent(plaintext);
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
 
-        Task.Run(async () => await _store.AddChatMessageAsync(Profile, groupId, new ChatMessage
+        _store.AddChatMessage(Profile, groupId, new ChatMessage
         {
             From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"),
             Ttl = ProtocolSerializer.GetInt(msg, "ttl"),
-        }, Passphrase));
+        }, Passphrase);
 
         OnGroupMessageReceived?.Invoke(groupId, from, sanitized, ts);
     }

@@ -153,9 +153,9 @@ public class CallService : IDisposable
                 ["toDeviceId"] = devId,
             };
 
-            // Save updated ratchet state
+            // Save updated ratchet state (debounced)
             var stateElement = JsonSerializer.SerializeToElement(ratchetState);
-            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, targetUserId, stateElement, Passphrase, devId));
+            _store.SaveRatchetStateAsync(Profile, targetUserId, stateElement, Passphrase, devId);
             break;
         }
 
@@ -288,6 +288,11 @@ public class CallService : IDisposable
 
         var incomingCallId = msg["callId"]?.GetValue<string>();
         var incomingFrom = msg["from"]?.GetValue<string>();
+
+        // C4: Reject calls from non-contacts
+        if (string.IsNullOrEmpty(incomingFrom) || Profile is null || !Profile.Contacts.ContainsKey(incomingFrom))
+            return;
+
         var modeStr = msg["mode"]?.GetValue<string>();
         var incomingMode = modeStr switch
         {
@@ -312,8 +317,12 @@ public class CallService : IDisposable
 
             if (encrypted is not null && nonce is not null && headerNode is not null)
             {
+                // H9: Validate DH header field
+                var dhVal = headerNode["dh"]?.GetValue<string>();
+                if (string.IsNullOrEmpty(dhVal)) return;
+
                 var header = new DoubleRatchet.RatchetHeader(
-                    headerNode["dh"]?.GetValue<string>() ?? "",
+                    dhVal,
                     headerNode["pn"]?.GetValue<int>() ?? 0,
                     headerNode["n"]?.GetValue<int>() ?? 0
                 );
@@ -349,15 +358,15 @@ public class CallService : IDisposable
                             }
                             catch { }
 
-                            // Save updated ratchet state
+                            // Save updated ratchet state (debounced)
                             var stateElement = JsonSerializer.SerializeToElement(ratchetState);
-                            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, incomingFrom, stateElement, Passphrase, fromDeviceId));
+                            _store.SaveRatchetStateAsync(Profile, incomingFrom, stateElement, Passphrase, fromDeviceId);
                         }
                         else
                         {
                             // Decrypt failed — restore backup
                             var backupJson = JsonSerializer.SerializeToElement(backup);
-                            Task.Run(async () => await _store.SaveRatchetStateAsync(Profile, incomingFrom, backupJson, Passphrase, fromDeviceId));
+                            _store.SaveRatchetStateAsync(Profile, incomingFrom, backupJson, Passphrase, fromDeviceId);
                         }
                     }
                 }
@@ -442,9 +451,9 @@ public class CallService : IDisposable
         if (callId != _callId) return;
 
         var userId = msg["from"]?.GetValue<string>();
+        if (userId != _remoteUserId) return; // Verify sender matches call peer
         var muted = msg["muted"]?.GetValue<bool>() ?? false;
-        if (userId is not null)
-            OnRemoteMuted?.Invoke(userId, muted);
+        OnRemoteMuted?.Invoke(userId, muted);
     }
 
     private void HandleBinaryFrame(byte[] data)

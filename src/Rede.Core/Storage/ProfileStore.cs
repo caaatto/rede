@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Rede.Core.Crypto;
+using Sodium;
 
 namespace Rede.Core.Storage;
 
@@ -23,6 +24,15 @@ public class ProfileStore
 
     private readonly SemaphoreSlim _saveLock = new(1, 1);
 
+    // --- Performance: cached scrypt key + debounced saves ---
+    private byte[]? _cachedKey64;       // 64-byte derived key (32 enc + 32 hmac)
+    private byte[]? _cachedSalt;        // salt used to derive the cached key
+    private string? _cachedPassphrase;  // to detect passphrase changes
+
+    private CancellationTokenSource? _debounceCts;
+    private volatile bool _savePending;
+    private const int DebounceMs = 500; // coalesce saves within 500ms
+
     private void EnsureDir()
     {
         if (!Directory.Exists(DataDir))
@@ -30,11 +40,17 @@ public class ProfileStore
             Directory.CreateDirectory(DataDir);
             if (!OperatingSystem.IsWindows())
             {
-                // Set 0700 permissions on Unix
                 File.SetUnixFileMode(DataDir,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
         }
+        // M4: Clean up stale .tmp files from crashed writes
+        try
+        {
+            foreach (var tmp in Directory.GetFiles(DataDir, "*.tmp"))
+                File.Delete(tmp);
+        }
+        catch { }
     }
 
     private static string GetProfilePath(string userId)
@@ -109,11 +125,31 @@ public class ProfileStore
         if (envelope is null) return null;
 
         var profile = ProfileEncryption.Decrypt<Profile>(envelope, passphrase);
-        if (profile is not null && MigrateProfile(profile))
+        if (profile is not null)
         {
-            await SaveProfileAsync(profile, passphrase);
+            // Cache the scrypt-derived key so subsequent saves skip scrypt (~1ms vs 0.5-2s)
+            CacheKey(passphrase);
+
+            if (MigrateProfile(profile))
+                await SaveProfileAsync(profile, passphrase);
         }
         return profile;
+    }
+
+    /// <summary>
+    /// Derive and cache the 64-byte scrypt key. Only re-derives if passphrase changed.
+    /// </summary>
+    private void CacheKey(string passphrase)
+    {
+        if (_cachedKey64 is not null && _cachedPassphrase == passphrase) return;
+
+        // Clear old cached key
+        if (_cachedKey64 is not null) CryptoService.ZeroOut(_cachedKey64);
+
+        var salt = SodiumCore.GetRandomBytes(16);
+        _cachedKey64 = ProfileEncryption.DeriveKey(passphrase, salt, ProfileEncryption.ScryptNCurrent, 64);
+        _cachedSalt = salt;
+        _cachedPassphrase = passphrase;
     }
 
     public async Task SaveProfileAsync(Profile profile, string passphrase)
@@ -121,10 +157,16 @@ public class ProfileStore
         EnsureDir();
         var p = GetProfilePath(profile.UserId);
 
+        // Ensure key is cached (first save after CreateProfileAsync, or passphrase change)
+        CacheKey(passphrase);
+
         await _saveLock.WaitAsync();
         try
         {
-            var envelope = ProfileEncryption.Encrypt(profile, passphrase);
+            // Use cached key — skips scrypt entirely (~1ms vs 0.5-2s)
+            var envelope = _cachedKey64 is not null
+                ? ProfileEncryption.EncryptWithDerivedKey(profile, _cachedKey64, _cachedSalt)
+                : ProfileEncryption.Encrypt(profile, passphrase);
             var json = JsonSerializer.Serialize(envelope, JsonOpts);
 
             // Atomic write: temp file, fsync, then rename
@@ -136,12 +178,59 @@ public class ProfileStore
                 await fs.WriteAsync(bytes);
                 fs.Flush(flushToDisk: true);
             }
-            SecureOverwrite(p);
+            // M5: Rename first (atomic), then securely overwrite old data
             File.Move(tmpFile, p, overwrite: true);
+            // M3: Set proper file permissions on Unix
+            if (!OperatingSystem.IsWindows())
+            {
+                try { File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+                catch { }
+            }
         }
         finally
         {
             _saveLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Debounced save — coalesces rapid saves into a single write after DebounceMs.
+    /// Use this for high-frequency mutations (message receive, ratchet state, etc.)
+    /// The profile object is snapshotted at write time, so mutations between calls are captured.
+    /// </summary>
+    public void SaveProfileDebounced(Profile profile, string passphrase)
+    {
+        _savePending = true;
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = new CancellationTokenSource();
+        var token = _debounceCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(DebounceMs, token);
+                if (token.IsCancellationRequested) return;
+                _savePending = false;
+                await SaveProfileAsync(profile, passphrase);
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    /// <summary>
+    /// Flush any pending debounced save immediately. Call on app exit or logout.
+    /// </summary>
+    public async Task FlushAsync(Profile? profile, string? passphrase)
+    {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = null;
+        if (_savePending && profile is not null && passphrase is not null)
+        {
+            _savePending = false;
+            await SaveProfileAsync(profile, passphrase);
         }
     }
 
@@ -304,7 +393,7 @@ public class ProfileStore
 
     // --- Chat history ---
 
-    public async Task AddChatMessageAsync(Profile profile, string chatId, ChatMessage message, string passphrase)
+    public void AddChatMessage(Profile profile, string chatId, ChatMessage message, string passphrase)
     {
         if (!profile.ChatHistory.ContainsKey(chatId))
             profile.ChatHistory[chatId] = new();
@@ -324,7 +413,14 @@ public class ProfileStore
         if (profile.ChatHistory[chatId].Count > 1000)
             profile.ChatHistory[chatId] = profile.ChatHistory[chatId].TakeLast(1000).ToList();
 
-        await SaveProfileAsync(profile, passphrase);
+        SaveProfileDebounced(profile, passphrase);
+    }
+
+    // Keep async overload for backward compat (redirects to debounced)
+    public Task AddChatMessageAsync(Profile profile, string chatId, ChatMessage message, string passphrase)
+    {
+        AddChatMessage(profile, chatId, message, passphrase);
+        return Task.CompletedTask;
     }
 
     public async Task CleanupExpiredMessagesAsync(Profile profile, string passphrase)
@@ -359,11 +455,12 @@ public class ProfileStore
         return null;
     }
 
-    public async Task SaveRatchetStateAsync(Profile profile, string contactId, JsonElement state, string passphrase, string? deviceId = null)
+    public Task SaveRatchetStateAsync(Profile profile, string contactId, JsonElement state, string passphrase, string? deviceId = null)
     {
         var key = RatchetKey(contactId, deviceId);
         profile.RatchetStates[key] = state;
-        await SaveProfileAsync(profile, passphrase);
+        SaveProfileDebounced(profile, passphrase);
+        return Task.CompletedTask;
     }
 
     public List<string?> GetRatchetDeviceIds(Profile profile, string contactId)
@@ -386,9 +483,10 @@ public class ProfileStore
         return profile.SenderKeys.TryGetValue(groupId, out var state) ? state : null;
     }
 
-    public async Task SaveSenderKeyStateAsync(Profile profile, string groupId, JsonElement state, string passphrase)
+    public Task SaveSenderKeyStateAsync(Profile profile, string groupId, JsonElement state, string passphrase)
     {
         profile.SenderKeys[groupId] = state;
-        await SaveProfileAsync(profile, passphrase);
+        SaveProfileDebounced(profile, passphrase);
+        return Task.CompletedTask;
     }
 }

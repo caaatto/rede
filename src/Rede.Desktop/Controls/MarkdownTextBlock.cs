@@ -1,3 +1,4 @@
+using System;
 using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
@@ -22,19 +23,18 @@ public class MarkdownTextBlock : SelectableTextBlock
         MarkdownProperty.Changed.AddClassHandler<MarkdownTextBlock>((tb, _) => tb.UpdateInlines());
     }
 
-    private static readonly Regex CodeBlockRegex = new(@"```([\s\S]*?)```", RegexOptions.Compiled);
+    // M2: Add regex timeout to prevent ReDoS on adversarial input
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(100);
+    private static readonly Regex CodeBlockRegex = new(@"```([\s\S]*?)```", RegexOptions.Compiled, RegexTimeout);
 
-    // Combined inline pattern — order matters:
-    // 1. `code`
-    // 2. *bold* (single asterisk)
-    // 3. _italic_ (underscore)
-    // 4. -strikethrough- (single dash, word boundaries to avoid matching e.g. "well-known")
     private static readonly Regex InlinePattern = new(
         @"(`[^`]+`)" +                          // group 1: inline code
         @"|(?<!\w)\*([^*]+?)\*(?!\w)" +          // group 2: *bold*
         @"|(?<!\w)_([^_]+?)_(?!\w)" +            // group 3: _italic_
         @"|(?<!\w)-([^-]+?)-(?!\w)",             // group 4: -strikethrough-
-        RegexOptions.Compiled);
+        RegexOptions.Compiled, RegexTimeout);
+
+    private const int MaxRenderLength = 8192; // M10: Limit text length before regex processing
 
     private void UpdateInlines()
     {
@@ -43,8 +43,13 @@ public class MarkdownTextBlock : SelectableTextBlock
         if (string.IsNullOrEmpty(text))
             return;
 
+        // M10: Truncate before regex processing to prevent UI freezes
+        if (text.Length > MaxRenderLength)
+            text = text[..MaxRenderLength] + "…";
+
         Inlines ??= new InlineCollection();
-        ParseMarkdown(text, Inlines);
+        try { ParseMarkdown(text, Inlines); }
+        catch (RegexMatchTimeoutException) { Inlines.Add(new Run(text)); }
     }
 
     private void ParseMarkdown(string text, InlineCollection inlines)

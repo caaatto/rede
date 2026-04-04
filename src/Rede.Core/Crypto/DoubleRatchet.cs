@@ -165,6 +165,10 @@ public class DoubleRatchet
         if (state.CKs is null)
             throw new InvalidOperationException("Sending chain not initialized — wait for first incoming message");
 
+        // C3: Prevent counter wraparound — check BEFORE mutating state
+        if (state.Ns >= MaxMessageNumber)
+            throw new InvalidOperationException("Message counter limit reached — session must be re-established.");
+
         var ck = Convert.FromBase64String(state.CKs);
         var (newCK, msgKey) = KdfCK(ck);
         CryptoService.ZeroOut(ck);
@@ -178,9 +182,6 @@ public class DoubleRatchet
         CryptoService.ZeroOut(paddedBytes);
 
         var header = new RatchetHeader(state.DHs!.PublicKey, state.PN, state.Ns);
-        // C3: Prevent counter wraparound
-        if (state.Ns >= MaxMessageNumber)
-            throw new InvalidOperationException("Message counter limit reached — session must be re-established.");
         state.Ns++;
 
         return new EncryptResult(header, Convert.ToBase64String(ciphertext), Convert.ToBase64String(nonce));
@@ -326,6 +327,9 @@ public class DoubleRatchet
         // H7: Validate DH public key length
         if (dhPub.Length != 32)
             throw new InvalidOperationException("Invalid DH public key length");
+        // M9: Reject low-order points to prevent small-subgroup attacks
+        if (!CryptoService.IsValidDhPublicKey(dhPub))
+            throw new InvalidOperationException("DH public key is a low-order point");
 
         // M3: try-finally ensures all DH intermediates are zeroed on exception
         byte[]? dhSec = null, rk = null, dhOut1 = null, rk1 = null, ckr = null;
