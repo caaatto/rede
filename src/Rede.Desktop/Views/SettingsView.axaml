@@ -78,12 +78,13 @@
 
             <!-- Content area -->
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="32,8,32,24">
-                <Panel MaxWidth="560" HorizontalAlignment="Center">
+                <Grid MaxWidth="560" HorizontalAlignment="Center"
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto">
 
                     <!-- =========================================================== -->
                     <!-- PROFILE Category                                             -->
                     <!-- =========================================================== -->
-                    <StackPanel Spacing="24" IsVisible="{Binding IsProfileCategory}">
+                    <StackPanel Grid.Row="0" Spacing="24" IsVisible="{Binding IsProfileCategory}">
 
                         <!-- Avatar + Identity -->
                         <StackPanel Spacing="12">
@@ -156,7 +157,7 @@
                     <!-- =========================================================== -->
                     <!-- PRESENCE Category                                            -->
                     <!-- =========================================================== -->
-                    <StackPanel Spacing="12" IsVisible="{Binding IsPresenceCategory}">
+                    <StackPanel Grid.Row="1" Spacing="12" IsVisible="{Binding IsPresenceCategory}">
                         <TextBlock Text="Presence" Classes="header" />
                         <TextBlock Text="Set your presence status. Contacts will see when you're online, away, or busy."
                                    Classes="secondary" TextWrapping="Wrap" FontSize="11" />
@@ -204,7 +205,7 @@
                     <!-- =========================================================== -->
                     <!-- NOTIFICATIONS Category                                       -->
                     <!-- =========================================================== -->
-                    <StackPanel Spacing="12" IsVisible="{Binding IsNotificationsCategory}">
+                    <StackPanel Grid.Row="2" Spacing="12" IsVisible="{Binding IsNotificationsCategory}">
                         <TextBlock Text="Notifications" Classes="header" />
                         <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Desktop Notifications"
@@ -226,7 +227,7 @@
                     <!-- =========================================================== -->
                     <!-- VOICE & AUDIO Category                                       -->
                     <!-- =========================================================== -->
-                    <StackPanel Spacing="24" IsVisible="{Binding IsVoiceCategory}">
+                    <StackPanel Grid.Row="3" Spacing="24" IsVisible="{Binding IsVoiceCategory}">
 
                         <!-- Voice Calls -->
                         <StackPanel Spacing="12">
@@ -294,7 +295,7 @@
                     <!-- =========================================================== -->
                     <!-- SECURITY Category                                            -->
                     <!-- =========================================================== -->
-                    <StackPanel Spacing="24" IsVisible="{Binding IsSecurityCategory}">
+                    <StackPanel Grid.Row="4" Spacing="24" IsVisible="{Binding IsSecurityCategory}">
 
                         <!-- Fingerprint -->
                         <StackPanel Spacing="12">
@@ -341,7 +342,7 @@
                         </StackPanel>
                     </StackPanel>
 
-                </Panel>
+                </Grid>
             </ScrollViewer>
         </Grid>
     </Grid>

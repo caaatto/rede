@@ -13,6 +13,7 @@ public partial class SettingsView : UserControl
     public SettingsView()
     {
         InitializeComponent();
+        DataContextChanged += (_, _) => PopulateColorPalette();
     }
 
     protected override void OnLoaded(RoutedEventArgs e)
@@ -23,7 +24,12 @@ public partial class SettingsView : UserControl
 
     private void PopulateColorPalette()
     {
+        if (ColorPalette is null) return;
         if (DataContext is not SettingsViewModel vm) return;
+
+        // Unsubscribe from any prior VM to avoid leaks on re-open
+        vm.PropertyChanged -= OnVmPropertyChanged;
+        vm.PropertyChanged += OnVmPropertyChanged;
 
         ColorPalette.Children.Clear();
         foreach (var hex in SettingsViewModel.PresetColors)
@@ -41,15 +47,32 @@ public partial class SettingsView : UserControl
                 BorderBrush = vm.AccentColor == color
                     ? Brush.Parse("#e0e0e8")
                     : Brushes.Transparent,
+                Tag = color,
             };
 
-            swatch.PointerPressed += (_, _) =>
+            swatch.PointerPressed += (s, _) =>
             {
-                vm.AccentColor = color;
-                PopulateColorPalette();
+                if (DataContext is SettingsViewModel v && s is Border b && b.Tag is string c)
+                    v.AccentColor = c;
             };
 
             ColorPalette.Children.Add(swatch);
+        }
+    }
+
+    private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SettingsViewModel.AccentColor))
+            RefreshSelectionBorder();
+    }
+
+    private void RefreshSelectionBorder()
+    {
+        if (ColorPalette is null || DataContext is not SettingsViewModel vm) return;
+        foreach (var child in ColorPalette.Children)
+        {
+            if (child is Border b && b.Tag is string hex)
+                b.BorderBrush = vm.AccentColor == hex ? Brush.Parse("#e0e0e8") : Brushes.Transparent;
         }
     }
 
