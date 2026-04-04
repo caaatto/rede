@@ -85,6 +85,23 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<GroupItemViewModel> _groups = new();
     [ObservableProperty] private ObservableCollection<PlaceItemViewModel> _places = new();
     [ObservableProperty] private object? _selectedConversation;
+    [ObservableProperty] private string _searchText = "";
+
+    partial void OnSearchTextChanged(string value) => ApplySearchFilter();
+
+    private void ApplySearchFilter()
+    {
+        var q = (SearchText ?? "").Trim();
+        var hasQuery = q.Length > 0;
+        var qLower = q.ToLowerInvariant();
+
+        foreach (var c in Contacts)
+            c.IsMatch = !hasQuery || (c.DisplayName ?? "").ToLowerInvariant().Contains(qLower);
+        foreach (var g in Groups)
+            g.IsMatch = !hasQuery || (g.Name ?? "").ToLowerInvariant().Contains(qLower);
+        foreach (var p in Places)
+            p.IsMatch = !hasQuery || (p.Name ?? "").ToLowerInvariant().Contains(qLower);
+    }
 
     // Chat state
     [ObservableProperty] private ObservableCollection<ChatMessageViewModel> _messages = new();
@@ -265,6 +282,7 @@ public partial class ContactItemViewModel : ViewModelBase
     [ObservableProperty] private bool _hasAvatar;
     [ObservableProperty] private string _status = "offline"; // online, away, dnd, offline
     [ObservableProperty] private string? _customStatus;
+    [ObservableProperty] private bool _isMatch = true;
 
     public string Initial => string.IsNullOrEmpty(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
     public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
@@ -318,6 +336,7 @@ public partial class GroupItemViewModel : ViewModelBase
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private int _memberCount;
+    [ObservableProperty] private bool _isMatch = true;
 }
 
 public partial class PlaceItemViewModel : ViewModelBase
@@ -338,6 +357,7 @@ public partial class PlaceItemViewModel : ViewModelBase
     [ObservableProperty] private string _ownerColor = "#eab308";
     [ObservableProperty] private string _adminColor = "#8b5cf6";
     [ObservableProperty] private string _memberColor = "#6b7280";
+    [ObservableProperty] private bool _isMatch = true;
 
     public string Initial => string.IsNullOrEmpty(Name) ? "?" : Name[..1].ToUpperInvariant();
     public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);

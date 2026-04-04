@@ -16,34 +16,55 @@
                 BorderThickness="0,0,1,0">
             <DockPanel>
 
-                <!-- Spacer for title bar area -->
-                <Border DockPanel.Dock="Top" Height="30" Background="Transparent"
-                        IsHitTestVisible="False" />
-
-                <!-- Collapse toggle (always at top) -->
-                <Border DockPanel.Dock="Top" Padding="4,6" Background="{StaticResource RedeSurfaceBrush}">
-                    <Grid ColumnDefinitions="*,Auto">
-                        <!-- Retry button (only visible when disconnected) -->
-                        <Button Grid.Column="0"
-                                Classes="ghost"
-                                Content="Retry"
-                                Padding="8,2"
-                                Margin="8,0,0,0"
-                                HorizontalAlignment="Left"
-                                FontSize="{StaticResource RedeSmallSize}"
-                                Foreground="{StaticResource RedeAccentVioletBrush}"
-                                IsVisible="{Binding !IsConnected}"
-                                Click="RetryConnection_Click" />
-                        <!-- Toggle button -->
-                        <Button Grid.Column="1" Classes="ghost"
+                <!-- Brand header — logo + REDE wordmark (inside titlebar area) -->
+                <Border DockPanel.Dock="Top" Height="44" Padding="14,8,8,6"
+                        Background="{StaticResource RedeSurfaceBrush}">
+                    <Grid ColumnDefinitions="Auto,10,*,Auto">
+                        <Image Grid.Column="0"
+                               Source="avares://Rede.Desktop/Assets/icon.png"
+                               Width="28" Height="28"
+                               VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2"
+                                   Text="REDE"
+                                   VerticalAlignment="Center"
+                                   FontSize="18"
+                                   FontWeight="{StaticResource RedeWeightBold}"
+                                   Foreground="{StaticResource RedeTextPrimaryBrush}"
+                                   IsVisible="{Binding !IsSidebarCollapsed}" />
+                        <Button Grid.Column="3" Classes="ghost"
                                 Command="{Binding ToggleSidebarCommand}"
                                 Padding="4" Margin="0"
                                 Width="28" Height="28"
-                                HorizontalAlignment="Right">
+                                VerticalAlignment="Center">
                             <TextBlock Text="{Binding IsSidebarCollapsed, Converter={StaticResource CollapseIconConverter}}"
                                        FontSize="14" HorizontalAlignment="Center" />
                         </Button>
                     </Grid>
+                </Border>
+
+                <!-- Search bar -->
+                <Border DockPanel.Dock="Top" Padding="10,6,10,8"
+                        Background="{StaticResource RedeSurfaceBrush}"
+                        IsVisible="{Binding !IsSidebarCollapsed}">
+                    <TextBox Text="{Binding SearchText}"
+                             Watermark="Search..."
+                             FontSize="{StaticResource RedeSmallSize}"
+                             Padding="10,5"
+                             MinHeight="0" />
+                </Border>
+
+                <!-- Retry row (only visible when disconnected) -->
+                <Border DockPanel.Dock="Top" Padding="10,0,10,6"
+                        Background="{StaticResource RedeSurfaceBrush}"
+                        IsVisible="{Binding !IsConnected}">
+                    <Button Classes="ghost"
+                            Content="Reconnect"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Padding="8,4"
+                            FontSize="{StaticResource RedeSmallSize}"
+                            Foreground="{StaticResource RedeAccentVioletBrush}"
+                            Click="RetryConnection_Click" />
                 </Border>
 
                 <!-- User profile panel (bottom of sidebar, like Discord) -->
@@ -133,6 +154,7 @@
                                         Margin="2,1"
                                         BorderThickness="0"
                                         CornerRadius="4"
+                                        IsVisible="{Binding IsMatch}"
                                         Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
                                         CommandParameter="{Binding}"
                                         PointerPressed="Contact_PointerPressed">
@@ -206,6 +228,7 @@
                                         Margin="2,1"
                                         BorderThickness="0"
                                         CornerRadius="4"
+                                        IsVisible="{Binding IsMatch}"
                                         Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
                                         CommandParameter="{Binding}"
                                         PointerPressed="Group_PointerPressed">
@@ -246,7 +269,7 @@
                     <ItemsControl ItemsSource="{Binding Places}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:PlaceItemViewModel">
-                                <StackPanel>
+                                <StackPanel IsVisible="{Binding IsMatch}">
                                     <!-- Place header -->
                                     <Button Classes="ghost"
                                             HorizontalAlignment="Stretch"
@@ -604,15 +627,6 @@
         </Border>
 
     </Grid>
-
-    <!-- App icon — fixed top-left, always visible -->
-    <Border Width="30" Height="30"
-            HorizontalAlignment="Left" VerticalAlignment="Top"
-            IsHitTestVisible="False">
-        <Image Source="avares://Rede.Desktop/Assets/icon.png"
-               Width="18" Height="18"
-               HorizontalAlignment="Center" VerticalAlignment="Center" />
-    </Border>
 
     </Panel>
 </UserControl>
