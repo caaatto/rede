@@ -134,7 +134,12 @@ public class Profile
 
     // System integration
     [JsonPropertyName("minimizeToTray")]
-    public bool MinimizeToTray { get; set; } // true = pressing X hides window to tray instead of quitting
+    public bool MinimizeToTray { get; set; } = true; // true = pressing X hides window to tray instead of quitting
+
+    // One-time migration marker: flip pre-v2.17 profiles (which had MinimizeToTray=false by default)
+    // to the new tray-by-default behavior on first load. Ensures existing users get the same UX as new installs.
+    [JsonPropertyName("trayDefaultMigratedV217")]
+    public bool TrayDefaultMigratedV217 { get; set; }
 
     [JsonPropertyName("autostart")]
     public bool Autostart { get; set; } // true = launch Rede on OS login

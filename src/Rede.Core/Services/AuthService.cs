@@ -54,10 +54,20 @@ public class AuthService : IDisposable
         Passphrase = passphrase;
         Profile = await _store.LoadProfileAsync(userId, passphrase);
         if (Profile is null) return false;
+        MigrateTrayDefault(Profile);
 
         _conn.On(Msg.AuthChallenge, HandleAuthChallenge);
         SendAuth();
         return true;
+    }
+
+    /// <summary>One-time upgrade: pre-v2.17 profiles had MinimizeToTray=false by default.
+    /// Flip them to true (matching the new default) unless the user already migrated.</summary>
+    private static void MigrateTrayDefault(Rede.Core.Storage.Profile profile)
+    {
+        if (profile.TrayDefaultMigratedV217) return;
+        profile.MinimizeToTray = true;
+        profile.TrayDefaultMigratedV217 = true;
     }
 
     /// <summary>Quick login by file hash — UserId is recovered from the decrypted profile.</summary>
@@ -66,6 +76,7 @@ public class AuthService : IDisposable
         Passphrase = passphrase;
         Profile = await _store.LoadProfileByHashAsync(hashHex, passphrase);
         if (Profile is null) return false;
+        MigrateTrayDefault(Profile);
 
         _conn.On(Msg.AuthChallenge, HandleAuthChallenge);
         SendAuth();

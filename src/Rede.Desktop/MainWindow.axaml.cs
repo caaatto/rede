@@ -101,8 +101,11 @@ public partial class MainWindow : Window
         if (_flushingOnClose) return;
         if (_auth?.Profile is null || _auth?.Passphrase is null)
         {
-            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
-                desktop.Shutdown();
+            // No session to flush — skip Avalonia/WebView/audio teardown entirely.
+            // Plain Shutdown() here hangs on webkit2gtk + HttpClient teardown on Linux
+            // (several seconds, feels like a crash). Nothing is dirty, so a hard exit
+            // is safe and instant.
+            Environment.Exit(0);
             return;
         }
         e.Cancel = true;
@@ -120,10 +123,11 @@ public partial class MainWindow : Window
         }
         catch { }
         _conn?.Dispose();
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop2)
-            desktop2.Shutdown();
-        else
-            Close();
+        // Same rationale as the login-screen path: Avalonia's cooperative shutdown
+        // hangs on WebView/audio/HttpClient teardown (multi-second freeze).
+        // Everything that needs to persist has been flushed; everything sensitive
+        // has been zeroed. A hard exit at this point is safe and instant.
+        Environment.Exit(0);
     }
 
     private async void CheckForUpdatesAsync()
