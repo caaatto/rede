@@ -8,8 +8,6 @@ namespace Rede.Desktop.ViewModels;
 public partial class LoginViewModel : ViewModelBase
 {
     [ObservableProperty] private string _userId = "";
-    [ObservableProperty] private string _passphrase = "";
-    [ObservableProperty] private string _passphraseConfirm = "";
     [ObservableProperty] private string _selectedServer = "IP Direct";
     [ObservableProperty] private string _inviteCode = "";
     [ObservableProperty] private string _errorMessage = "";
@@ -60,12 +58,19 @@ public partial class LoginViewModel : ViewModelBase
         OnPropertyChanged(nameof(UserIdWatermark));
     }
 
-    // (userId, passphrase, serverUrl, transport)
-    public event Action<string, string, string, string>? OnLoginRequested;
-    // (hashHex, passphrase, serverUrl, transport)
-    public event Action<string, string, string, string>? OnQuickLoginRequested;
-    // (displayName, passphrase, serverUrl, transport, inviteCode)
-    public event Action<string, string, string, string, string>? OnRegisterRequested;
+    // Passphrase is supplied as a byte[] at submit time by the view code-behind
+    // (SecureTextBox.ExtractPassphrase). The VM never holds it.
+    //
+    // Contract: the byte[] is OWNED by the event subscriber after the invocation —
+    // the subscriber is responsible for mlock/zero. The VM does not retain a
+    // reference.
+
+    // (userId, passphraseBytes, serverUrl, transport)
+    public event Action<string, byte[], string, string>? OnLoginRequested;
+    // (hashHex, passphraseBytes, serverUrl, transport)
+    public event Action<string, byte[], string, string>? OnQuickLoginRequested;
+    // (displayName, passphraseBytes, serverUrl, transport, inviteCode)
+    public event Action<string, byte[], string, string, string>? OnRegisterRequested;
     public event Action? OnUpdateRequested;
 
     public LoginViewModel()
@@ -116,9 +121,20 @@ public partial class LoginViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void QuickLogin()
+    private void UseDifferentAccount()
     {
-        if (string.IsNullOrWhiteSpace(Passphrase))
+        HasQuickLogin = false;
+        QuickLoginHash = "";
+        ErrorMessage = "";
+    }
+
+    /// <summary>
+    /// Submit a quick login. <paramref name="passphrase"/> ownership transfers
+    /// to the subscriber of <see cref="OnQuickLoginRequested"/>.
+    /// </summary>
+    public void SubmitQuickLogin(byte[] passphrase)
+    {
+        if (passphrase.Length == 0)
         {
             ErrorMessage = "Passphrase required.";
             return;
@@ -127,7 +143,7 @@ public partial class LoginViewModel : ViewModelBase
         IsLoading = true;
         try
         {
-            OnQuickLoginRequested?.Invoke(QuickLoginHash, Passphrase, ServerUrl, Transport);
+            OnQuickLoginRequested?.Invoke(QuickLoginHash, passphrase, ServerUrl, Transport);
         }
         catch
         {
@@ -136,19 +152,13 @@ public partial class LoginViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
-    private void UseDifferentAccount()
+    /// <summary>
+    /// Submit a login. <paramref name="passphrase"/> ownership transfers to the
+    /// subscriber of <see cref="OnLoginRequested"/>.
+    /// </summary>
+    public void SubmitLogin(byte[] passphrase)
     {
-        HasQuickLogin = false;
-        QuickLoginHash = "";
-        Passphrase = "";
-        ErrorMessage = "";
-    }
-
-    [RelayCommand]
-    private void Login()
-    {
-        if (string.IsNullOrWhiteSpace(UserId) || string.IsNullOrWhiteSpace(Passphrase))
+        if (string.IsNullOrWhiteSpace(UserId) || passphrase.Length == 0)
         {
             ErrorMessage = "User ID and passphrase are required.";
             return;
@@ -165,7 +175,7 @@ public partial class LoginViewModel : ViewModelBase
 
         try
         {
-            OnLoginRequested?.Invoke(UserId.Trim(), Passphrase, ServerUrl, Transport);
+            OnLoginRequested?.Invoke(UserId.Trim(), passphrase, ServerUrl, Transport);
         }
         catch
         {
@@ -174,43 +184,48 @@ public partial class LoginViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
-    private void Register()
+    /// <summary>
+    /// Submit a registration. <paramref name="passphrase"/> ownership transfers
+    /// to the subscriber; <paramref name="passphraseConfirm"/> is zeroed by the
+    /// caller after return.
+    /// </summary>
+    public bool SubmitRegister(byte[] passphrase, byte[] passphraseConfirm, int passphraseCharCount)
     {
-        if (string.IsNullOrWhiteSpace(UserId) || string.IsNullOrWhiteSpace(Passphrase))
+        if (string.IsNullOrWhiteSpace(UserId) || passphrase.Length == 0)
         {
             ErrorMessage = "Display name and passphrase are required.";
-            return;
+            return false;
         }
 
         if (UserId.Length > 64 || ContainsControlChars(UserId))
         {
             ErrorMessage = "Display name must be 1-64 characters, no special characters.";
-            return;
+            return false;
         }
 
-        if (Passphrase.Length < 12)
+        if (passphraseCharCount < 12)
         {
             ErrorMessage = "Passphrase must be at least 12 characters.";
-            return;
+            return false;
         }
 
-        if (Passphrase != PassphraseConfirm)
+        if (passphrase.Length != passphraseConfirm.Length ||
+            !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(passphrase, passphraseConfirm))
         {
             ErrorMessage = "Passphrases do not match.";
-            return;
+            return false;
         }
 
         if (string.IsNullOrWhiteSpace(InviteCode))
         {
             ErrorMessage = "Invite code is required for registration.";
-            return;
+            return false;
         }
 
         if (InviteCode.Length > 128 || ContainsControlChars(InviteCode))
         {
             ErrorMessage = "Invalid invite code.";
-            return;
+            return false;
         }
 
         ErrorMessage = "";
@@ -219,13 +234,15 @@ public partial class LoginViewModel : ViewModelBase
 
         try
         {
-            OnRegisterRequested?.Invoke(UserId.Trim(), Passphrase, ServerUrl, Transport, InviteCode.Trim());
+            OnRegisterRequested?.Invoke(UserId.Trim(), passphrase, ServerUrl, Transport, InviteCode.Trim());
+            return true;
         }
         catch
         {
             ErrorMessage = "Registration failed. Please try again.";
             IsLoading = false;
             IsRegistering = false;
+            return false;
         }
     }
 

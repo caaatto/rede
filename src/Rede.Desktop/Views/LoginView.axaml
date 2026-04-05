@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Rede.Desktop.ViewModels"
+             xmlns:ctrls="using:Rede.Desktop.Controls"
              x:Class="Rede.Desktop.Views.LoginView"
              x:DataType="vm:LoginViewModel">
 
@@ -38,11 +39,9 @@
                     <StackPanel Spacing="4">
                         <TextBlock Text="Passphrase" Classes="secondary"
                                    FontWeight="{StaticResource RedeWeightMedium}" />
-                        <TextBox Text="{Binding Passphrase}"
-                                 PasswordChar="*"
-                                 Watermark="enter passphrase"
-                                 IsEnabled="{Binding !IsLoading}"
-                                 KeyDown="OnPassphraseKeyDown" />
+                        <ctrls:SecureTextBox x:Name="QuickPassphraseBox"
+                                             Watermark="enter passphrase"
+                                             IsInputEnabled="{Binding !IsLoading}" />
                     </StackPanel>
                     <StackPanel Spacing="4">
                         <TextBlock Text="Server" Classes="secondary"
@@ -56,7 +55,8 @@
                               IsChecked="{Binding StaySignedIn}"
                               IsEnabled="{Binding !IsLoading}" />
                     <Button Content="Unlock"
-                            Command="{Binding QuickLoginCommand}"
+                            x:Name="QuickLoginButton"
+                            Click="OnQuickLoginClick"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
                             IsEnabled="{Binding !IsLoading}" />
@@ -120,11 +120,9 @@
                     <StackPanel Spacing="4">
                         <TextBlock Text="Passphrase" Classes="secondary"
                                    FontWeight="{StaticResource RedeWeightMedium}" />
-                        <TextBox Text="{Binding Passphrase}"
-                                 PasswordChar="*"
-                                 Watermark="min 12 characters"
-                                 IsEnabled="{Binding !IsLoading}"
-                                 KeyDown="OnPassphraseKeyDown" />
+                        <ctrls:SecureTextBox x:Name="LoginPassphraseBox"
+                                             Watermark="min 12 characters"
+                                             IsInputEnabled="{Binding !IsLoading}" />
                     </StackPanel>
 
                     <!-- Server -->
@@ -148,7 +146,8 @@
 
                     <!-- Login button -->
                     <Button Content="Login"
-                            Command="{Binding LoginCommand}"
+                            x:Name="LoginButton"
+                            Click="OnLoginClick"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
                             IsEnabled="{Binding !IsLoading}" />
@@ -177,19 +176,17 @@
                         <StackPanel Spacing="4">
                             <TextBlock Text="Passphrase" Classes="secondary"
                                        FontWeight="{StaticResource RedeWeightMedium}" />
-                            <TextBox Text="{Binding Passphrase}"
-                                     PasswordChar="*"
-                                     Watermark="min 12 characters"
-                                     IsEnabled="{Binding !IsLoading}" />
+                            <ctrls:SecureTextBox x:Name="RegisterPassphraseBox"
+                                                 Watermark="min 12 characters"
+                                                 IsInputEnabled="{Binding !IsLoading}" />
                         </StackPanel>
 
                         <StackPanel Spacing="4">
                             <TextBlock Text="Confirm Passphrase" Classes="secondary"
                                        FontWeight="{StaticResource RedeWeightMedium}" />
-                            <TextBox Text="{Binding PassphraseConfirm}"
-                                     PasswordChar="*"
-                                     Watermark="repeat passphrase"
-                                     IsEnabled="{Binding !IsLoading}" />
+                            <ctrls:SecureTextBox x:Name="RegisterPassphraseConfirmBox"
+                                                 Watermark="repeat passphrase"
+                                                 IsInputEnabled="{Binding !IsLoading}" />
                         </StackPanel>
                     </StackPanel>
 
@@ -222,7 +219,8 @@
 
                 <!-- Register button (centered below both columns) -->
                 <Button Content="Register"
-                        Command="{Binding RegisterCommand}"
+                        x:Name="RegisterButton"
+                        Click="OnRegisterClick"
                         HorizontalAlignment="Center"
                         HorizontalContentAlignment="Center"
                         MinWidth="200"

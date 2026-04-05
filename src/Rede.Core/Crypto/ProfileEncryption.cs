@@ -31,20 +31,18 @@ public static class ProfileEncryption
     /// <summary>
     /// Derive a 32-byte key using scrypt. Mirrors: deriveKey(passphrase, salt, scryptN)
     /// Uses N/r=8/p=1 parameters matching the JS client's crypto.scryptSync call.
+    /// Caller owns <paramref name="passphrase"/> (bytes are not zeroed here).
     /// </summary>
-    public static byte[] DeriveKey(string passphrase, byte[] salt, int scryptN = 0, int outputLen = 32)
+    public static byte[] DeriveKey(byte[] passphrase, byte[] salt, int scryptN = 0, int outputLen = 32)
     {
         int N = scryptN > 0 ? scryptN : ScryptNCurrent;
-        var password = Encoding.UTF8.GetBytes(passphrase);
         var output = new byte[outputLen];
 
         var result = crypto_pwhash_scryptsalsa208sha256_ll(
-            password, (nuint)password.Length,
+            passphrase, (nuint)passphrase.Length,
             salt, (nuint)salt.Length,
             (ulong)N, 8, 1,  // N, r=8, p=1
             output, (nuint)output.Length);
-
-        CryptoService.ZeroOut(password); // M6: Zero password bytes after use
 
         if (result != 0)
             throw new CryptographicException("scrypt key derivation failed");
@@ -55,7 +53,7 @@ public static class ProfileEncryption
     /// <summary>
     /// Encrypt profile data to an envelope. Mirrors: encryptProfile(data, passphrase)
     /// </summary>
-    public static EncryptedEnvelope Encrypt(object data, string passphrase)
+    public static EncryptedEnvelope Encrypt(object data, byte[] passphrase)
     {
         var salt = SodiumCore.GetRandomBytes(16);
         var combined = DeriveKey(passphrase, salt, ScryptNCurrent, 64);
@@ -106,7 +104,7 @@ public static class ProfileEncryption
     /// <summary>
     /// Decrypt profile from envelope. Mirrors: decryptProfile(envelope, passphrase)
     /// </summary>
-    public static T? Decrypt<T>(EncryptedEnvelope envelope, string passphrase) where T : class
+    public static T? Decrypt<T>(EncryptedEnvelope envelope, byte[] passphrase) where T : class
     {
         try
         {

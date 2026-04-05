@@ -66,6 +66,10 @@ public partial class MainWindow : Window
     private bool _flushingOnClose;
     private bool _forceQuit;
 
+    // mlock/VirtualLock handle for the active passphrase byte[]. Keeps the
+    // buffer pinned and resident (no swap/hibernation leakage) until close.
+    private Rede.Core.Crypto.SecureMemory.SecureHandle? _passphraseLock;
+
     /// <summary>
     /// Triggers a real application shutdown (bypassing the minimize-to-tray interception).
     /// Called by the tray "Quit" menu item.
@@ -108,6 +112,11 @@ public partial class MainWindow : Window
             ExportNoncesToProfile();
             await _store.FlushAsync(_auth.Profile, _auth.Passphrase);
             _auth.Profile?.ZeroSecrets();
+            // Zero the passphrase WHILE still mlock'd, so the last content
+            // written to the physical page is zeros, then release the lock+pin.
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(_auth.Passphrase);
+            _passphraseLock?.Dispose();
+            _passphraseLock = null;
         }
         catch { }
         _conn?.Dispose();
@@ -306,12 +315,12 @@ public partial class MainWindow : Window
         return mainView;
     }
 
-    private void OnLogin(string userId, string passphrase, string serverUrl, string transport)
+    private void OnLogin(string userId, byte[] passphrase, string serverUrl, string transport)
     {
         LoginAsync(userId, passphrase, serverUrl, transport);
     }
 
-    private void OnQuickLogin(string hash, string passphrase, string serverUrl, string transport)
+    private void OnQuickLogin(string hash, byte[] passphrase, string serverUrl, string transport)
     {
         QuickLoginAsync(hash, passphrase, serverUrl, transport);
     }
@@ -340,7 +349,7 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private async void QuickLoginAsync(string hash, string passphrase, string serverUrl, string transport)
+    private async void QuickLoginAsync(string hash, byte[] passBytes, string serverUrl, string transport)
     {
         try
         {
@@ -350,12 +359,20 @@ public partial class MainWindow : Window
             _lastTransport = transport;
             _isNewUser = false;
 
+            // Lock the passphrase buffer — ownership transferred from the view
+            // on Submit. MainWindow holds it until logout/close and zeros it then.
+            _passphraseLock?.Dispose();
+            _passphraseLock = Rede.Core.Crypto.SecureMemory.Lock(passBytes);
+
             // Decrypt profile locally first so we can extract userId for the boot animation.
             // LoginByHashAsync will do this again via AuthService but that's acceptable — scrypt
             // is cached after first derivation, so the second call is ~1ms.
-            var probe = await _store.LoadProfileByHashAsync(hash, passphrase);
+            var probe = await _store.LoadProfileByHashAsync(hash, passBytes);
             if (probe is null)
             {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(passBytes);
+                _passphraseLock?.Dispose();
+                _passphraseLock = null;
                 Dispatcher.UIThread.Post(() => { _loginVm.IsLoading = false; _loginVm.ErrorMessage = "Wrong passphrase."; });
                 return;
             }
@@ -367,7 +384,7 @@ public partial class MainWindow : Window
 
             await _conn!.ConnectAsync();
             await WaitForQueueIfNeeded();
-            var ok = await _auth!.LoginByHashAsync(hash, passphrase);
+            var ok = await _auth!.LoginByHashAsync(hash, passBytes);
             if (!ok)
             {
                 Dispatcher.UIThread.Post(() =>
@@ -375,7 +392,6 @@ public partial class MainWindow : Window
                 return;
             }
 
-            Dispatcher.UIThread.Post(() => _loginVm.Passphrase = "");
             PropagateProfile();
         }
         catch (Exception ex)
@@ -385,7 +401,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnRegister(string displayName, string passphrase, string serverUrl, string transport, string inviteCode)
+    private void OnRegister(string displayName, byte[] passphrase, string serverUrl, string transport, string inviteCode)
     {
         RegisterAsync(displayName, passphrase, serverUrl, transport, inviteCode);
     }
@@ -508,7 +524,7 @@ public partial class MainWindow : Window
             await (_queueAdmitTcs?.Task ?? Task.CompletedTask);
     }
 
-    private async void LoginAsync(string userId, string passphrase, string serverUrl, string transport)
+    private async void LoginAsync(string userId, byte[] passBytes, string serverUrl, string transport)
     {
         try
         {
@@ -524,9 +540,14 @@ public partial class MainWindow : Window
             InitServices(serverUrl, transport);
             WireQueueEvents();
 
+            // Ownership of passBytes transferred from the view on Submit. Lock it
+            // and hold until logout/close.
+            _passphraseLock?.Dispose();
+            _passphraseLock = Rede.Core.Crypto.SecureMemory.Lock(passBytes);
+
             await _conn!.ConnectAsync();
             await WaitForQueueIfNeeded();
-            var ok = await _auth!.LoginAsync(userId, passphrase);
+            var ok = await _auth!.LoginAsync(userId, passBytes);
             if (!ok)
             {
                 Dispatcher.UIThread.Post(() =>
@@ -534,8 +555,6 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // H1: Clear passphrase from login VM after successful auth
-            Dispatcher.UIThread.Post(() => _loginVm.Passphrase = "");
             PropagateProfile();
         }
         catch (Exception ex)
@@ -545,7 +564,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RegisterAsync(string displayName, string passphrase, string serverUrl, string transport, string inviteCode)
+    private async void RegisterAsync(string displayName, byte[] passBytes, string serverUrl, string transport, string inviteCode)
     {
         try
         {
@@ -561,17 +580,15 @@ public partial class MainWindow : Window
             InitServices(serverUrl, transport);
             WireQueueEvents();
 
+            _passphraseLock?.Dispose();
+            _passphraseLock = Rede.Core.Crypto.SecureMemory.Lock(passBytes);
+
             await _conn!.ConnectAsync();
             await WaitForQueueIfNeeded();
-            await _auth!.RegisterAsync(displayName, passphrase, inviteCode);
+            await _auth!.RegisterAsync(displayName, passBytes, inviteCode);
 
-            // H1: Clear sensitive fields from login VM after successful registration
-            Dispatcher.UIThread.Post(() =>
-            {
-                _loginVm.Passphrase = "";
-                _loginVm.PassphraseConfirm = "";
-                _loginVm.InviteCode = ""; // M13: Clear invite code
-            });
+            // M13: Clear invite code from VM after successful registration
+            Dispatcher.UIThread.Post(() => _loginVm.InviteCode = "");
         }
         catch (Exception ex)
         {

@@ -42,7 +42,7 @@ public class CallService : IDisposable
     private System.Timers.Timer? _offerTimeout;
 
     public Profile? Profile { get; set; }
-    public string? Passphrase { get; set; }
+    public byte[]? Passphrase { get; set; }
 
     public CallState State => _state;
     public string? CallId => _callId;

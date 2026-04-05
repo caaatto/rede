@@ -29,7 +29,7 @@ public class ProfileStore
     // --- Performance: cached scrypt key + debounced saves ---
     private byte[]? _cachedKey64;       // 64-byte derived key (32 enc + 32 hmac)
     private byte[]? _cachedSalt;        // salt used to derive the cached key
-    private string? _cachedPassphrase;  // to detect passphrase changes
+    private byte[]? _cachedPassphrase;  // owned copy — to detect passphrase changes (byte[] so we can zero on clear)
 
     private CancellationTokenSource? _debounceCts;
     private volatile bool _savePending;
@@ -107,7 +107,7 @@ public class ProfileStore
         catch { }
     }
 
-    public async Task<Profile?> LoadProfileAsync(string userId, string passphrase)
+    public async Task<Profile?> LoadProfileAsync(string userId, byte[] passphrase)
     {
         EnsureDir();
         var p = GetProfilePath(userId);
@@ -130,7 +130,7 @@ public class ProfileStore
     /// the plaintext userId. The decrypted profile contains UserId internally.
     /// Used by quick-login flow.
     /// </summary>
-    public async Task<Profile?> LoadProfileByHashAsync(string hashHex, string passphrase)
+    public async Task<Profile?> LoadProfileByHashAsync(string hashHex, byte[] passphrase)
     {
         EnsureDir();
         // Validate hash format: 64 hex chars (no path traversal)
@@ -147,7 +147,7 @@ public class ProfileStore
         return true;
     }
 
-    private async Task<Profile?> DecryptProfileFileAsync(string path, string passphrase)
+    private async Task<Profile?> DecryptProfileFileAsync(string path, byte[] passphrase)
     {
         var json = await File.ReadAllTextAsync(path);
         var envelope = JsonSerializer.Deserialize<ProfileEncryption.EncryptedEnvelope>(json, JsonOpts);
@@ -213,20 +213,25 @@ public class ProfileStore
     /// <summary>
     /// Derive and cache the 64-byte scrypt key. Only re-derives if passphrase changed.
     /// </summary>
-    private void CacheKey(string passphrase)
+    private void CacheKey(byte[] passphrase)
     {
-        if (_cachedKey64 is not null && _cachedPassphrase == passphrase) return;
+        if (_cachedKey64 is not null && _cachedPassphrase is not null
+            && _cachedPassphrase.Length == passphrase.Length
+            && CryptographicOperations.FixedTimeEquals(_cachedPassphrase, passphrase))
+            return;
 
-        // Clear old cached key
+        // Clear old cached key + passphrase
         if (_cachedKey64 is not null) CryptoService.ZeroOut(_cachedKey64);
+        if (_cachedPassphrase is not null) CryptoService.ZeroOut(_cachedPassphrase);
 
         var salt = SodiumCore.GetRandomBytes(16);
         _cachedKey64 = ProfileEncryption.DeriveKey(passphrase, salt, ProfileEncryption.ScryptNCurrent, 64);
         _cachedSalt = salt;
-        _cachedPassphrase = passphrase;
+        // Own a copy so caller can freely zero their buffer
+        _cachedPassphrase = (byte[])passphrase.Clone();
     }
 
-    public async Task SaveProfileAsync(Profile profile, string passphrase)
+    public async Task SaveProfileAsync(Profile profile, byte[] passphrase)
     {
         EnsureDir();
         var p = GetProfilePath(profile.UserId);
@@ -277,7 +282,7 @@ public class ProfileStore
     /// <summary>Event raised when a debounced save fails (disk error, etc.)</summary>
     public event Action<string>? OnSaveError;
 
-    public void SaveProfileDebounced(Profile profile, string passphrase)
+    public void SaveProfileDebounced(Profile profile, byte[] passphrase)
     {
         _savePending = true;
         _debounceCts?.Cancel();
@@ -307,7 +312,7 @@ public class ProfileStore
     /// <summary>
     /// Flush any pending debounced save immediately. Call on app exit or logout.
     /// </summary>
-    public async Task FlushAsync(Profile? profile, string? passphrase)
+    public async Task FlushAsync(Profile? profile, byte[]? passphrase)
     {
         _debounceCts?.Cancel();
         _debounceCts?.Dispose();
@@ -328,10 +333,10 @@ public class ProfileStore
     {
         if (_cachedKey64 is not null) { CryptoService.ZeroOut(_cachedKey64); _cachedKey64 = null; }
         if (_cachedSalt is not null) { CryptoService.ZeroOut(_cachedSalt); _cachedSalt = null; }
-        _cachedPassphrase = null;
+        if (_cachedPassphrase is not null) { CryptoService.ZeroOut(_cachedPassphrase); _cachedPassphrase = null; }
     }
 
-    public async Task<Profile> CreateProfileAsync(string internalId, string displayName, string passphrase)
+    public async Task<Profile> CreateProfileAsync(string internalId, string displayName, byte[] passphrase)
     {
         var encKP = CryptoService.GenerateKeyPair();
         var sigKP = CryptoService.GenerateSigningKeyPair();
@@ -410,7 +415,7 @@ public class ProfileStore
 
     public async Task<AddContactResult> AddContactAsync(
         Profile profile, string internalId, byte[] publicKey, byte[]? signingKey,
-        string? displayName, string passphrase, Dictionary<string, DeviceKeys>? devices = null)
+        string? displayName, byte[] passphrase, Dictionary<string, DeviceKeys>? devices = null)
     {
         var deviceMap = devices ?? new Dictionary<string, DeviceKeys>
         {
@@ -441,7 +446,7 @@ public class ProfileStore
 
     public async Task ConfirmContactKeyChangeAsync(
         Profile profile, string internalId, byte[] publicKey, byte[]? signingKey,
-        string? displayName, string passphrase, Dictionary<string, DeviceKeys>? devices = null)
+        string? displayName, byte[] passphrase, Dictionary<string, DeviceKeys>? devices = null)
     {
         var deviceMap = devices ?? new Dictionary<string, DeviceKeys>
         {
@@ -470,7 +475,7 @@ public class ProfileStore
 
     // --- Group operations ---
 
-    public async Task AddGroupAsync(Profile profile, string groupId, string name, byte[] groupKey, List<string>? members, string passphrase)
+    public async Task AddGroupAsync(Profile profile, string groupId, string name, byte[] groupKey, List<string>? members, byte[] passphrase)
     {
         profile.Groups[groupId] = new Group
         {
@@ -483,7 +488,7 @@ public class ProfileStore
 
     // --- Place operations ---
 
-    public async Task SavePlaceAsync(Profile profile, string placeId, Place place, string passphrase)
+    public async Task SavePlaceAsync(Profile profile, string placeId, Place place, byte[] passphrase)
     {
         profile.Places[placeId] = place;
         await SaveProfileAsync(profile, passphrase);
@@ -491,7 +496,7 @@ public class ProfileStore
 
     // --- Chat history ---
 
-    public void AddChatMessage(Profile profile, string chatId, ChatMessage message, string passphrase)
+    public void AddChatMessage(Profile profile, string chatId, ChatMessage message, byte[] passphrase)
     {
         lock (_profileMutationLock)
         {
@@ -517,13 +522,13 @@ public class ProfileStore
     }
 
     // Keep async overload for backward compat (redirects to debounced)
-    public Task AddChatMessageAsync(Profile profile, string chatId, ChatMessage message, string passphrase)
+    public Task AddChatMessageAsync(Profile profile, string chatId, ChatMessage message, byte[] passphrase)
     {
         AddChatMessage(profile, chatId, message, passphrase);
         return Task.CompletedTask;
     }
 
-    public async Task CleanupExpiredMessagesAsync(Profile profile, string passphrase)
+    public async Task CleanupExpiredMessagesAsync(Profile profile, byte[] passphrase)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         bool changed = false;
@@ -555,7 +560,7 @@ public class ProfileStore
         return null;
     }
 
-    public Task SaveRatchetStateAsync(Profile profile, string contactId, JsonElement state, string passphrase, string? deviceId = null)
+    public Task SaveRatchetStateAsync(Profile profile, string contactId, JsonElement state, byte[] passphrase, string? deviceId = null)
     {
         var rk = RatchetKey(contactId, deviceId);
         lock (_profileMutationLock) { profile.RatchetStates[rk] = state; }
@@ -583,7 +588,7 @@ public class ProfileStore
         return profile.SenderKeys.TryGetValue(groupId, out var state) ? state : null;
     }
 
-    public Task SaveSenderKeyStateAsync(Profile profile, string groupId, JsonElement state, string passphrase)
+    public Task SaveSenderKeyStateAsync(Profile profile, string groupId, JsonElement state, byte[] passphrase)
     {
         lock (_profileMutationLock) { profile.SenderKeys[groupId] = state; }
         SaveProfileDebounced(profile, passphrase);

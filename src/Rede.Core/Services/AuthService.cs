@@ -23,7 +23,12 @@ public class AuthService : IDisposable
     public event Action<string>? OnAuthFailed;
 
     public Profile? Profile { get; private set; }
-    public string? Passphrase { get; private set; }
+    /// <summary>
+    /// UTF-8 bytes of the user's passphrase. Lives only in this property + the owning
+    /// MainWindow, which zeros it on logout/close. Services hold references but never
+    /// allocate their own copies.
+    /// </summary>
+    public byte[]? Passphrase { get; private set; }
 
     public AuthService(RedeConnection conn, ProfileStore store)
     {
@@ -43,8 +48,8 @@ public class AuthService : IDisposable
         _conn.On(Msg.DeviceLinkFail, HandleDeviceLinkFail);
     }
 
-    /// <summary>Login with existing profile.</summary>
-    public async Task<bool> LoginAsync(string userId, string passphrase)
+    /// <summary>Login with existing profile. Caller owns <paramref name="passphrase"/>.</summary>
+    public async Task<bool> LoginAsync(string userId, byte[] passphrase)
     {
         Passphrase = passphrase;
         Profile = await _store.LoadProfileAsync(userId, passphrase);
@@ -56,7 +61,7 @@ public class AuthService : IDisposable
     }
 
     /// <summary>Quick login by file hash — UserId is recovered from the decrypted profile.</summary>
-    public async Task<bool> LoginByHashAsync(string hashHex, string passphrase)
+    public async Task<bool> LoginByHashAsync(string hashHex, byte[] passphrase)
     {
         Passphrase = passphrase;
         Profile = await _store.LoadProfileByHashAsync(hashHex, passphrase);
@@ -68,7 +73,7 @@ public class AuthService : IDisposable
     }
 
     /// <summary>Register a new account.</summary>
-    public async Task RegisterAsync(string displayName, string passphrase, string inviteCode)
+    public async Task RegisterAsync(string displayName, byte[] passphrase, string inviteCode)
     {
         Passphrase = passphrase;
         Profile = await _store.CreateProfileAsync("pending", displayName, passphrase);
@@ -90,7 +95,7 @@ public class AuthService : IDisposable
     }
 
     /// <summary>Link a new device to existing account.</summary>
-    public async Task LinkDeviceAsync(string userId, string passphrase, string linkCode)
+    public async Task LinkDeviceAsync(string userId, byte[] passphrase, string linkCode)
     {
         Passphrase = passphrase;
         Profile = await _store.CreateProfileAsync("pending", userId, passphrase);

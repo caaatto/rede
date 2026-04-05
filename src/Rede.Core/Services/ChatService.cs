@@ -34,7 +34,7 @@ public class ChatService : IDisposable
     }
 
     public Profile? Profile { get; set; }
-    public string? Passphrase { get; set; }
+    public byte[]? Passphrase { get; set; }
 
     // H7: Queue per target — multiple messages can be pending before bundle arrives
     private readonly Dictionary<string, List<(string Text, int Ttl)>> _pendingOutgoing = new();

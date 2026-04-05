@@ -18,7 +18,7 @@ public class ContactService : IDisposable
     public void Dispose() { GC.SuppressFinalize(this); }
 
     public Profile? Profile { get; set; }
-    public string? Passphrase { get; set; }
+    public byte[]? Passphrase { get; set; }
 
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, string>? OnContactAdded; // userId, displayName, fingerprint
