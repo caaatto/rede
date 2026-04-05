@@ -11,14 +11,14 @@
         <!-- ===== SIDEBAR ===== -->
         <Border Grid.Column="0"
                 Width="{Binding IsSidebarCollapsed, Converter={StaticResource SidebarWidthConverter}}"
-                Background="{StaticResource RedeSurfaceBrush}"
-                BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                Background="{DynamicResource RedeSurfaceBrush}"
+                BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                 BorderThickness="0,0,1,0">
             <DockPanel>
 
                 <!-- Brand header — logo + REDE wordmark (inside titlebar area) -->
                 <Border DockPanel.Dock="Top" Height="44" Padding="14,8,8,6"
-                        Background="{StaticResource RedeSurfaceBrush}">
+                        Background="{DynamicResource RedeSurfaceBrush}">
                     <Grid ColumnDefinitions="Auto,10,*,Auto">
                         <Image Grid.Column="0"
                                Source="avares://Rede.Desktop/Assets/icon.png"
@@ -29,7 +29,7 @@
                                    VerticalAlignment="Center"
                                    FontSize="18"
                                    FontWeight="{StaticResource RedeWeightBold}"
-                                   Foreground="{StaticResource RedeTextPrimaryBrush}"
+                                   Foreground="{DynamicResource RedeTextPrimaryBrush}"
                                    IsVisible="{Binding !IsSidebarCollapsed}" />
                         <Button Grid.Column="3" Classes="ghost"
                                 Command="{Binding ToggleSidebarCommand}"
@@ -44,7 +44,7 @@
 
                 <!-- Search bar -->
                 <Border DockPanel.Dock="Top" Padding="10,6,10,8"
-                        Background="{StaticResource RedeSurfaceBrush}"
+                        Background="{DynamicResource RedeSurfaceBrush}"
                         IsVisible="{Binding !IsSidebarCollapsed}">
                     <TextBox Text="{Binding SearchText}"
                              Watermark="Search..."
@@ -55,7 +55,7 @@
 
                 <!-- Retry row (only visible when disconnected) -->
                 <Border DockPanel.Dock="Top" Padding="10,0,10,6"
-                        Background="{StaticResource RedeSurfaceBrush}"
+                        Background="{DynamicResource RedeSurfaceBrush}"
                         IsVisible="{Binding !IsConnected}">
                     <Button Classes="ghost"
                             Content="Reconnect"
@@ -63,13 +63,13 @@
                             HorizontalContentAlignment="Center"
                             Padding="8,4"
                             FontSize="{StaticResource RedeSmallSize}"
-                            Foreground="{StaticResource RedeAccentVioletBrush}"
+                            Foreground="{DynamicResource RedeAccentVioletBrush}"
                             Click="RetryConnection_Click" />
                 </Border>
 
                 <!-- User profile panel (bottom of sidebar, like Discord) -->
                 <Border DockPanel.Dock="Bottom" Padding="8,6"
-                        BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                        BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                         BorderThickness="0,1,0,0"
                         Background="#0cffffff">
                     <Grid ColumnDefinitions="Auto,8,*,Auto">
@@ -95,7 +95,7 @@
                                      HorizontalAlignment="Right"
                                      VerticalAlignment="Bottom"
                                      Fill="{Binding OwnStatusBrush}"
-                                     Stroke="{StaticResource RedeSurfaceBrush}"
+                                     Stroke="{DynamicResource RedeSurfaceBrush}"
                                      StrokeThickness="2" />
                         </Panel>
                         <!-- Name + status text -->
@@ -190,7 +190,7 @@
                                                    IsVisible="{Binding !$parent[Border].((vm:MainViewModel)DataContext).IsSidebarCollapsed, FallbackValue=True}" />
                                         <!-- Unread dot -->
                                         <Ellipse Grid.Column="3" Width="8" Height="8"
-                                                 Fill="{StaticResource RedeAccentVioletBrush}"
+                                                 Fill="{DynamicResource RedeAccentVioletBrush}"
                                                  VerticalAlignment="Center"
                                                  IsVisible="{Binding HasUnread}" />
                                     </Grid>
@@ -234,11 +234,11 @@
                                         PointerPressed="Group_PointerPressed">
                                     <Grid ColumnDefinitions="*,Auto">
                                         <TextBlock Grid.Column="0">
-                                            <Run Text="#" Foreground="{StaticResource RedeTextMutedBrush}" />
+                                            <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
                                             <Run Text="{Binding Name}" />
                                         </TextBlock>
                                         <Ellipse Grid.Column="1" Width="8" Height="8"
-                                                 Fill="{StaticResource RedeAccentVioletBrush}"
+                                                 Fill="{DynamicResource RedeAccentVioletBrush}"
                                                  VerticalAlignment="Center"
                                                  IsVisible="{Binding HasUnread}" />
                                     </Grid>
@@ -301,7 +301,7 @@
                                             <TextBlock Grid.Column="2"
                                                        Text="{Binding IsExpanded, Converter={StaticResource CollapseIconConverter}}"
                                                        FontSize="10"
-                                                       Foreground="{StaticResource RedeTextMutedBrush}"
+                                                       Foreground="{DynamicResource RedeTextMutedBrush}"
                                                        VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="4"
                                                        FontWeight="{StaticResource RedeWeightMedium}">
@@ -314,7 +314,7 @@
                                                        VerticalAlignment="Center"
                                                        Margin="6,0,0,0" />
                                             <Ellipse Grid.Column="6" Width="8" Height="8"
-                                                     Fill="{StaticResource RedeAccentVioletBrush}"
+                                                     Fill="{DynamicResource RedeAccentVioletBrush}"
                                                      VerticalAlignment="Center"
                                                      Margin="4,0,0,0"
                                                      IsVisible="{Binding HasUnread}" />
@@ -336,11 +336,11 @@
                                                         PointerPressed="Channel_PointerPressed">
                                                     <Grid ColumnDefinitions="*,Auto">
                                                         <TextBlock Grid.Column="0">
-                                                            <Run Text="#" Foreground="{StaticResource RedeTextMutedBrush}" />
+                                                            <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
                                                             <Run Text="{Binding Name}" />
                                                         </TextBlock>
                                                         <Ellipse Grid.Column="1" Width="8" Height="8"
-                                                                 Fill="{StaticResource RedeAccentVioletBrush}"
+                                                                 Fill="{DynamicResource RedeAccentVioletBrush}"
                                                                  VerticalAlignment="Center"
                                                                  IsVisible="{Binding HasUnread}" />
                                                     </Grid>
@@ -364,8 +364,8 @@
 
             <!-- Chat header (extra top margin for title bar) -->
             <Border DockPanel.Dock="Top" Padding="16,12" Margin="0,30,0,0"
-                    Background="{StaticResource RedeSurfaceBrush}"
-                    BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                    Background="{DynamicResource RedeSurfaceBrush}"
+                    BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                     BorderThickness="0,0,0,1">
                 <Grid ColumnDefinitions="*,Auto,Auto">
                     <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="2"
@@ -408,8 +408,8 @@
 
             <!-- Message input bar -->
             <Border DockPanel.Dock="Bottom" Padding="16,12"
-                    Background="{StaticResource RedeSurfaceBrush}"
-                    BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                    Background="{DynamicResource RedeSurfaceBrush}"
+                    BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                     BorderThickness="0,1,0,0">
                 <Grid ColumnDefinitions="*,8,Auto">
                     <TextBox Grid.Column="0"
@@ -443,7 +443,7 @@
                                             MaxWidth="500"
                                             IsVisible="{Binding IsSecurityAlert}">
                                         <TextBlock Text="{Binding Text}"
-                                                   Foreground="{StaticResource RedeWarningBrush}"
+                                                   Foreground="{DynamicResource RedeWarningBrush}"
                                                    FontSize="{StaticResource RedeSmallSize}"
                                                    TextWrapping="Wrap"
                                                    HorizontalAlignment="Center" />
@@ -451,7 +451,7 @@
 
                                     <!-- System message (centered) -->
                                     <TextBlock Text="{Binding Text}"
-                                               Foreground="{StaticResource RedeTextSecondaryBrush}"
+                                               Foreground="{DynamicResource RedeTextSecondaryBrush}"
                                                FontStyle="Italic"
                                                FontSize="{StaticResource RedeSmallSize}"
                                                HorizontalAlignment="Center"
@@ -506,7 +506,7 @@
                                                            FontSize="{StaticResource RedeCaptionSize}"
                                                            VerticalAlignment="Bottom" />
                                             </StackPanel>
-                                            <Border Background="{StaticResource RedeSurfaceBrush}"
+                                            <Border Background="{DynamicResource RedeSurfaceBrush}"
                                                     CornerRadius="4,12,12,12"
                                                     Padding="14,10"
                                                     IsVisible="{Binding !IsSystem}">
@@ -533,7 +533,7 @@
                                                 Margin="80,0,0,0"
                                                 MaxWidth="600"
                                                 IsVisible="{Binding IsOwn}">
-                                        <Border Background="{StaticResource RedeSurfaceActiveBrush}"
+                                        <Border Background="{DynamicResource RedeSurfaceActiveBrush}"
                                                 CornerRadius="12,4,12,12"
                                                 Padding="14,10">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -569,14 +569,14 @@
         <!-- ===== MEMBER LIST PANEL ===== -->
         <Border Grid.Column="2"
                 Width="{Binding IsMemberListVisible, Converter={StaticResource SidebarWidthConverter}}"
-                Background="{StaticResource RedeSurfaceBrush}"
-                BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                Background="{DynamicResource RedeSurfaceBrush}"
+                BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                 BorderThickness="1,0,0,0"
                 IsVisible="{Binding IsMemberListVisible}">
             <DockPanel>
                 <Border DockPanel.Dock="Top" Height="30" Background="Transparent" IsHitTestVisible="False" />
                 <Border DockPanel.Dock="Top" Padding="12,8"
-                        BorderBrush="{StaticResource RedeBorderSubtleBrush}"
+                        BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                         BorderThickness="0,0,0,1">
                     <TextBlock Text="Members" Classes="secondary"
                                FontWeight="{StaticResource RedeWeightSemiBold}" />

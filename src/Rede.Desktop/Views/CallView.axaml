@@ -7,7 +7,7 @@
 
     <!-- Call overlay bar — sits at bottom of chat area -->
     <Border Background="#1a1a28"
-            BorderBrush="{StaticResource RedeBorderBrush}"
+            BorderBrush="{DynamicResource RedeBorderBrush}"
             BorderThickness="0,1,0,0"
             Padding="16,12">
 
@@ -21,11 +21,11 @@
                        ToolTip.Tip="{Binding ModeTooltip}" />
                 <StackPanel Spacing="2">
                     <TextBlock Text="{Binding RemoteUser}"
-                               Foreground="{StaticResource RedeTextPrimaryBrush}"
+                               Foreground="{DynamicResource RedeTextPrimaryBrush}"
                                FontSize="14"
                                FontWeight="SemiBold" />
                     <TextBlock Text="{Binding StatusText}"
-                               Foreground="{StaticResource RedeTextSecondaryBrush}"
+                               Foreground="{DynamicResource RedeTextSecondaryBrush}"
                                FontSize="11" />
                 </StackPanel>
             </StackPanel>
@@ -33,7 +33,7 @@
             <!-- Center: duration (when connected) -->
             <TextBlock Grid.Column="1"
                        Text="{Binding DurationText}"
-                       Foreground="{StaticResource RedeTextMutedBrush}"
+                       Foreground="{DynamicResource RedeTextMutedBrush}"
                        FontSize="16"
                        FontFamily="Consolas,monospace"
                        HorizontalAlignment="Center"
@@ -46,13 +46,13 @@
                 <!-- Incoming call: Accept / Decline -->
                 <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsIncoming}">
                     <Button Command="{Binding AcceptCallCommand}"
-                            Background="{StaticResource RedeSuccessBrush}"
+                            Background="{DynamicResource RedeSuccessBrush}"
                             Foreground="White"
                             Content="Accept"
                             Padding="16,8"
                             CornerRadius="6" />
                     <Button Command="{Binding RejectCallCommand}"
-                            Background="{StaticResource RedeErrorBrush}"
+                            Background="{DynamicResource RedeErrorBrush}"
                             Foreground="White"
                             Content="Decline"
                             Padding="16,8"
@@ -63,8 +63,8 @@
                 <StackPanel Orientation="Horizontal" Spacing="8"
                             IsVisible="{Binding !IsIncoming}">
                     <Button Command="{Binding ToggleMuteCommand}"
-                            Background="{StaticResource RedeSurfaceActiveBrush}"
-                            Foreground="{StaticResource RedeTextPrimaryBrush}"
+                            Background="{DynamicResource RedeSurfaceActiveBrush}"
+                            Foreground="{DynamicResource RedeTextPrimaryBrush}"
                             Padding="12,8"
                             CornerRadius="6"
                             ToolTip.Tip="Toggle Mute">
@@ -76,7 +76,7 @@
                         </Panel>
                     </Button>
                     <Button Command="{Binding HangUpCommand}"
-                            Background="{StaticResource RedeErrorBrush}"
+                            Background="{DynamicResource RedeErrorBrush}"
                             Foreground="White"
                             Content="Hang Up"
                             Padding="16,8"

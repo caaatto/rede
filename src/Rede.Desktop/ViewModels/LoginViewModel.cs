@@ -10,7 +10,7 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private string _userId = "";
     [ObservableProperty] private string _passphrase = "";
     [ObservableProperty] private string _passphraseConfirm = "";
-    [ObservableProperty] private string _selectedServer = "I2Pd Nürnberg";
+    [ObservableProperty] private string _selectedServer = "IP Direct";
     [ObservableProperty] private string _inviteCode = "";
     [ObservableProperty] private string _errorMessage = "";
     [ObservableProperty] private string _statusMessage = "";
@@ -18,6 +18,11 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private bool _isUpdateAvailable;
     [ObservableProperty] private bool _isRegistering;
     [ObservableProperty] private bool _isRegisterMode;
+
+    // When checked, the last-profile hint is written on successful login so
+    // the next app start shows quick-login with only the passphrase field.
+    // When unchecked, any existing hint is cleared on successful login.
+    [ObservableProperty] private bool _staySignedIn = true;
 
     // Quick login: set when a profile hint exists from a previous session.
     // Only the passphrase field is shown — the userId is recovered from the

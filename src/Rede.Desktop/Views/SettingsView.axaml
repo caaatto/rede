@@ -15,23 +15,23 @@
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource RedeTextSecondaryBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource RedeTextSecondaryBrush}" />
         </Style>
         <Style Selector="ListBox.settings-nav ListBoxItem:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{StaticResource RedeSurfaceBrush}" />
-            <Setter Property="TextElement.Foreground" Value="{StaticResource RedeTextPrimaryBrush}" />
+            <Setter Property="Background" Value="{DynamicResource RedeSurfaceBrush}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
         </Style>
         <Style Selector="ListBox.settings-nav ListBoxItem:selected /template/ ContentPresenter">
-            <Setter Property="Background" Value="{StaticResource RedeAccentVioletBrush}" />
+            <Setter Property="Background" Value="{DynamicResource RedeAccentVioletBrush}" />
             <Setter Property="TextElement.Foreground" Value="White" />
         </Style>
         <Style Selector="ListBox.settings-nav ListBoxItem:selected:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{StaticResource RedeAccentVioletBrush}" />
+            <Setter Property="Background" Value="{DynamicResource RedeAccentVioletBrush}" />
             <Setter Property="TextElement.Foreground" Value="White" />
         </Style>
     </UserControl.Styles>
 
-    <Border Background="{StaticResource RedeSurfaceBrush}">
+    <Border Background="{DynamicResource RedeSurfaceBrush}">
     <Grid RowDefinitions="Auto,*" Margin="0,36,0,0">
 
         <!-- Header -->
@@ -54,7 +54,7 @@
 
             <!-- Category Sidebar -->
             <Border Grid.Column="0"
-                    Background="{StaticResource RedeBackgroundBrush}"
+                    Background="{DynamicResource RedeBackgroundBrush}"
                     Padding="12,8">
                 <ListBox Classes="settings-nav"
                          SelectedIndex="{Binding SelectedCategoryIndex}">
@@ -118,7 +118,7 @@
                                                 Command="{Binding PickAvatarCommand}" />
                                         <Button Classes="ghost" Content="Remove"
                                                 Padding="8,3" FontSize="11"
-                                                Foreground="{StaticResource RedeErrorBrush}"
+                                                Foreground="{DynamicResource RedeErrorBrush}"
                                                 Command="{Binding RemoveAvatarCommand}"
                                                 IsVisible="{Binding HasAvatar}" />
                                     </StackPanel>
@@ -263,7 +263,7 @@
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Transport" Classes="secondary" VerticalAlignment="Center" />
                                 <TextBlock Grid.Row="0" Grid.Column="1"
                                            Text="{Binding CallTransport}"
-                                           Foreground="{StaticResource RedeTextPrimaryBrush}"
+                                           Foreground="{DynamicResource RedeTextPrimaryBrush}"
                                            VerticalAlignment="Center" />
                                 <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                                            Text="Voice calls use E2EE (SRTP) over your current transport. I2P/Tor: anonymous with higher latency. Direct: low latency, server sees your IP."
@@ -329,7 +329,7 @@
                             <TextBlock Text="Fingerprint" Classes="header" />
                             <TextBlock Text="Verify this fingerprint out-of-band to ensure secure communication."
                                        Classes="secondary" TextWrapping="Wrap" />
-                            <Border Background="{StaticResource RedeBackgroundBrush}"
+                            <Border Background="{DynamicResource RedeBackgroundBrush}"
                                     CornerRadius="8"
                                     Padding="16,12">
                                 <Grid RowDefinitions="Auto,8,Auto">
@@ -337,7 +337,7 @@
                                                Text="{Binding Fingerprint}"
                                                FontFamily="Courier New, monospace"
                                                FontSize="15"
-                                               Foreground="{StaticResource RedeAccentVioletBrush}"
+                                               Foreground="{DynamicResource RedeAccentVioletBrush}"
                                                HorizontalAlignment="Center"
                                                TextWrapping="Wrap" />
                                     <Button Grid.Row="2"
@@ -356,7 +356,7 @@
                         <!-- Public Key -->
                         <StackPanel Spacing="12">
                             <TextBlock Text="Public Key" Classes="header" />
-                            <Border Background="{StaticResource RedeBackgroundBrush}"
+                            <Border Background="{DynamicResource RedeBackgroundBrush}"
                                     CornerRadius="8"
                                     Padding="16,12">
                                 <TextBlock Text="{Binding PublicKey}"

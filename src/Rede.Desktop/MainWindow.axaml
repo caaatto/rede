@@ -6,7 +6,7 @@
         Title="Rede"
         Width="1100" Height="750"
         MinWidth="480" MinHeight="400"
-        Background="{StaticResource RedeBackgroundBrush}"
+        Background="{DynamicResource RedeBackgroundBrush}"
         WindowStartupLocation="CenterScreen"
         Icon="avares://Rede.Desktop/Assets/icon.png"
         ExtendClientAreaToDecorationsHint="True"

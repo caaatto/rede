@@ -269,7 +269,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            _store.SaveLastProfileHint(profile.UserId, serverName);
+            if (_loginVm.StaySignedIn)
+            {
+                _store.SaveLastProfileHint(profile.UserId, serverName);
+            }
+            else
+            {
+                // User opted out — remove any existing hint so the next launch
+                // shows the full login form again.
+                _store.ClearLastProfileHint();
+            }
             if (profile.LastServerName != serverName)
             {
                 profile.LastServerName = serverName;
@@ -839,8 +848,9 @@ public partial class MainWindow : Window
         _notifications.ShowContent = p.NotificationShowContent;
         _notifications.OwnStatus = p.Status ?? "online";
 
-        // Apply saved theme variant (live-swap color resources)
+        // Apply saved theme variant + accent color (live-swap color resources)
         Themes.ThemeService.Apply(p.ThemeVariant);
+        Themes.ThemeService.ApplyAccent(p.AccentColor);
 
         // Send own status (server broadcasts to all — no contact list leaked)
         SendOwnStatus();
@@ -852,6 +862,35 @@ public partial class MainWindow : Window
             RefreshPlaces();
             UpdateOwnProfilePanel();
         });
+    }
+
+    // The color used for contacts / places / own profile when no per-entity
+    // accent is set. Follows the user's profile accent so changing it in
+    // Settings recolors every "default" avatar in the sidebar.
+    private string DefaultAccent() => _auth?.Profile?.AccentColor ?? "#8b5cf6";
+
+    // Re-apply the current default accent color to any contact/place/channel
+    // VMs whose stored accent is the default. Called after the user changes
+    // their profile accent so existing sidebar items update live without
+    // having to reconnect.
+    private void RefreshDefaultAccents()
+    {
+        if (_auth?.Profile is null) return;
+        var def = DefaultAccent();
+
+        foreach (var contact in _mainVm.Contacts)
+        {
+            if (!_auth.Profile.Contacts.TryGetValue(contact.UserId, out var c)) continue;
+            if (string.IsNullOrEmpty(c.AccentColor) && contact.AccentColor != def)
+                contact.AccentColor = def;
+        }
+
+        foreach (var place in _mainVm.Places)
+        {
+            if (!_auth.Profile.Places.TryGetValue(place.PlaceId, out var p)) continue;
+            if (string.IsNullOrEmpty(p.AccentColor) && place.AccentColor != def)
+                place.AccentColor = def;
+        }
     }
 
     private string? _ownAvatarDataCache; // track own avatar data to avoid redundant bitmap decode
@@ -1208,7 +1247,7 @@ public partial class MainWindow : Window
                 // Differential update — only set changed properties
                 var newName = SanitizeDisplayString(c.DisplayName ?? id, 64);
                 if (existing.DisplayName != newName) existing.DisplayName = newName;
-                var newColor = c.AccentColor ?? "#8b5cf6";
+                var newColor = string.IsNullOrEmpty(c.AccentColor) ? DefaultAccent() : c.AccentColor;
                 if (existing.AccentColor != newColor) existing.AccentColor = newColor;
                 if (existing.Status != (c.Status ?? "offline")) existing.Status = c.Status ?? "offline";
                 if (existing.CustomStatus != c.CustomStatus) existing.CustomStatus = c.CustomStatus;
@@ -1226,7 +1265,7 @@ public partial class MainWindow : Window
                 {
                     UserId = id,
                     DisplayName = SanitizeDisplayString(c.DisplayName ?? id, 64),
-                    AccentColor = c.AccentColor ?? "#8b5cf6",
+                    AccentColor = string.IsNullOrEmpty(c.AccentColor) ? DefaultAccent() : c.AccentColor,
                     Status = c.Status ?? "offline",
                     CustomStatus = c.CustomStatus,
                 };
@@ -1318,7 +1357,7 @@ public partial class MainWindow : Window
                 if (existing.MemberCount != mc) existing.MemberCount = mc;
                 if (existing.IsCreator != isCreator) existing.IsCreator = isCreator;
                 if (existing.IsAdmin != isAdmin) existing.IsAdmin = isAdmin;
-                var ac = p.AccentColor ?? "#8b5cf6";
+                var ac = string.IsNullOrEmpty(p.AccentColor) ? DefaultAccent() : p.AccentColor;
                 if (existing.AccentColor != ac) existing.AccentColor = ac;
                 if (existing.OwnerColor != p.OwnerColor) existing.OwnerColor = p.OwnerColor;
                 if (existing.AdminColor != p.AdminColor) existing.AdminColor = p.AdminColor;
@@ -1391,7 +1430,7 @@ public partial class MainWindow : Window
                     MemberCount = p.Members?.Count ?? 0,
                     IsCreator = isCreator, IsAdmin = isAdmin,
                     Channels = channels,
-                    AccentColor = p.AccentColor ?? "#8b5cf6",
+                    AccentColor = string.IsNullOrEmpty(p.AccentColor) ? DefaultAccent() : p.AccentColor,
                     OwnerColor = p.OwnerColor, AdminColor = p.AdminColor,
                     MemberColor = p.MemberColor,
                 };
@@ -1438,7 +1477,7 @@ public partial class MainWindow : Window
             if (_auth.Profile.Contacts.TryGetValue(memberId, out var contact))
             {
                 displayName = contact.DisplayName ?? memberId;
-                accentColor = contact.AccentColor ?? "#8b5cf6";
+                accentColor = string.IsNullOrEmpty(contact.AccentColor) ? DefaultAccent() : contact.AccentColor;
                 status = contact.Status ?? "offline";
             }
             else if (memberId == _auth.Profile.UserId)
@@ -1522,7 +1561,7 @@ public partial class MainWindow : Window
                 var contactVm = _mainVm.Contacts.FirstOrDefault(c => c.UserId == msg.From);
                 var accentColor = isOwn
                     ? (_auth.Profile.AccentColor ?? "#8b5cf6")
-                    : (contactVm?.AccentColor ?? "#8b5cf6");
+                    : (!string.IsNullOrEmpty(contactVm?.AccentColor) ? contactVm!.AccentColor : DefaultAccent());
                 var initial = contactVm?.Initial
                     ?? (string.IsNullOrEmpty(msg.From) ? "?" : msg.From[..1].ToUpperInvariant());
 
@@ -1719,6 +1758,12 @@ public partial class MainWindow : Window
                 _auth.Profile.AvatarMimeType = vm.AvatarMimeType;
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
                 _chat?.BroadcastProfile(vm.AccentColor, vm.AvatarData, vm.AvatarMimeType);
+                // Live-swap the global accent brush so buttons/highlights
+                // pick up the new color without a restart. Also refresh the
+                // default accent on existing contact/place VMs that didn't
+                // have a per-contact color set.
+                Themes.ThemeService.ApplyAccent(vm.AccentColor);
+                RefreshDefaultAccents();
                 UpdateOwnProfilePanel();
             }
         };

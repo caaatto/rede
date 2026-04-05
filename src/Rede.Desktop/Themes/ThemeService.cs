@@ -69,6 +69,35 @@ public static class ThemeService
         TextSecondary: "#5a5b70",
         TextMuted: "#8a8ba0");
 
+    /// <summary>
+    /// Override the global accent brush (buttons, highlights, focus rings).
+    /// Called on profile load and whenever the user changes their accent in
+    /// Settings. Uses DynamicResource-backed keys so all views update live.
+    /// </summary>
+    public static void ApplyAccent(string? hex)
+    {
+        var app = Application.Current;
+        if (app is null) return;
+        var r = app.Resources;
+        if (!Color.TryParse(hex, out var c)) c = Color.Parse("#8b5cf6");
+        var dim = Dim20(c);
+        var glow = Color.FromArgb(0x40, c.R, c.G, c.B);
+
+        r["RedeAccentViolet"] = c;
+        r["RedeAccentVioletDim"] = dim;
+        r["RedeGlowViolet"] = glow;
+        r["RedeAccentVioletBrush"] = new SolidColorBrush(c);
+        r["RedeAccentVioletDimBrush"] = new SolidColorBrush(dim);
+        r["RedeGlowVioletBrush"] = new SolidColorBrush(glow);
+    }
+
+    // Darken a color by ~20% for hover / dim variants.
+    private static Color Dim20(Color c)
+    {
+        byte d(byte v) => (byte)(v * 0.8);
+        return Color.FromArgb(c.A, d(c.R), d(c.G), d(c.B));
+    }
+
     public static void Apply(string? variant)
     {
         var palette = (variant ?? Dark).ToLowerInvariant() switch

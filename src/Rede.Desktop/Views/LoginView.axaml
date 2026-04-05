@@ -9,8 +9,8 @@
                   HorizontalScrollBarVisibility="Disabled"
                   Padding="0,36,0,24">
     <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-        <Border Background="{StaticResource RedeSurfaceBrush}"
-                BorderBrush="{StaticResource RedeBorderBrush}"
+        <Border Background="{DynamicResource RedeSurfaceBrush}"
+                BorderBrush="{DynamicResource RedeBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="12"
                 Padding="24,18"
@@ -22,7 +22,7 @@
                     <TextBlock Text="rede"
                                Classes="title"
                                HorizontalAlignment="Center"
-                               Foreground="{StaticResource RedeAccentVioletBrush}" />
+                               Foreground="{DynamicResource RedeAccentVioletBrush}" />
                     <TextBlock Text="secure messenger"
                                Classes="secondary"
                                HorizontalAlignment="Center" />
@@ -41,7 +41,8 @@
                         <TextBox Text="{Binding Passphrase}"
                                  PasswordChar="*"
                                  Watermark="enter passphrase"
-                                 IsEnabled="{Binding !IsLoading}" />
+                                 IsEnabled="{Binding !IsLoading}"
+                                 KeyDown="OnPassphraseKeyDown" />
                     </StackPanel>
                     <StackPanel Spacing="4">
                         <TextBlock Text="Server" Classes="secondary"
@@ -51,6 +52,9 @@
                                   HorizontalAlignment="Stretch"
                                   IsEnabled="{Binding !IsLoading}" />
                     </StackPanel>
+                    <CheckBox Content="Stay signed in"
+                              IsChecked="{Binding StaySignedIn}"
+                              IsEnabled="{Binding !IsLoading}" />
                     <Button Content="Unlock"
                             Command="{Binding QuickLoginCommand}"
                             HorizontalAlignment="Stretch"
@@ -119,7 +123,8 @@
                         <TextBox Text="{Binding Passphrase}"
                                  PasswordChar="*"
                                  Watermark="min 12 characters"
-                                 IsEnabled="{Binding !IsLoading}" />
+                                 IsEnabled="{Binding !IsLoading}"
+                                 KeyDown="OnPassphraseKeyDown" />
                     </StackPanel>
 
                     <!-- Server -->
@@ -131,11 +136,15 @@
                                   HorizontalAlignment="Stretch"
                                   IsEnabled="{Binding !IsLoading}" />
                         <TextBlock Text="Deine IP-Adresse ist bei direkter Verbindung für den Server sichtbar."
-                                   Foreground="{StaticResource RedeWarningBrush}"
+                                   Foreground="{DynamicResource RedeWarningBrush}"
                                    FontSize="{StaticResource RedeSmallSize}"
                                    TextWrapping="Wrap"
                                    IsVisible="{Binding IsDirectTransport}" />
                     </StackPanel>
+
+                    <CheckBox Content="Stay signed in"
+                              IsChecked="{Binding StaySignedIn}"
+                              IsEnabled="{Binding !IsLoading}" />
 
                     <!-- Login button -->
                     <Button Content="Login"
@@ -194,7 +203,7 @@
                                       HorizontalAlignment="Stretch"
                                       IsEnabled="{Binding !IsLoading}" />
                             <TextBlock Text="Deine IP-Adresse ist bei direkter Verbindung für den Server sichtbar."
-                                       Foreground="{StaticResource RedeWarningBrush}"
+                                       Foreground="{DynamicResource RedeWarningBrush}"
                                        FontSize="{StaticResource RedeSmallSize}"
                                        TextWrapping="Wrap"
                                        IsVisible="{Binding IsDirectTransport}" />
@@ -228,7 +237,7 @@
 
                 <!-- Error message -->
                 <TextBlock Text="{Binding ErrorMessage}"
-                           Foreground="{StaticResource RedeErrorBrush}"
+                           Foreground="{DynamicResource RedeErrorBrush}"
                            FontSize="{StaticResource RedeSmallSize}"
                            IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                            TextWrapping="Wrap"
@@ -241,7 +250,7 @@
                             IsVisible="{Binding IsLoading}">
                     <TextBlock Text="Connecting..."
                                Classes="secondary"
-                               Foreground="{StaticResource RedeAccentVioletBrush}" />
+                               Foreground="{DynamicResource RedeAccentVioletBrush}" />
                 </StackPanel>
 
                 <!-- Update status -->
@@ -249,7 +258,7 @@
                            Classes="secondary"
                            FontSize="{StaticResource RedeSmallSize}"
                            HorizontalAlignment="Center"
-                           Foreground="{StaticResource RedeAccentTealBrush}">
+                           Foreground="{DynamicResource RedeAccentTealBrush}">
                     <TextBlock.IsVisible>
                         <MultiBinding Converter="{x:Static BoolConverters.And}">
                             <Binding Path="StatusMessage" Converter="{x:Static StringConverters.IsNotNullOrEmpty}" />
@@ -264,7 +273,7 @@
                         HorizontalAlignment="Center"
                         FontSize="{StaticResource RedeSmallSize}"
                         Background="Transparent"
-                        Foreground="{StaticResource RedeAccentTealBrush}"
+                        Foreground="{DynamicResource RedeAccentTealBrush}"
                         Cursor="Hand"
                         Padding="8,4"
                         IsVisible="{Binding IsUpdateAvailable}" />
