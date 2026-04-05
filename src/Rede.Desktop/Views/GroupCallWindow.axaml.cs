@@ -1,8 +1,10 @@
 using System;
 using System.IO;
-using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
+using AvaloniaWebView;
 using Rede.Core.Services;
 
 namespace Rede.Desktop.Views;
@@ -11,8 +13,9 @@ public partial class GroupCallWindow : Window
 {
     private GroupCallService? _service;
     private GCallTokenInfo? _token;
-    private string? _identity;
+    private string? _displayName;
     private string? _e2eeKeyBase64;
+    private bool _initPosted;
 
     public GroupCallWindow()
     {
@@ -26,12 +29,15 @@ public partial class GroupCallWindow : Window
 
     /// <summary>
     /// Configure the window with call data. Call before showing.
+    /// The SFrame key is NEVER passed via the URL — it is injected into the
+    /// page via ExecuteScriptAsync after navigation completes, so it never
+    /// ends up in process arguments, browser history, or referer headers.
     /// </summary>
-    public void Configure(GroupCallService service, GCallTokenInfo token, string identity, byte[]? e2eeKey)
+    public void Configure(GroupCallService service, GCallTokenInfo token, string displayName, byte[]? e2eeKey)
     {
         _service = service;
         _token = token;
-        _identity = identity;
+        _displayName = displayName;
         _e2eeKeyBase64 = e2eeKey is { Length: 32 } ? Convert.ToBase64String(e2eeKey) : null;
         Title = $"Rede Call · {token.Scope.Kind}";
 
@@ -50,22 +56,51 @@ public partial class GroupCallWindow : Window
             return;
         }
 
-        // Build file:// URL with query params. WebView control loads the local
-        // bundled page; LiveKit JS there will connect to the SFU with the token.
-        var q = new StringBuilder();
-        q.Append("?url=").Append(Uri.EscapeDataString(_token.Url));
-        q.Append("&token=").Append(Uri.EscapeDataString(_token.Token));
-        q.Append("&room=").Append(Uri.EscapeDataString(_token.Room));
-        q.Append("&identity=").Append(Uri.EscapeDataString(_identity ?? "anon"));
-        if (_e2eeKeyBase64 is not null)
-            q.Append("&key=").Append(Uri.EscapeDataString(_e2eeKeyBase64));
+        // Load the bundled HTML without any secrets in the URL. The page boots
+        // into a "waiting for __redeInit" state and connects only once the
+        // host injects the config via ExecuteScriptAsync.
+        var uri = new Uri("file://" + htmlPath);
 
-        var uri = new Uri("file://" + htmlPath + q.ToString());
+        var webView = this.FindControl<WebView>("WebView");
+        if (webView is null) return;
 
-        var webView = this.FindControl<AvaloniaWebView.WebView>("WebView");
-        if (webView is not null)
+        webView.NavigationCompleted += OnNavigationCompleted;
+        webView.Url = uri;
+    }
+
+    private async void OnNavigationCompleted(object? sender, WebViewCore.Events.WebViewUrlLoadedEventArg e)
+    {
+        if (sender is not WebView webView) return;
+        if (_token is null) return;
+        if (_initPosted) return; // only inject once; later subframe loads must not leak
+        _initPosted = true;
+
+        // Build the config as a JSON object and serialize it so quoting/escaping
+        // is handled correctly. This is the ONLY place the raw E2EE key leaves
+        // managed memory, and it only ever lives in the JS heap of the
+        // bundled local page — no URL, no process args, no logs.
+        var cfg = new JsonObject
         {
-            webView.Url = uri;
+            ["url"] = _token.Url,
+            ["token"] = _token.Token,
+            ["room"] = _token.Room,
+            ["identity"] = _token.Identity, // per-room pseudonym from server
+            ["displayName"] = _displayName ?? "",
+            ["e2eeKey"] = _e2eeKeyBase64 ?? "",
+        };
+        var json = cfg.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+
+        // Wrap in a self-zeroing call so the config object is not left reachable
+        // on window.* after __redeInit has consumed it.
+        var script = "(function(){try{var c=" + json + ";window.__redeInit&&window.__redeInit(c);c.e2eeKey='';c.token='';}catch(e){console.error(e);}})();";
+
+        try
+        {
+            await webView.ExecuteScriptAsync(script);
+        }
+        catch (Exception ex)
+        {
+            ShowError("WebView init failed", ex.Message);
         }
     }
 

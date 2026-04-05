@@ -203,21 +203,32 @@
   }
 
   // --- Config injection ---
-  // The C# host passes config via the query string when loading this page:
-  //   index.html?url=<livekit-ws>&token=<jwt>&room=<name>&identity=<user>&key=<base64-32b>
-  const params = new URLSearchParams(location.search);
-  const cfg = {
-    url: params.get('url') || '',
-    token: params.get('token') || '',
-    room: params.get('room') || '',
-    identity: params.get('identity') || 'anon',
-    e2eeKey: params.get('key') || '', // base64 32-byte shared SFrame key
-  };
+  // Config (especially the SFrame E2EE key) is NEVER passed via the URL. The
+  // C# host calls window.__redeInit(cfg) via ExecuteScriptAsync after the page
+  // has loaded, so secrets never end up in process args, browser history, or
+  // referer headers. Until __redeInit fires, the page sits in a "waiting"
+  // state and does not connect to anything.
+  let cfg = null;
+  let initialized = false;
 
-  if (!cfg.url || !cfg.token) {
-    showError('Missing config', 'The host did not provide a token or URL.');
-    return;
-  }
+  window.__redeInit = function (c) {
+    if (initialized) return;
+    if (!c || typeof c !== 'object') return;
+    if (!c.url || !c.token) {
+      showError('Missing config', 'The host did not provide a token or URL.');
+      return;
+    }
+    cfg = {
+      url: String(c.url),
+      token: String(c.token),
+      room: String(c.room || ''),
+      identity: String(c.identity || 'anon'),
+      displayName: String(c.displayName || ''),
+      e2eeKey: String(c.e2eeKey || ''),
+    };
+    initialized = true;
+    startCall();
+  };
 
   // --- UI refs ---
   const statusBar = document.getElementById('status-bar');
@@ -257,6 +268,10 @@
     postHost('error', { title, message: msg });
   }
 
+  setStatus('connecting', 'Waiting for host…');
+
+function startCall() {
+  if (!cfg) return;
   // --- E2EE setup ---
   // SFrame encryption key is passed from C# via query param (base64, 32 bytes).
   // It's derived client-side from the Place/Group Sender Key — the Rede server
@@ -297,41 +312,65 @@
   const room = new LK.Room(roomOpts);
 
   // --- Track rendering ---
-  const tiles = new Map(); // participantIdentity -> tile element
+  // tiles are keyed by the LiveKit participant identity, which is a per-room
+  // pseudonym (not a userId). Display names arrive over the encrypted data
+  // channel once a participant joins.
+  const tiles = new Map(); // pseudonym -> { el, labelEl, displayName }
+  const displayNames = new Map(); // pseudonym -> string
+
+  function labelFor(pseudonym) {
+    return displayNames.get(pseudonym) || (pseudonym.slice(0, 6));
+  }
 
   function ensureTile(participant) {
-    let tile = tiles.get(participant.identity);
-    if (tile) return tile;
-    tile = document.createElement('div');
+    const id = participant.identity;
+    let entry = tiles.get(id);
+    if (entry) return entry.el;
+    const tile = document.createElement('div');
     tile.className = 'tile';
-    tile.dataset.identity = participant.identity;
+    tile.dataset.identity = id;
 
     const placeholder = document.createElement('div');
     placeholder.className = 'placeholder';
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
-    avatar.textContent = (participant.identity[0] || '?').toUpperCase();
+    const label = labelFor(id);
+    avatar.textContent = (label[0] || '?').toUpperCase();
     placeholder.appendChild(avatar);
     tile.appendChild(placeholder);
 
-    const name = document.createElement('div');
-    name.className = 'name';
-    name.textContent = participant.identity;
-    tile.appendChild(name);
+    const nameEl = document.createElement('div');
+    nameEl.className = 'name';
+    nameEl.textContent = label;
+    tile.appendChild(nameEl);
 
     grid.appendChild(tile);
-    tiles.set(participant.identity, tile);
+    tiles.set(id, { el: tile, labelEl: nameEl, avatarEl: avatar });
     return tile;
   }
 
+  function updateTileName(pseudonym, name) {
+    if (!name) return;
+    displayNames.set(pseudonym, name);
+    const entry = tiles.get(pseudonym);
+    if (entry) {
+      entry.labelEl.textContent = name;
+      entry.avatarEl.textContent = (name[0] || '?').toUpperCase();
+    }
+  }
+
   function removeTile(identity) {
-    const tile = tiles.get(identity);
-    if (tile) { tile.remove(); tiles.delete(identity); }
+    const entry = tiles.get(identity);
+    if (entry) { entry.el.remove(); tiles.delete(identity); }
+    displayNames.delete(identity);
   }
 
   function attachTrack(participant, publication) {
     if (!publication.track) return;
-    const tile = ensureTile(participant);
+    ensureTile(participant);
+    const entry = tiles.get(participant.identity);
+    const tile = entry ? entry.el : null;
+    if (!tile) return;
     const el = publication.track.attach();
     if (publication.kind === 'video') {
       el.style.width = '100%';
@@ -363,12 +402,20 @@
         await room.setE2EEEnabled(true);
         e2eeBadge.className = 'on';
         e2eeBadge.textContent = 'E2EE ON';
+        // We are done with the raw E2EE key now — LK holds it internally.
+        // Zero our copy of the base64 string (strings are immutable in JS so
+        // this just drops the reference; GC will reclaim when possible).
+        cfg.e2eeKey = '';
       } catch (e) {
         console.error('E2EE setup failed', e);
         showError('E2EE setup failed', 'Could not enable end-to-end encryption. Call aborted.');
         room.disconnect();
         return;
       }
+    }
+    // Seed our own display name so the local tile is correct immediately.
+    if (cfg.displayName) {
+      updateTileName(room.localParticipant.identity, cfg.displayName);
     }
     // Enable mic + cam by default
     try {
@@ -379,7 +426,41 @@
       console.error('Failed to enable devices', e);
     }
     ensureTile(room.localParticipant);
+    // Broadcast our display name over the data channel. With E2EE on, this
+    // packet is SFrame-encrypted too, so the LiveKit SFU sees only ciphertext.
+    // Sending displayName via LiveKit JWT metadata would leak it to the SFU.
+    publishHello();
     postHost('connected', { room: cfg.room, participants: room.numParticipants });
+  });
+
+  async function publishHello() {
+    if (!cfg.displayName) return;
+    try {
+      const payload = new TextEncoder().encode(JSON.stringify({ t: 'hello', name: cfg.displayName }));
+      await room.localParticipant.publishData(payload, { reliable: true });
+    } catch (e) {
+      console.warn('publishData(hello) failed', e);
+    }
+  }
+
+  room.on(LK.RoomEvent.DataReceived, (payload, participant) => {
+    if (!participant) return;
+    try {
+      const text = new TextDecoder().decode(payload);
+      const obj = JSON.parse(text);
+      if (obj && obj.t === 'hello' && typeof obj.name === 'string') {
+        // Trust-on-first-use: bind a displayName to a pseudonym for this call
+        // only. Since the packet arrives over the E2EE data channel, only
+        // members who already share the SFrame key can set it.
+        const clean = String(obj.name).slice(0, 64).replace(/[\u202a-\u202e\u2066-\u2069]/g, '');
+        updateTileName(participant.identity, clean);
+      }
+    } catch (e) { /* ignore malformed */ }
+  });
+
+  room.on(LK.RoomEvent.ParticipantConnected, () => {
+    // Re-announce so late joiners learn our name.
+    publishHello();
   });
 
   room.on(LK.RoomEvent.Disconnected, (reason) => {
@@ -418,8 +499,8 @@
 
   room.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
     const active = new Set(speakers.map(s => s.identity));
-    for (const [id, tile] of tiles) {
-      tile.classList.toggle('speaking', active.has(id));
+    for (const [id, entry] of tiles) {
+      entry.el.classList.toggle('speaking', active.has(id));
     }
   });
 
@@ -458,6 +539,8 @@
   (async () => {
     try {
       await room.connect(cfg.url, cfg.token);
+      // Token is no longer needed after the WS handshake — drop our reference.
+      cfg.token = '';
     } catch (e) {
       console.error('Connection failed', e);
       showError('Connection failed', e.message || String(e));
@@ -467,6 +550,7 @@
   // Expose for C# to call
   window.redeLeave = () => btnLeave.click();
   window.redeToggleMute = () => btnMic.click();
+} // end startCall
 })();
 </script>
 </body>

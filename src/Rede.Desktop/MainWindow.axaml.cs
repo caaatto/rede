@@ -340,7 +340,10 @@ public partial class MainWindow : Window
         _groupCall.OnTokenReceived += info => Dispatcher.UIThread.Post(() =>
         {
             if (_auth?.Profile is null) return;
-            var key = GroupCallService.DeriveSFrameKey(_auth.Profile, info.Scope);
+            // SFrame key is mixed with the per-session callId returned by the
+            // server, so calls in the same channel across time get unrelated
+            // keys (inter-call forward secrecy).
+            var key = GroupCallService.DeriveSFrameKey(_auth.Profile, info.Scope, info.CallId);
             if (key is null)
             {
                 _mainVm.AddSystemMessage("[Call] No E2EE key available for this scope — call aborted.");
@@ -348,10 +351,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Close any existing call window before opening a new one.
+            // Close any existing call window before opening a new one. The
+            // window receives the user's display name for labeling purposes;
+            // the LiveKit connection uses the server-issued pseudonym from
+            // info.Identity so the SFU never sees the real userId.
             _groupCallWindow?.Close();
             _groupCallWindow = new Views.GroupCallWindow();
-            _groupCallWindow.Configure(_groupCall!, info, _auth.Profile.UserId, key);
+            _groupCallWindow.Configure(_groupCall!, info, _auth.Profile.DisplayName ?? "", key);
             _groupCallWindow.Closed += (_, _) => _groupCallWindow = null;
             _groupCallWindow.Show(this);
 

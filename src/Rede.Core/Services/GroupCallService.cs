@@ -55,6 +55,8 @@ public sealed class GCallTokenInfo
     public required string Url { get; init; }      // LiveKit WebSocket URL
     public required string Token { get; init; }    // JWT
     public required string Room { get; init; }     // Opaque room name (HMAC of scope)
+    public required string Identity { get; init; } // Per-room pseudonym from server (never the raw userId)
+    public required string CallId { get; init; }   // Per-session value mixed into SFrame HKDF for inter-call forward secrecy
     public long ExpiresAt { get; init; }           // Unix seconds
 }
 
@@ -111,7 +113,7 @@ public class GroupCallService
     }
 
     /// <summary>
-    /// Derive the SFrame E2EE key for a group call scope.
+    /// Derive the SFrame E2EE key for a group call scope + session.
     ///
     /// For Places, we use the Place's metadataKey — a 32-byte symmetric key
     /// shared among all members via the existing E2EE Place key distribution.
@@ -121,11 +123,29 @@ public class GroupCallService
     /// mixing the channel id into the HKDF info. When the Place rekeys
     /// (e.g. after /prekey), the SFrame key rotates too.
     ///
+    /// The callId is a per-session value generated fresh by the server for
+    /// each new call in the same room. Mixing it into HKDF means SFrame keys
+    /// rotate between calls in the same channel, so a recording of call N
+    /// cannot be retroactively decrypted using the key derived for call N+1.
+    /// (A member who still holds the Place metadataKey can of course derive
+    /// both — this only protects between-call isolation, not post-kick
+    /// exclusion; rotate the metadataKey via /prekey for that.)
+    ///
     /// The Rede server and LiveKit SFU never see this key — it's derived
     /// client-side from secrets the server doesn't have.
     /// </summary>
-    public static byte[]? DeriveSFrameKey(Profile profile, GCallScope scope)
+    public static byte[]? DeriveSFrameKey(Profile profile, GCallScope scope, string callId)
     {
+        if (string.IsNullOrEmpty(callId)) return null;
+        // Reject anything other than a hex callId so untrusted server input
+        // can't inject HKDF separators.
+        foreach (var c in callId)
+        {
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                return null;
+        }
+        if (callId.Length < 16 || callId.Length > 64) return null;
+
         string? sharedKeyB64 = null;
         if (scope.Kind == "place")
         {
@@ -146,7 +166,7 @@ public class GroupCallService
 
         // Domain-separated info so SFrame keys can never collide with any
         // other key derived from the same metadataKey (e.g. metadata encryption).
-        var info = Encoding.UTF8.GetBytes("REDE_GCALL_SFRAME_V1:" + scope.Key);
+        var info = Encoding.UTF8.GetBytes("REDE_GCALL_SFRAME_V1:" + scope.Key + ":" + callId);
         return Hkdf.DeriveKey(ikm, Array.Empty<byte>(), info, 32);
     }
 
@@ -209,9 +229,12 @@ public class GroupCallService
         var url = msg["url"]?.GetValue<string>();
         var token = msg["token"]?.GetValue<string>();
         var room = msg["room"]?.GetValue<string>();
+        var identity = msg["identity"]?.GetValue<string>();
+        var callId = msg["callId"]?.GetValue<string>();
         var expiresAt = msg["expiresAt"]?.GetValue<long>() ?? 0;
 
-        if (scope is null || url is null || token is null || room is null)
+        if (scope is null || url is null || token is null || room is null
+            || string.IsNullOrEmpty(identity) || string.IsNullOrEmpty(callId))
         {
             _state = GCallState.Idle;
             return;
@@ -223,6 +246,8 @@ public class GroupCallService
             Url = url,
             Token = token,
             Room = room,
+            Identity = identity,
+            CallId = callId,
             ExpiresAt = expiresAt,
         };
         _activeToken = info;
