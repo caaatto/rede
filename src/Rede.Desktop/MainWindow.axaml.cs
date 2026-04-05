@@ -27,6 +27,8 @@ public partial class MainWindow : Window
     private PlaceService? _places;
     private DeviceService? _devices;
     private CallService? _call;
+    private GroupCallService? _groupCall;
+    private Views.GroupCallWindow? _groupCallWindow;
     private readonly CallViewModel _callVm = new();
     private readonly Rede.Core.Services.NotificationService _notifications = new();
 
@@ -331,6 +333,89 @@ public partial class MainWindow : Window
     private TaskCompletionSource? _queueAdmitTcs;
     private bool _isQueued;
 
+    private void WireGroupCallEvents()
+    {
+        if (_groupCall is null) return;
+
+        _groupCall.OnTokenReceived += info => Dispatcher.UIThread.Post(() =>
+        {
+            if (_auth?.Profile is null) return;
+            var key = GroupCallService.DeriveSFrameKey(_auth.Profile, info.Scope);
+            if (key is null)
+            {
+                _mainVm.AddSystemMessage("[Call] No E2EE key available for this scope — call aborted.");
+                _groupCall?.EndCall();
+                return;
+            }
+
+            // Close any existing call window before opening a new one.
+            _groupCallWindow?.Close();
+            _groupCallWindow = new Views.GroupCallWindow();
+            _groupCallWindow.Configure(_groupCall!, info, _auth.Profile.UserId, key);
+            _groupCallWindow.Closed += (_, _) => _groupCallWindow = null;
+            _groupCallWindow.Show(this);
+
+            // Tell other members we started the call.
+            _groupCall!.Announce(info.Scope);
+        });
+
+        _groupCall.OnTokenFailed += (scope, reason) => Dispatcher.UIThread.Post(() =>
+        {
+            _mainVm.AddSystemMessage($"[Call] Could not start call: {reason}");
+        });
+
+        _groupCall.OnIncomingAnnounce += (scope, startedBy, startedAt) => Dispatcher.UIThread.Post(() =>
+        {
+            var label = scope.Kind == "place" ? "place" : "group";
+            _mainVm.AddSystemMessage($"[Call] {startedBy} started a call in this {label}. Use the phone button to join.");
+        });
+
+        _groupCall.OnCallEnded += (scope, endedBy) => Dispatcher.UIThread.Post(() =>
+        {
+            _mainVm.AddSystemMessage($"[Call] Call ended.");
+        });
+    }
+
+    /// <summary>
+    /// Start or join a group call for the currently selected Place channel or Group.
+    /// Triggered from chat header button or /call slash command in a group/place scope.
+    /// </summary>
+    public void StartGroupCallForCurrentScope()
+    {
+        if (_groupCall is null || _auth?.Profile is null)
+        {
+            _mainVm.AddSystemMessage("[Call] Not ready.");
+            return;
+        }
+
+        GCallScope? scope = _mainVm.SelectedConversation switch
+        {
+            ChannelItemViewModel ch => new GCallScope
+            {
+                Kind = "place",
+                Id = ch.PlaceId,
+                ChannelId = ch.ChannelId,
+            },
+            GroupItemViewModel g => new GCallScope
+            {
+                Kind = "group",
+                Id = g.GroupId,
+            },
+            _ => null,
+        };
+
+        if (scope is null)
+        {
+            _mainVm.AddSystemMessage("[Call] Select a place channel or group first.");
+            return;
+        }
+
+        if (!_groupCall.RequestToken(scope))
+        {
+            _mainVm.AddSystemMessage("[Call] Already in a call.");
+        }
+    }
+
     private void WireQueueEvents()
     {
         _isQueued = false;
@@ -466,6 +551,8 @@ public partial class MainWindow : Window
         _devices = new DeviceService(_conn, _store);
         _call = new CallService(_conn, _store);
         _callVm.Init(_call);
+        _groupCall = new GroupCallService(_conn);
+        WireGroupCallEvents();
 
         // Connection events
         _conn.OnConnected += () =>
@@ -1046,7 +1133,18 @@ public partial class MainWindow : Window
                 break;
             }
 
+            case "call":
+                // /call with no args — start a group call in the current place channel or group
+                StartGroupCallForCurrentScope();
+                break;
+
             case "hangup":
+                // Group call window open? Close it. Otherwise fall through to 1:1 hangup.
+                if (_groupCallWindow is not null)
+                {
+                    _groupCallWindow.Close();
+                    break;
+                }
                 _call?.HangUp();
                 break;
 

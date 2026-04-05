@@ -95,6 +95,14 @@ public static class Msg
     public const string CallMute = "call_mute";
     public const string CallParticipants = "call_participants";
 
+    // Group Calls (LiveKit SFU, E2EE via SFrame)
+    public const string GCallRequestToken = "gcall_request_token";
+    public const string GCallToken = "gcall_token";
+    public const string GCallTokenFail = "gcall_token_fail";
+    public const string GCallAnnounce = "gcall_announce";
+    public const string GCallEnd = "gcall_end";
+    public const string GCallActive = "gcall_active";
+
     // Status / Presence
     public const string StatusUpdate = "status_update";
     public const string StatusSubscribe = "status_subscribe";

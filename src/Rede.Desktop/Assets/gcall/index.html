@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Rede Call</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #14141c;
+    --border: #262634;
+    --text: #e8e8ee;
+    --secondary: #8a8a9a;
+    --accent: #8b5cf6;
+    --accent-2: #2dd4bf;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif;
+    font-size: 14px;
+    overflow: hidden;
+    user-select: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  #status-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--secondary);
+  }
+  #status-bar .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--secondary);
+  }
+  #status-bar.connected .dot { background: #22c55e; }
+  #status-bar.connecting .dot { background: #eab308; animation: pulse 1.5s infinite; }
+  #status-bar.failed .dot { background: var(--danger); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  #e2ee-badge {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  #e2ee-badge.on { color: var(--accent-2); background: rgba(45,212,191,0.1); border: 1px solid rgba(45,212,191,0.3); }
+  #e2ee-badge.off { color: var(--danger); background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); }
+
+  #grid {
+    flex: 1;
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-auto-rows: 1fr;
+    overflow: auto;
+    min-height: 0;
+  }
+  .tile {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .tile video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .tile .placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: var(--secondary);
+  }
+  .tile .avatar {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 600;
+    color: white;
+  }
+  .tile .name {
+    position: absolute;
+    left: 10px; bottom: 10px;
+    padding: 4px 8px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .tile .mute-indicator {
+    position: absolute;
+    top: 10px; right: 10px;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  .tile.speaking {
+    border-color: var(--accent-2);
+    box-shadow: 0 0 0 2px rgba(45,212,191,0.4);
+  }
+
+  #controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+  button.ctrl {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: #1e1e28;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button.ctrl:hover { background: #2a2a38; }
+  button.ctrl.active { background: var(--danger); border-color: var(--danger); }
+  button.ctrl.leave { background: var(--danger); border-color: var(--danger); }
+  button.ctrl.leave:hover { background: #dc2626; }
+  button.ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #error-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,10,15,0.95);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    padding: 32px;
+    text-align: center;
+  }
+  #error-overlay.visible { display: flex; }
+  #error-overlay h2 { color: var(--danger); margin: 0; }
+  #error-overlay p { color: var(--secondary); max-width: 400px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="status-bar" class="connecting">
+    <span class="dot"></span>
+    <span id="status-text">Connecting to call…</span>
+    <span id="e2ee-badge" class="off">E2EE OFF</span>
+  </div>
+  <div id="grid"></div>
+  <div id="controls">
+    <button class="ctrl" id="btn-mic" title="Toggle microphone">MIC</button>
+    <button class="ctrl" id="btn-cam" title="Toggle camera">CAM</button>
+    <button class="ctrl" id="btn-screen" title="Share screen" disabled>SHARE</button>
+    <button class="ctrl leave" id="btn-leave" title="Leave call">END</button>
+  </div>
+</div>
+<div id="error-overlay">
+  <h2 id="error-title">Call failed</h2>
+  <p id="error-message"></p>
+</div>
+
+<script src="livekit-client.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const LK = window.LivekitClient;
+  if (!LK) {
+    showError('Runtime error', 'LiveKit client failed to load.');
+    return;
+  }
+
+  // --- Config injection ---
+  // The C# host passes config via the query string when loading this page:
+  //   index.html?url=<livekit-ws>&token=<jwt>&room=<name>&identity=<user>&key=<base64-32b>
+  const params = new URLSearchParams(location.search);
+  const cfg = {
+    url: params.get('url') || '',
+    token: params.get('token') || '',
+    room: params.get('room') || '',
+    identity: params.get('identity') || 'anon',
+    e2eeKey: params.get('key') || '', // base64 32-byte shared SFrame key
+  };
+
+  if (!cfg.url || !cfg.token) {
+    showError('Missing config', 'The host did not provide a token or URL.');
+    return;
+  }
+
+  // --- UI refs ---
+  const statusBar = document.getElementById('status-bar');
+  const statusText = document.getElementById('status-text');
+  const e2eeBadge = document.getElementById('e2ee-badge');
+  const grid = document.getElementById('grid');
+  const btnMic = document.getElementById('btn-mic');
+  const btnCam = document.getElementById('btn-cam');
+  const btnLeave = document.getElementById('btn-leave');
+
+  // --- Host bridge ---
+  // Post messages back to the C# WebView host so Avalonia UI can react.
+  function postHost(type, payload) {
+    try {
+      if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+        // WebView2 (Windows)
+        window.chrome.webview.postMessage(JSON.stringify({ type, ...payload }));
+      } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.rede) {
+        // WKWebView (macOS)
+        window.webkit.messageHandlers.rede.postMessage({ type, ...payload });
+      } else {
+        // Fallback: log to console — the host can hook into console messages
+        console.log('[REDE_HOST]', JSON.stringify({ type, ...payload }));
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function setStatus(state, text) {
+    statusBar.className = state;
+    statusText.textContent = text;
+  }
+
+  function showError(title, msg) {
+    document.getElementById('error-title').textContent = title;
+    document.getElementById('error-message').textContent = msg;
+    document.getElementById('error-overlay').classList.add('visible');
+    postHost('error', { title, message: msg });
+  }
+
+  // --- E2EE setup ---
+  // SFrame encryption key is passed from C# via query param (base64, 32 bytes).
+  // It's derived client-side from the Place/Group Sender Key — the Rede server
+  // and LiveKit SFU never see this key. If no key is provided, E2EE is disabled
+  // and a warning is shown (should not happen in production).
+  let keyProvider = null;
+  let e2eeEnabled = false;
+  if (cfg.e2eeKey) {
+    try {
+      keyProvider = new LK.ExternalE2EEKeyProvider();
+      e2eeEnabled = true;
+    } catch (e) {
+      console.error('Failed to create E2EE key provider', e);
+    }
+  }
+
+  // --- Room setup ---
+  const roomOpts = {
+    adaptiveStream: true,
+    dynacast: true,
+    publishDefaults: {
+      videoSimulcastLayers: [LK.VideoPresets.h540, LK.VideoPresets.h216],
+      audioPreset: LK.AudioPresets.music,
+      red: true,
+      dtx: true,
+    },
+    videoCaptureDefaults: {
+      resolution: LK.VideoPresets.h720.resolution,
+    },
+  };
+  if (e2eeEnabled) {
+    roomOpts.e2ee = {
+      keyProvider,
+      worker: new Worker('livekit-client.e2ee.worker.js'),
+    };
+  }
+
+  const room = new LK.Room(roomOpts);
+
+  // --- Track rendering ---
+  const tiles = new Map(); // participantIdentity -> tile element
+
+  function ensureTile(participant) {
+    let tile = tiles.get(participant.identity);
+    if (tile) return tile;
+    tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.dataset.identity = participant.identity;
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'placeholder';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = (participant.identity[0] || '?').toUpperCase();
+    placeholder.appendChild(avatar);
+    tile.appendChild(placeholder);
+
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = participant.identity;
+    tile.appendChild(name);
+
+    grid.appendChild(tile);
+    tiles.set(participant.identity, tile);
+    return tile;
+  }
+
+  function removeTile(identity) {
+    const tile = tiles.get(identity);
+    if (tile) { tile.remove(); tiles.delete(identity); }
+  }
+
+  function attachTrack(participant, publication) {
+    if (!publication.track) return;
+    const tile = ensureTile(participant);
+    const el = publication.track.attach();
+    if (publication.kind === 'video') {
+      el.style.width = '100%';
+      el.style.height = '100%';
+      el.style.objectFit = 'cover';
+      const ph = tile.querySelector('.placeholder');
+      if (ph) ph.style.display = 'none';
+      tile.insertBefore(el, tile.firstChild);
+    } else {
+      // Audio elements — attach but don't display
+      el.style.display = 'none';
+      document.body.appendChild(el);
+    }
+  }
+
+  function detachTrack(publication) {
+    if (publication.track) {
+      publication.track.detach().forEach(el => el.remove());
+    }
+  }
+
+  // --- Event wiring ---
+  room.on(LK.RoomEvent.Connected, async () => {
+    setStatus('connected', 'In call · ' + cfg.room.slice(0, 8));
+    if (e2eeEnabled && keyProvider) {
+      try {
+        const raw = base64ToBytes(cfg.e2eeKey);
+        await keyProvider.setKey(raw);
+        await room.setE2EEEnabled(true);
+        e2eeBadge.className = 'on';
+        e2eeBadge.textContent = 'E2EE ON';
+      } catch (e) {
+        console.error('E2EE setup failed', e);
+        showError('E2EE setup failed', 'Could not enable end-to-end encryption. Call aborted.');
+        room.disconnect();
+        return;
+      }
+    }
+    // Enable mic + cam by default
+    try {
+      await room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setCameraEnabled(false); // camera off by default
+      updateButtons();
+    } catch (e) {
+      console.error('Failed to enable devices', e);
+    }
+    ensureTile(room.localParticipant);
+    postHost('connected', { room: cfg.room, participants: room.numParticipants });
+  });
+
+  room.on(LK.RoomEvent.Disconnected, (reason) => {
+    setStatus('failed', 'Disconnected');
+    postHost('disconnected', { reason: String(reason || '') });
+  });
+
+  room.on(LK.RoomEvent.Reconnecting, () => setStatus('connecting', 'Reconnecting…'));
+  room.on(LK.RoomEvent.Reconnected, () => setStatus('connected', 'In call'));
+
+  room.on(LK.RoomEvent.ParticipantConnected, (p) => {
+    ensureTile(p);
+    postHost('participant_joined', { identity: p.identity });
+  });
+
+  room.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
+    removeTile(p.identity);
+    postHost('participant_left', { identity: p.identity });
+  });
+
+  room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    attachTrack(participant, publication);
+  });
+
+  room.on(LK.RoomEvent.TrackUnsubscribed, (track, publication) => {
+    detachTrack(publication);
+  });
+
+  room.on(LK.RoomEvent.LocalTrackPublished, (publication, participant) => {
+    attachTrack(participant, publication);
+  });
+
+  room.on(LK.RoomEvent.LocalTrackUnpublished, (publication) => {
+    detachTrack(publication);
+  });
+
+  room.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
+    const active = new Set(speakers.map(s => s.identity));
+    for (const [id, tile] of tiles) {
+      tile.classList.toggle('speaking', active.has(id));
+    }
+  });
+
+  // --- Controls ---
+  function updateButtons() {
+    const lp = room.localParticipant;
+    btnMic.classList.toggle('active', !lp.isMicrophoneEnabled);
+    btnMic.textContent = lp.isMicrophoneEnabled ? 'MIC' : 'MUTE';
+    btnCam.classList.toggle('active', !lp.isCameraEnabled);
+    btnCam.textContent = lp.isCameraEnabled ? 'CAM' : 'OFF';
+  }
+
+  btnMic.onclick = async () => {
+    const lp = room.localParticipant;
+    await lp.setMicrophoneEnabled(!lp.isMicrophoneEnabled);
+    updateButtons();
+  };
+  btnCam.onclick = async () => {
+    const lp = room.localParticipant;
+    await lp.setCameraEnabled(!lp.isCameraEnabled);
+    updateButtons();
+  };
+  btnLeave.onclick = async () => {
+    await room.disconnect();
+    postHost('left', {});
+  };
+
+  // --- Connect ---
+  function base64ToBytes(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  (async () => {
+    try {
+      await room.connect(cfg.url, cfg.token);
+    } catch (e) {
+      console.error('Connection failed', e);
+      showError('Connection failed', e.message || String(e));
+    }
+  })();
+
+  // Expose for C# to call
+  window.redeLeave = () => btnLeave.click();
+  window.redeToggleMute = () => btnMic.click();
+})();
+</script>
+</body>
+</html>

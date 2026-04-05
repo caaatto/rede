@@ -94,6 +94,15 @@ const MSG = {
   CALL_MUTE: 'call_mute',
   CALL_PARTICIPANTS: 'call_participants',
 
+  // Group Calls (LiveKit SFU, E2EE via SFrame)
+  // scope = { kind: 'place'|'group', id: string, channelId?: string }
+  GCALL_REQUEST_TOKEN: 'gcall_request_token',   // client → server: { scope }
+  GCALL_TOKEN: 'gcall_token',                    // server → client: { scope, url, token, room, expiresAt }
+  GCALL_TOKEN_FAIL: 'gcall_token_fail',          // server → client: { scope, reason }
+  GCALL_ANNOUNCE: 'gcall_announce',              // client → server → members: { scope, startedBy, startedAt }
+  GCALL_END: 'gcall_end',                        // client → server → members: { scope, endedBy }
+  GCALL_ACTIVE: 'gcall_active',                  // server → client: { scope, participants[] } (poll / on join)
+
   // Status / Presence
   STATUS_UPDATE: 'status_update',
   STATUS_SUBSCRIBE: 'status_subscribe',

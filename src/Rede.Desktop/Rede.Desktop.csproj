@@ -12,6 +12,13 @@
     <AvaloniaResource Include="Assets/icon.png" />
   </ItemGroup>
 
+  <!-- Bundled LiveKit WebView assets for group calls -->
+  <ItemGroup>
+    <None Include="Assets/gcall/index.html" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets/gcall/livekit-client.min.js" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets/gcall/livekit-client.e2ee.worker.js" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.12" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
@@ -24,6 +31,8 @@
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
+    <PackageReference Include="WebView.Avalonia" Version="11.0.0.1" />
+    <PackageReference Include="WebView.Avalonia.Desktop" Version="11.0.0.1" />
   </ItemGroup>
 
   <ItemGroup>
