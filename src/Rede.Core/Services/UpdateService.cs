@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.17.1-beta";
+    private const string CurrentVersion = "2.17.2-beta";
 
     /// <summary>
     /// Ed25519 public key (base64, 32 bytes) of the release signing key. When set,
@@ -293,12 +293,14 @@ public class UpdateService
                 onStatus?.Invoke("Update failed: SHA256 hash mismatch! Download may be compromised.");
                 return false;
             }
-            // hashVerified == null means no checksum file available — proceed with warning
-            // (only acceptable when sigResult was not already null; if neither is
-            // available the release is effectively unverified — warn loudly).
+            // hashVerified == null means no checksum file available. If signing is also
+            // not configured, the release is effectively unverified — refuse to install
+            // rather than silently trust the GitHub transport (TOFU cert pinning is the
+            // only remaining barrier and it's not enough for binary drops).
             if (sigResult is null && hashVerified is null)
             {
-                onStatus?.Invoke("Warning: release is unsigned and has no checksums file — installing anyway.");
+                onStatus?.Invoke("Update failed: release is unsigned and has no SHA256SUMS asset. Refusing to install.");
+                return false;
             }
 
             onStatus?.Invoke("Installing...");
