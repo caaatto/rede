@@ -206,16 +206,26 @@
 [x] L2: Silent Exception-Swallowing in Avatar/Icon-Loading — `System.Diagnostics.Debug.WriteLine()` in catch-Blöcken von `LoadAvatar()` und `LoadIcon()` (keine externe Dependency).
 [x] L3: Fire-and-Forget Saves — Gelöst durch debounced Saves mit Error-Event + FlushAsync bei App-Exit. OnSaveError surfaced Fehler im UI.
 
+## Security Audit (2026-04-05, Runde 8) — Gefixte Findings
+
+### High
+[x] H1: NonceTracker in-memory only — Replay-Fenster nach Neustart geschlossen. `NonceTracker.ImportSnapshot()`/`ExportSnapshot()` + neues `Profile.SeenNonces` Feld. `MainWindow.PropagateProfile()` lädt Snapshot beim Login in alle drei Tracker (chat/group/place). `ExportNoncesToProfile()` merged vor jedem `FlushAsync` (Close, Ctrl+Q). 10k Hard-Cap, stale-Eviction (>1h) bei Import und Export.
+[x] H2: ProfileEncryption HMAC optional — Leerer/fehlender `envelope.Hmac` ist jetzt hartes Decrypt-Fail (`return null`). Blockt Downgrade-Angriffe auf unauthenticated Legacy-Format. Legacy-HMAC-Salt-Derivation bleibt als einziger Extra-Versuch bei gesetztem HMAC.
+[x] H3: Auto-Update Binaries ohne echte Signatur — Ed25519 Detached-Signature-Verifikation via `Sodium.PublicKeyAuth.VerifyDetached` in `UpdateService.VerifyReleaseSignatureAsync()`. `<AssetName>.sig` Asset wird aus GitHub-Release gezogen. `ReleaseSigningPublicKeyB64` Konstante (aktuell leer = Skip mit SHA256-Fallback). Bei gesetztem Public Key ist `.sig` Pflicht, fehlend/ungültig = harter Abort ohne Fallback. Infra komplett, Release-Manager muss nur Keypair generieren und Public Key eintragen.
+
+### Medium
+[x] M1: Event-Handler-Akkumulation bei wiederholtem Login — `_store.OnSaveError` war der echte Leak (doppelte WARNING-Toasts nach 2. Login). Fix: `_saveErrorHandler` als Feld, un-/resubscribe in `InitServices`. Zusätzlich `IDisposable` auf `AuthService`, `ChatService`, `ContactService`, `GroupService`, `PlaceService`, `DeviceService` (CallService hatte es schon). `InitServices` ruft `Dispose()` auf allen 7 Services vor Neuanlegen — deterministisches Lifecycle statt GC-Warten.
+
 ## Bekannte Einschränkungen (by design / .NET limitation)
-- Key material wird als string (base64) gespeichert - .NET strings sind immutable, können nicht gezeroed werden. Erfordert Refactoring zu byte[] (architekturell).
-- Skipped Message Keys (bis zu 1000) als base64 Strings im Heap - nicht zeroed bei Eviction (gleiche .NET string Limitation).
-- NonceTracker ist in-memory - nach Neustart können Nachrichten aus der letzten Stunde replayed werden.
-- SecureOverwrite ist auf SSDs mit Wear-Leveling nicht effektiv - Full-Disk-Encryption empfohlen.
-- Auto-Update-Binaries sind nicht kryptographisch signiert - SHA256-Hash-Verifikation als Mitigation, echte Signierung (minisign/GPG) steht aus.
-- Sender Key Signatur bindet nicht an Group ID - Cross-Group-Replay theoretisch möglich. Fix erfordert Protokolländerung (Wire-Compat-Break).
-- ProfileEncryption HMAC ist optional für Legacy-Profile - nach Migrationszeitraum sollte HMAC required werden.
-- Passphrase wird als string an 5+ Service-Objekte propagiert - .NET SecureString ist deprecated, byte[] erfordert Refactoring.
-- Event-Handler-Akkumulation in InitServices bei wiederholtem Login - Services sollten IDisposable implementieren.
+- ~~Key material wird als string (base64) gespeichert~~ — GEFIXT: Alle Secret/Public Keys, Chain Keys, Group/Metadata Keys, Ratchet-State-Felder (RK/CKs/CKr/DHr), Sender-Key ChainKeys und Device Keys sind jetzt `byte[]` im Speicher. Wire-Format (JSON auf Disk, Protokoll) bleibt base64 via `Base64BytesJsonConverter` für JS-v1-Kompat. `Profile.ZeroSecrets()` zeroot SecretKey, SigningSecretKey, SignedPreKey, OneTimePreKeys, PreviousSignedPreKeys, Group.Key, Place.MetadataKey via `CryptographicOperations.ZeroMemory` — aufgerufen auf beiden Close-Pfaden (Window Close, Ctrl+Q) nach `FlushAsync`.
+- ~~Skipped Message Keys (bis zu 1000) als base64 Strings im Heap~~ — GEFIXT im gleichen Refactor: `DoubleRatchet.RatchetState.MKSKIPPED` ist jetzt `Dictionary<string, byte[]>` mit Custom-Converter, Keys sind auf dem Heap zeroable.
+- ~~NonceTracker ist in-memory~~ — GEFIXT in Runde 8 (H1): Persistiert als `Profile.SeenNonces`, beim Login in alle Tracker importiert, bei Flush exportiert. Replay-Fenster überlebt Neustarts.
+- SecureOverwrite ist auf SSDs mit Wear-Leveling nicht effektiv - Full-Disk-Encryption empfohlen (User-Guidance / Release-Notes, kein Code-Fix möglich).
+- Auto-Update-Binaries: Ed25519-Verifikations-Infrastruktur in Runde 8 (H3) hinzugefügt. Noch nicht aktiv, da `ReleaseSigningPublicKeyB64` Konstante leer ist — Release-Manager muss Keypair generieren, Public Key eintragen und `.sig` Asset pro Release bauen. Bis dahin greift SHA256-Checksums-Mitigation.
+- Sender Key Signatur bindet nicht an Group ID - Cross-Group-Replay theoretisch möglich. Fix erfordert Protokolländerung über `Rede.Core/Crypto/SenderKeys.cs` + `rede-client/client/crypto.js` (v1) + `shared/protocol.js` (beide Copies) + `server/index.js` Sender-Key-Verify. Wire-Compat-Break, braucht koordinierten Roll-out.
+- ~~ProfileEncryption HMAC ist optional für Legacy-Profile~~ — GEFIXT in Runde 8 (H2): Leerer HMAC = hartes Decrypt-Fail.
+- Passphrase wird als string an 5+ Service-Objekte propagiert - .NET SecureString ist deprecated, byte[] erfordert Refactoring durch AuthService, ChatService, GroupService, PlaceService, DeviceService, ContactService, ProfileStore, ProfileEncryption.Encrypt/Decrypt.
+- ~~Event-Handler-Akkumulation in InitServices bei wiederholtem Login~~ — GEFIXT in Runde 8 (M1): `_saveErrorHandler` als Feld mit un-/resubscribe + `IDisposable` auf allen Services.
 - ~~Double scrypt bei jedem Profile-Save~~ — GEFIXT in Runde 6 (L7): Single 64-Byte Derivation mit Legacy-Fallback.
 - Profile wird bei jeder einzelnen Nachricht komplett neu verschlüsselt und geschrieben - Chat-History sollte separat gespeichert werden.
 - ~~Fire-and-forget Task.Run Saves ohne Fehlerbehandlung~~ — GEFIXT in Runde 7: Debounced Saves mit OnSaveError Event + FlushAsync bei App-Exit.

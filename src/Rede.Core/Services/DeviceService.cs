@@ -12,10 +12,12 @@ namespace Rede.Core.Services;
 /// Device management: link creation, device added notifications.
 /// Mirrors: DEVICE_LINK_CREATE, DEVICE_ADDED handlers in index.js
 /// </summary>
-public class DeviceService
+public class DeviceService : IDisposable
 {
     private readonly RedeConnection _conn;
     private readonly ProfileStore _store;
+
+    public void Dispose() { GC.SuppressFinalize(this); }
 
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
@@ -71,11 +73,12 @@ public class DeviceService
         if (deviceId is null || publicKey is null || signingKey is null) return;
 
         // Validate key format (32-byte base64)
+        byte[] pkBytes, skBytes;
         try
         {
-            var pk = Convert.FromBase64String(publicKey);
-            var sk = Convert.FromBase64String(signingKey);
-            if (pk.Length != 32 || sk.Length != 32)
+            pkBytes = Convert.FromBase64String(publicKey);
+            skBytes = Convert.FromBase64String(signingKey);
+            if (pkBytes.Length != 32 || skBytes.Length != 32)
             {
                 OnSystemMessage?.Invoke("[SECURITY] Invalid device keys in DEVICE_ADDED — ignored.");
                 return;
@@ -88,11 +91,11 @@ public class DeviceService
         }
 
         Profile.OwnDevices ??= new Dictionary<string, DeviceKeys>();
-        Profile.OwnDevices[deviceId] = new DeviceKeys { PublicKey = publicKey, SigningKey = signingKey };
+        Profile.OwnDevices[deviceId] = new DeviceKeys { PublicKey = pkBytes, SigningKey = skBytes };
         await _store.SaveProfileAsync(Profile, Passphrase);
 
         // H10: Show device fingerprint for out-of-band verification
-        var fingerprintBytes = SHA256.HashData(Convert.FromBase64String(signingKey));
+        var fingerprintBytes = SHA256.HashData(skBytes);
         var fingerprint = Convert.ToHexString(fingerprintBytes[..8]).ToLowerInvariant();
         var formatted = string.Join(":", Enumerable.Range(0, fingerprint.Length / 2)
             .Select(i => fingerprint.Substring(i * 2, 2)));

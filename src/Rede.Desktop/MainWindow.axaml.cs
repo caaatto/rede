@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
+using Rede.Core.Crypto;
 using Rede.Core.Networking;
 using Rede.Core.Services;
 using Rede.Core.Storage;
@@ -26,6 +27,11 @@ public partial class MainWindow : Window
     private GroupService? _groups;
     private PlaceService? _places;
     private DeviceService? _devices;
+
+    // Persistent handler reference so InitServices can unsubscribe before re-binding.
+    // Without this, every re-login would stack another handler on the long-lived
+    // ProfileStore and duplicate save-error toasts.
+    private Action<string>? _saveErrorHandler;
     private CallService? _call;
     private GroupCallService? _groupCall;
     private Views.GroupCallWindow? _groupCallWindow;
@@ -46,24 +52,69 @@ public partial class MainWindow : Window
         {
             ShowLogin();
             CheckForUpdatesAsync();
+
+            // --minimized (e.g. from OS autostart): hide to tray after the login view
+            // is fully initialized so the user can surface it via the tray icon.
+            if (Program.StartMinimized)
+            {
+                Dispatcher.UIThread.Post(() => Hide(), Avalonia.Threading.DispatcherPriority.Background);
+            }
         };
         Closing += OnWindowClosing;
     }
 
     private bool _flushingOnClose;
+    private bool _forceQuit;
+
+    /// <summary>
+    /// Triggers a real application shutdown (bypassing the minimize-to-tray interception).
+    /// Called by the tray "Quit" menu item.
+    /// </summary>
+    public void ForceQuit()
+    {
+        _forceQuit = true;
+        if (!IsVisible) Show(); // surface the window so the closing flush path runs normally
+        Close();
+    }
+
     private async void OnWindowClosing(object? sender, Avalonia.Controls.WindowClosingEventArgs e)
     {
+        // Minimize-to-tray: if logged in and the user enabled the preference, hide the
+        // window instead of tearing down the session. Bypass when _forceQuit is set
+        // (tray Quit menu, Ctrl+Q, /quit slash command).
+        if (!_forceQuit
+            && _auth?.Profile is { MinimizeToTray: true }
+            && _conn is not null)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+
         // Flush any pending debounced saves before window closes — otherwise
         // recent profile edits (accent color, avatar, status) can be lost if
         // the user closes within the 500ms debounce window.
         if (_flushingOnClose) return;
-        if (_auth?.Profile is null || _auth?.Passphrase is null) return;
+        if (_auth?.Profile is null || _auth?.Passphrase is null)
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+                desktop.Shutdown();
+            return;
+        }
         e.Cancel = true;
         _flushingOnClose = true;
-        try { await _store.FlushAsync(_auth.Profile, _auth.Passphrase); }
+        try
+        {
+            ExportNoncesToProfile();
+            await _store.FlushAsync(_auth.Profile, _auth.Passphrase);
+            _auth.Profile?.ZeroSecrets();
+        }
         catch { }
         _conn?.Dispose();
-        Close();
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop2)
+            desktop2.Shutdown();
+        else
+            Close();
     }
 
     private async void CheckForUpdatesAsync()
@@ -556,7 +607,20 @@ public partial class MainWindow : Window
             }
         }
 
+        // Dispose previous service cluster before replacing references. On a
+        // second login/reconnect this prevents orphaned service instances and
+        // drops their event subscriptions deterministically instead of leaving
+        // cleanup to GC. The RedeConnection owns the transport-layer handler
+        // delegates, so disposing it drops strong references back to the services.
+        _auth?.Dispose();
+        _chat?.Dispose();
+        _contacts?.Dispose();
+        _groups?.Dispose();
+        _places?.Dispose();
+        _devices?.Dispose();
+        _call?.Dispose();
         _conn?.Dispose();
+
         _conn = new RedeConnection(serverUrl, proxy);
         _auth = new AuthService(_conn, _store);
         _chat = new ChatService(_conn, _store);
@@ -598,11 +662,16 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage($"[Error] {err}");
         });
 
-        // Surface profile save errors to UI
-        _store.OnSaveError += err => Dispatcher.UIThread.Post(() =>
+        // Surface profile save errors to UI. ProfileStore is long-lived (single
+        // instance across login/logout cycles) so we must unsubscribe the previous
+        // handler before re-binding or handlers accumulate on every re-login.
+        if (_saveErrorHandler is not null)
+            _store.OnSaveError -= _saveErrorHandler;
+        _saveErrorHandler = err => Dispatcher.UIThread.Post(() =>
         {
             _mainVm.AddSystemMessage($"[WARNING] {err}");
         });
+        _store.OnSaveError += _saveErrorHandler;
 
         // Status / Presence handler — server broadcasts to all, client filters locally
         _conn.On(Rede.Core.Protocol.Msg.StatusChange, msg =>
@@ -724,7 +793,20 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (!Rede.Core.Crypto.CryptoService.VerifyGroupKey(groupId, name, key, sig, sender.SigningKey))
+            byte[] keyBytes, sigBytes;
+            try
+            {
+                keyBytes = Convert.FromBase64String(key);
+                sigBytes = Convert.FromBase64String(sig);
+            }
+            catch
+            {
+                Dispatcher.UIThread.Post(() =>
+                    _mainVm.AddSystemMessage($"[SECURITY] Malformed group key payload from {senderId} — rejected."));
+                return;
+            }
+
+            if (!Rede.Core.Crypto.CryptoService.VerifyGroupKey(groupId, name, keyBytes, sigBytes, sender.SigningKey))
             {
                 Dispatcher.UIThread.Post(() =>
                     _mainVm.AddSystemMessage($"[SECURITY] Invalid group key signature from {senderId}! Key rejected."));
@@ -733,7 +815,7 @@ public partial class MainWindow : Window
 
             Task.Run(async () =>
             {
-                await _store.AddGroupAsync(profile, groupId, safeName, key, null, passphrase);
+                await _store.AddGroupAsync(profile, groupId, safeName, keyBytes, null, passphrase);
                 Dispatcher.UIThread.Post(() =>
                 {
                     _mainVm.AddSystemMessage($"Received group key for \"{safeName}\"");
@@ -826,6 +908,45 @@ public partial class MainWindow : Window
         });
     }
 
+    /// <summary>
+    /// Merge current in-memory NonceTracker state from chat/group/place services into
+    /// <c>Profile.SeenNonces</c> so replay-protection survives across restarts.
+    /// Called before every profile flush (Ctrl+Q, window close, explicit shutdown).
+    /// </summary>
+    private void ExportNoncesToProfile()
+    {
+        if (_auth?.Profile is null) return;
+        var merged = new Dictionary<string, long>();
+
+        void Merge(NonceTracker? t)
+        {
+            if (t is null) return;
+            foreach (var kv in t.ExportSnapshot())
+            {
+                // Keep the freshest timestamp per nonce so aging works correctly.
+                if (!merged.TryGetValue(kv.Key, out var existing) || kv.Value > existing)
+                    merged[kv.Key] = kv.Value;
+            }
+        }
+
+        Merge(_chat?.NonceTracker);
+        Merge(_groups?.NonceTracker);
+        Merge(_places?.NonceTracker);
+
+        // Hard cap: never persist more than 10k entries to keep the encrypted profile
+        // bounded. NonceTracker already enforces this in-memory, but a defensive check
+        // here guards against drift between merged-set size and per-tracker caps.
+        if (merged.Count > 10000)
+        {
+            merged = merged
+                .OrderByDescending(kv => kv.Value)
+                .Take(10000)
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+
+        _auth.Profile.SeenNonces = merged;
+    }
+
     private void PropagateProfile()
     {
         if (_auth?.Profile is null) return;
@@ -838,6 +959,19 @@ public partial class MainWindow : Window
         if (_places is not null) { _places.Profile = p; _places.Passphrase = pp; }
         if (_devices is not null) { _devices.Profile = p; _devices.Passphrase = pp; }
         if (_call is not null) { _call.Profile = p; _call.Passphrase = pp; }
+
+        // Replay-protection: rehydrate per-service NonceTrackers from the persisted
+        // profile snapshot. Without this, messages received within the 1h replay
+        // window before the last shutdown could be replayed after a restart.
+        // We import the same merged snapshot into all three trackers — a nonce seen
+        // in any context stays blocked across all contexts, which is safe (slightly
+        // over-strict) since nonces are random 24-byte values with negligible collision.
+        if (p.SeenNonces.Count > 0)
+        {
+            _chat?.NonceTracker.ImportSnapshot(p.SeenNonces);
+            _groups?.NonceTracker.ImportSnapshot(p.SeenNonces);
+            _places?.NonceTracker.ImportSnapshot(p.SeenNonces);
+        }
 
         // Cleanup expired TTL messages on login
         if (pp is not null)
@@ -1613,7 +1747,7 @@ public partial class MainWindow : Window
             DisplayName = p.DisplayName,
             DeviceId = p.DeviceId,
             Fingerprint = Rede.Core.Crypto.CryptoService.Fingerprint(p.PublicKey),
-            PublicKey = p.PublicKey,
+            PublicKey = Convert.ToBase64String(p.PublicKey),
             CallTransport = _call?.LocalMode.ToString() ?? _conn.Transport,
             AccentColor = p.AccentColor ?? "#8b5cf6",
             AvatarInitial = string.IsNullOrEmpty(p.DisplayName) ? "?" : p.DisplayName[..1].ToUpperInvariant(),
@@ -1654,6 +1788,50 @@ public partial class MainWindow : Window
                 _notifications.ShowContent = vm.NotificationShowContent;
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
             }
+        };
+
+        // System integration (tray + autostart)
+        vm.IsAutostartSupported = Rede.Core.Services.AutostartService.IsSupported;
+        vm.MinimizeToTray = _auth.Profile.MinimizeToTray;
+        // Reconcile stored preference with actual OS state — user may have removed the
+        // autostart entry outside of Rede.
+        vm.AutostartEnabled = vm.IsAutostartSupported && Rede.Core.Services.AutostartService.IsEnabled();
+        vm.StartMinimized = _auth.Profile.StartMinimized;
+        _auth.Profile.Autostart = vm.AutostartEnabled;
+
+        vm.OnSystemSettingsChanged += () =>
+        {
+            if (_auth?.Profile is null || _auth.Passphrase is null) return;
+
+            _auth.Profile.MinimizeToTray = vm.MinimizeToTray;
+            _auth.Profile.StartMinimized = vm.StartMinimized;
+
+            // Apply autostart state change to the OS.
+            if (vm.AutostartEnabled != _auth.Profile.Autostart ||
+                (vm.AutostartEnabled && Rede.Core.Services.AutostartService.IsEnabled() == false))
+            {
+                bool ok;
+                if (vm.AutostartEnabled)
+                    ok = Rede.Core.Services.AutostartService.Enable(vm.StartMinimized);
+                else
+                    ok = Rede.Core.Services.AutostartService.Disable();
+
+                if (!ok)
+                {
+                    _mainVm.AddSystemMessage("Failed to update OS autostart entry.");
+                    // Revert VM to actual OS state
+                    vm.AutostartEnabled = Rede.Core.Services.AutostartService.IsEnabled();
+                }
+                _auth.Profile.Autostart = vm.AutostartEnabled;
+            }
+            else if (vm.AutostartEnabled)
+            {
+                // Autostart unchanged but StartMinimized may have flipped — rewrite entry
+                // so the launch args reflect the new preference.
+                Rede.Core.Services.AutostartService.Enable(vm.StartMinimized);
+            }
+
+            _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
         };
 
         // Theme variant — live-apply is done in ViewModel; persist here
@@ -1828,11 +2006,15 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Q && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            // Flush any pending debounced saves before exit
+            // Ctrl+Q = real quit, bypass minimize-to-tray.
             if (_auth?.Profile is not null && _auth?.Passphrase is not null)
+            {
+                ExportNoncesToProfile();
                 await _store.FlushAsync(_auth.Profile, _auth.Passphrase);
+                _auth.Profile.ZeroSecrets();
+            }
             _conn?.Dispose();
-            Close();
+            ForceQuit();
         }
     }
 
@@ -1895,7 +2077,14 @@ public partial class MainWindow : Window
         {
             if (!key.StartsWith(prefix)) continue;
             var deviceId = key[prefix.Length..];
-            contact.Devices[deviceId] = new DeviceKeys { PublicKey = publicKey, SigningKey = signingKey };
+            byte[] pkBytes, skBytes;
+            try
+            {
+                pkBytes = Convert.FromBase64String(publicKey);
+                skBytes = Convert.FromBase64String(signingKey);
+            }
+            catch { continue; }
+            contact.Devices[deviceId] = new DeviceKeys { PublicKey = pkBytes, SigningKey = skBytes };
             accepted.Add(key);
             _mainVm.AddSystemMessage($"Device {deviceId} for {userId} accepted. Verify fingerprint out-of-band!");
         }

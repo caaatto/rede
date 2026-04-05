@@ -26,6 +26,7 @@ public partial class SettingsViewModel : ViewModelBase
     public bool IsNotificationsCategory => SelectedCategoryIndex == 3;
     public bool IsVoiceCategory => SelectedCategoryIndex == 4;
     public bool IsSecurityCategory => SelectedCategoryIndex == 5;
+    public bool IsSystemCategory => SelectedCategoryIndex == 6;
 
     partial void OnSelectedCategoryIndexChanged(int value)
     {
@@ -35,7 +36,21 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsNotificationsCategory));
         OnPropertyChanged(nameof(IsVoiceCategory));
         OnPropertyChanged(nameof(IsSecurityCategory));
+        OnPropertyChanged(nameof(IsSystemCategory));
     }
+
+    // System integration (minimize-to-tray, autostart)
+    [ObservableProperty] private bool _minimizeToTray;
+    [ObservableProperty] private bool _autostartEnabled;
+    [ObservableProperty] private bool _startMinimized;
+
+    public bool IsAutostartSupported { get; set; } = true;
+
+    partial void OnMinimizeToTrayChanged(bool value) => OnSystemSettingsChanged?.Invoke();
+    partial void OnAutostartEnabledChanged(bool value) => OnSystemSettingsChanged?.Invoke();
+    partial void OnStartMinimizedChanged(bool value) => OnSystemSettingsChanged?.Invoke();
+
+    public event Action? OnSystemSettingsChanged;
 
     // Appearance: theme variant (live-applies on change, saved via OnThemeChanged)
     [ObservableProperty] private string _themeVariant = "dark";

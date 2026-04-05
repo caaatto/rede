@@ -10,10 +10,12 @@ namespace Rede.Core.Services;
 /// Contact management: add, lookup, confirm key change, fingerprint.
 /// Mirrors: USER_LOOKUP handler, addContact, confirmContactKeyChange in index.js
 /// </summary>
-public class ContactService
+public class ContactService : IDisposable
 {
     private readonly RedeConnection _conn;
     private readonly ProfileStore _store;
+
+    public void Dispose() { GC.SuppressFinalize(this); }
 
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
@@ -45,7 +47,7 @@ public class ContactService
     }
 
     // H3: Store pending key changes so ConfirmKeyChange can apply them
-    private readonly Dictionary<string, (string PublicKey, string? SigningKey, string? DisplayName, Dictionary<string, DeviceKeys>? Devices)> _pendingKeyChanges = new();
+    private readonly Dictionary<string, (byte[] PublicKey, byte[]? SigningKey, string? DisplayName, Dictionary<string, DeviceKeys>? Devices)> _pendingKeyChanges = new();
 
     /// <summary>Confirm key change for a contact (after security warning).</summary>
     public async Task ConfirmKeyChange(string userId)
@@ -117,6 +119,20 @@ public class ContactService
             return;
         }
 
+        // Decode keys at the wire boundary
+        byte[] publicKeyBytes;
+        byte[]? signingKeyBytes = null;
+        try
+        {
+            publicKeyBytes = Convert.FromBase64String(publicKey);
+            if (signingKey is not null) signingKeyBytes = Convert.FromBase64String(signingKey);
+        }
+        catch
+        {
+            OnSystemMessage?.Invoke($"Invalid key encoding from server for {userId}.");
+            return;
+        }
+
         // Parse devices if present — M1: validate each device key
         Dictionary<string, DeviceKeys>? devices = null;
         var devicesNode = msg["devices"];
@@ -129,29 +145,35 @@ public class ContactService
                 {
                     var devPk = dd["publicKey"]?.GetValue<string>() ?? "";
                     var devSk = dd["signingKey"]?.GetValue<string>();
-                    // Validate device key format (32-byte base64)
+                    byte[] devPkBytes;
+                    byte[]? devSkBytes = null;
                     try
                     {
-                        if (Convert.FromBase64String(devPk).Length != 32) continue;
-                        if (devSk is not null && Convert.FromBase64String(devSk).Length != 32) continue;
+                        devPkBytes = Convert.FromBase64String(devPk);
+                        if (devPkBytes.Length != 32) continue;
+                        if (devSk is not null)
+                        {
+                            devSkBytes = Convert.FromBase64String(devSk);
+                            if (devSkBytes.Length != 32) continue;
+                        }
                     }
                     catch { continue; }
-                    devices[devId] = new DeviceKeys { PublicKey = devPk, SigningKey = devSk };
+                    devices[devId] = new DeviceKeys { PublicKey = devPkBytes, SigningKey = devSkBytes };
                 }
             }
         }
 
-        var result = await _store.AddContactAsync(Profile, userId, publicKey, signingKey, displayName, Passphrase, devices);
+        var result = await _store.AddContactAsync(Profile, userId, publicKeyBytes, signingKeyBytes, displayName, Passphrase, devices);
 
         if (result.Warning)
         {
             // H3: Store pending key change for later confirmation
-            _pendingKeyChanges[userId] = (publicKey, signingKey, displayName, devices);
+            _pendingKeyChanges[userId] = (publicKeyBytes, signingKeyBytes, displayName, devices);
             OnKeyChangeWarning?.Invoke(userId, result.OldFingerprint!, result.NewFingerprint!);
         }
         else
         {
-            var fp = CryptoService.Fingerprint(publicKey);
+            var fp = CryptoService.Fingerprint(publicKeyBytes);
             OnContactAdded?.Invoke(userId, displayName ?? userId, fp);
             OnContactsChanged?.Invoke();
         }

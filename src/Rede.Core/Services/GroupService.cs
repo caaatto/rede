@@ -11,11 +11,16 @@ namespace Rede.Core.Services;
 /// Group management: create, invite, kick, rekey, group messaging.
 /// Mirrors: GROUP_CREATE, GROUP_INVITE, GROUP_KICK, GROUP_MESSAGE handlers in index.js
 /// </summary>
-public class GroupService
+public class GroupService : IDisposable
 {
     private readonly RedeConnection _conn;
     private readonly ProfileStore _store;
     private readonly NonceTracker _nonceTracker = new(); // H3: Replay protection for group messages
+
+    /// <summary>Replay-protection tracker — exposed for persistence across restarts.</summary>
+    public NonceTracker NonceTracker => _nonceTracker;
+
+    public void Dispose() { GC.SuppressFinalize(this); }
 
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
@@ -108,7 +113,7 @@ public class GroupService
             return;
         }
 
-        var newKey = CryptoService.GenerateGroupKey();
+        var newKey = CryptoService.GenerateSymmetricKey();
         group.Key = newKey;
         _store.SaveProfileDebounced(Profile, Passphrase);
 
@@ -156,9 +161,10 @@ public class GroupService
         {
             var parsed = JsonSerializer.Deserialize<JsonElement>(skStateJson.Value);
             var ownNode = parsed.GetProperty("own");
+            var ckB64 = ownNode.GetProperty("chainKey").GetString() ?? "";
             skState = new SenderKeys.SenderKeyState
             {
-                ChainKey = ownNode.GetProperty("chainKey").GetString() ?? "",
+                ChainKey = ckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(ckB64),
                 MessageNumber = ownNode.GetProperty("messageNumber").GetInt32(),
             };
         }
@@ -174,7 +180,7 @@ public class GroupService
         {
             ["own"] = new JsonObject
             {
-                ["chainKey"] = skState.ChainKey,
+                ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
                 ["messageNumber"] = skState.MessageNumber,
             }
         };
@@ -216,7 +222,7 @@ public class GroupService
         var name = ProtocolSerializer.GetString(msg, "name");
         if (groupId is null || name is null) return;
 
-        var key = CryptoService.GenerateGroupKey();
+        var key = CryptoService.GenerateSymmetricKey();
         await _store.AddGroupAsync(Profile, groupId, name, key, new List<string> { Profile.UserId }, Passphrase);
 
         OnSystemMessage?.Invoke($"Group '{name}' created ({groupId})");
@@ -234,7 +240,7 @@ public class GroupService
         if (name.Length > 64) name = name[..64];
         // H2: Never accept group key from server — always generate locally.
         // Real key comes via signed ratcheted DM from the group creator.
-        var key = CryptoService.GenerateGroupKey();
+        var key = CryptoService.GenerateSymmetricKey();
 
         if (groupId is null) return;
 
@@ -319,9 +325,10 @@ public class GroupService
                 if (parsed.TryGetProperty("members", out var members) &&
                     members.TryGetProperty(from, out var memberData))
                 {
+                    var mckB64 = memberData.GetProperty("chainKey").GetString() ?? "";
                     memberState = new SenderKeys.SenderKeyState
                     {
-                        ChainKey = memberData.GetProperty("chainKey").GetString() ?? "",
+                        ChainKey = mckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(mckB64),
                         MessageNumber = memberData.GetProperty("messageNumber").GetInt32(),
                     };
                 }
@@ -342,7 +349,7 @@ public class GroupService
                 var membersNode = parsed["members"] as JsonObject ?? new JsonObject();
                 membersNode[from] = new JsonObject
                 {
-                    ["chainKey"] = memberState.ChainKey,
+                    ["chainKey"] = Convert.ToBase64String(memberState.ChainKey),
                     ["messageNumber"] = memberState.MessageNumber,
                 };
                 parsed["members"] = membersNode;

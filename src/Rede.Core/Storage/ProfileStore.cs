@@ -333,8 +333,8 @@ public class ProfileStore
 
     public async Task<Profile> CreateProfileAsync(string internalId, string displayName, string passphrase)
     {
-        var (publicKey, secretKey) = CryptoService.GenerateKeyPair();
-        var (signingKey, signingSecretKey) = CryptoService.GenerateSigningKeyPair();
+        var encKP = CryptoService.GenerateKeyPair();
+        var sigKP = CryptoService.GenerateSigningKeyPair();
         var deviceId = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
 
         var profile = new Profile
@@ -342,10 +342,10 @@ public class ProfileStore
             UserId = internalId,
             DisplayName = displayName,
             DeviceId = deviceId,
-            PublicKey = publicKey,
-            SecretKey = secretKey,
-            SigningKey = signingKey,
-            SigningSecretKey = signingSecretKey,
+            PublicKey = encKP.PublicKey,
+            SecretKey = encKP.SecretKey,
+            SigningKey = sigKP.SigningKey,
+            SigningSecretKey = sigKP.SigningSecretKey,
             ProtocolVersion = 3,
         };
 
@@ -390,7 +390,7 @@ public class ProfileStore
         // Migrate contacts: add devices map if flat keys
         foreach (var (_, contact) in profile.Contacts)
         {
-            if (contact.Devices.Count == 0 && !string.IsNullOrEmpty(contact.PublicKey))
+            if (contact.Devices.Count == 0 && contact.PublicKey.Length > 0)
             {
                 contact.Devices["primary"] = new DeviceKeys
                 {
@@ -409,7 +409,7 @@ public class ProfileStore
     public record AddContactResult(bool Warning, string? OldFingerprint = null, string? NewFingerprint = null);
 
     public async Task<AddContactResult> AddContactAsync(
-        Profile profile, string internalId, string publicKey, string? signingKey,
+        Profile profile, string internalId, byte[] publicKey, byte[]? signingKey,
         string? displayName, string passphrase, Dictionary<string, DeviceKeys>? devices = null)
     {
         var deviceMap = devices ?? new Dictionary<string, DeviceKeys>
@@ -417,7 +417,8 @@ public class ProfileStore
             ["primary"] = new() { PublicKey = publicKey, SigningKey = signingKey }
         };
 
-        if (profile.Contacts.TryGetValue(internalId, out var existing) && existing.PublicKey != publicKey)
+        if (profile.Contacts.TryGetValue(internalId, out var existing) &&
+            !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(existing.PublicKey, publicKey))
         {
             return new AddContactResult(true,
                 CryptoService.Fingerprint(existing.PublicKey),
@@ -439,7 +440,7 @@ public class ProfileStore
     }
 
     public async Task ConfirmContactKeyChangeAsync(
-        Profile profile, string internalId, string publicKey, string? signingKey,
+        Profile profile, string internalId, byte[] publicKey, byte[]? signingKey,
         string? displayName, string passphrase, Dictionary<string, DeviceKeys>? devices = null)
     {
         var deviceMap = devices ?? new Dictionary<string, DeviceKeys>
@@ -469,7 +470,7 @@ public class ProfileStore
 
     // --- Group operations ---
 
-    public async Task AddGroupAsync(Profile profile, string groupId, string name, string groupKey, List<string>? members, string passphrase)
+    public async Task AddGroupAsync(Profile profile, string groupId, string name, byte[] groupKey, List<string>? members, string passphrase)
     {
         profile.Groups[groupId] = new Group
         {

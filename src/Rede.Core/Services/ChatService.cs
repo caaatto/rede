@@ -11,11 +11,27 @@ namespace Rede.Core.Services;
 /// Handles 1:1 messaging (send/receive with Double Ratchet) and sealed sender.
 /// Mirrors: sendRatcheted, receiveRatcheted, trySealedSend, MESSAGE handler in index.js
 /// </summary>
-public class ChatService
+public class ChatService : IDisposable
 {
     private readonly RedeConnection _conn;
     private readonly ProfileStore _store;
     private readonly NonceTracker _nonceTracker = new();
+
+    /// <summary>
+    /// Replay-protection tracker. Exposed so MainWindow can import/export the
+    /// persisted nonce snapshot across restarts.
+    /// </summary>
+    public NonceTracker NonceTracker => _nonceTracker;
+
+    public void Dispose()
+    {
+        // Services are re-created per login. The underlying RedeConnection owns the
+        // message-handler delegates and is disposed separately, which drops strong
+        // references back to this service. Dispose is provided so InitServices can
+        // signal end-of-life deterministically and so future refactors can attach
+        // per-service cleanup (CTS, timers, file handles) without API changes.
+        GC.SuppressFinalize(this);
+    }
 
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
@@ -204,13 +220,13 @@ public class ChatService
     {
         if (Profile?.DeliveryToken is null) return false;
 
-        string? recipPubKey = null;
+        byte[]? recipPubKey = null;
         if (devId is not null && contact.Devices.TryGetValue(devId, out var devKeys))
             recipPubKey = devKeys.PublicKey;
         else
             recipPubKey = contact.PublicKey;
 
-        if (recipPubKey is null) return false;
+        if (recipPubKey is null || recipPubKey.Length == 0) return false;
 
         var inner = new JsonObject
         {
@@ -351,24 +367,44 @@ public class ChatService
         if (Profile is null || Passphrase is null) return null;
 
         var x3dh = msg["x3dh"]!;
-        var identityKey = x3dh["identityKey"]?.GetValue<string>();
-        var ephemeralKey = x3dh["ephemeralKey"]?.GetValue<string>();
-        if (identityKey is null || ephemeralKey is null) return null;
+        var identityKeyB64 = x3dh["identityKey"]?.GetValue<string>();
+        var ephemeralKeyB64 = x3dh["ephemeralKey"]?.GetValue<string>();
+        if (identityKeyB64 is null || ephemeralKeyB64 is null) return null;
 
-        // Verify identity key
-        bool verified = contact.Devices.Values.Any(d => d.PublicKey == identityKey)
-                        || contact.PublicKey == identityKey;
+        byte[] identityKey, ephemeralKey;
+        try
+        {
+            identityKey = Convert.FromBase64String(identityKeyB64);
+            ephemeralKey = Convert.FromBase64String(ephemeralKeyB64);
+            if (identityKey.Length != 32 || ephemeralKey.Length != 32) return null;
+        }
+        catch { return null; }
+
+        // Verify identity key — constant-time compare against known devices
+        bool verified = contact.Devices.Values.Any(d =>
+                            d.PublicKey.Length == 32 &&
+                            System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(d.PublicKey, identityKey))
+                        || (contact.PublicKey.Length == 32 &&
+                            System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(contact.PublicKey, identityKey));
         if (!verified)
         {
             OnSystemMessage?.Invoke($"[SECURITY] X3DH identity key mismatch from {from}! Message rejected.");
             return null;
         }
 
-        var usedOtpkPub = x3dh["usedOTPKPub"]?.GetValue<string>();
-        string? otpkSecret = null;
+        var usedOtpkPubB64 = x3dh["usedOTPKPub"]?.GetValue<string>();
+        byte[]? usedOtpkPub = null;
+        if (usedOtpkPubB64 is not null)
+        {
+            try { usedOtpkPub = Convert.FromBase64String(usedOtpkPubB64); }
+            catch { usedOtpkPub = null; }
+        }
+        byte[]? otpkSecret = null;
         if (usedOtpkPub is not null)
         {
-            var idx = Profile.OneTimePreKeys.FindIndex(k => k.PublicKey == usedOtpkPub);
+            var idx = Profile.OneTimePreKeys.FindIndex(k =>
+                k.PublicKey.Length == usedOtpkPub.Length &&
+                System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(k.PublicKey, usedOtpkPub));
             if (idx >= 0)
             {
                 otpkSecret = Profile.OneTimePreKeys[idx].SecretKey;
@@ -391,7 +427,9 @@ public class ChatService
                 spkCandidates.Add(new KeyPairData { PublicKey = old.PublicKey, SecretKey = old.SecretKey });
         }
 
-        var otpkAttempts = usedOtpkPub is not null ? new[] { otpkSecret, null } : new string?[] { null };
+        var otpkAttempts = new List<byte[]?>();
+        if (usedOtpkPub is not null) otpkAttempts.Add(otpkSecret);
+        otpkAttempts.Add(null);
 
         foreach (var otpk in otpkAttempts)
         {
@@ -404,7 +442,7 @@ public class ChatService
 
                 var ratchetState = DoubleRatchet.InitReceiver(
                     x3dhResult.SharedSecret,
-                    new DoubleRatchet.KeyPairB64(spk.PublicKey, spk.SecretKey));
+                    new DoubleRatchet.KeyPairBytes(spk.PublicKey, spk.SecretKey));
 
                 var headerNode = msg["header"];
                 if (headerNode is null) continue;
@@ -497,34 +535,55 @@ public class ChatService
             return;
         }
 
-        // Parse per-device bundles or single legacy bundle
-        var deviceBundles = new List<(string? DevId, string IdentityKey, string? SigningKey, string SignedPreKey, string SignedPreKeySig, string? OneTimePreKey)>();
+        // Parse per-device bundles or single legacy bundle — decode keys to byte[] at wire boundary
+        var deviceBundles = new List<(string? DevId, byte[] IdentityKey, byte[]? SigningKey, byte[] SignedPreKey, byte[] SignedPreKeySig, byte[]? OneTimePreKey, string? OneTimePreKeyB64)>();
+
+        static bool TryDecode(string? b64, out byte[] bytes)
+        {
+            bytes = Array.Empty<byte>();
+            if (string.IsNullOrEmpty(b64)) return false;
+            try { bytes = Convert.FromBase64String(b64); return true; }
+            catch { return false; }
+        }
+
+        void AddBundle(string? dId, string? ikB64, string? skB64, string? spkB64, string? spkSigB64, string? otpkB64)
+        {
+            if (!TryDecode(ikB64, out var ik)) return;
+            if (!TryDecode(spkB64, out var spk)) return;
+            if (!TryDecode(spkSigB64, out var spkSig)) return;
+            byte[]? sk = null;
+            if (skB64 is not null && TryDecode(skB64, out var skBytes)) sk = skBytes;
+            byte[]? otpk = null;
+            if (otpkB64 is not null && TryDecode(otpkB64, out var otpkBytes)) otpk = otpkBytes;
+            deviceBundles.Add((dId, ik, sk, spk, spkSig, otpk, otpkB64));
+        }
+
         var devicesNode = msg["devices"];
         if (devicesNode is JsonArray devArr)
         {
             foreach (var d in devArr)
             {
                 if (d is not JsonObject dObj) continue;
-                deviceBundles.Add((
+                AddBundle(
                     dObj["deviceId"]?.GetValue<string>(),
-                    dObj["identityKey"]?.GetValue<string>() ?? "",
+                    dObj["identityKey"]?.GetValue<string>(),
                     dObj["signingKey"]?.GetValue<string>(),
-                    dObj["signedPreKey"]?.GetValue<string>() ?? "",
-                    dObj["signedPreKeySig"]?.GetValue<string>() ?? "",
+                    dObj["signedPreKey"]?.GetValue<string>(),
+                    dObj["signedPreKeySig"]?.GetValue<string>(),
                     dObj["oneTimePreKey"]?.GetValue<string>()
-                ));
+                );
             }
         }
         else
         {
-            deviceBundles.Add((
+            AddBundle(
                 null,
-                ProtocolSerializer.GetString(msg, "identityKey") ?? "",
+                ProtocolSerializer.GetString(msg, "identityKey"),
                 ProtocolSerializer.GetString(msg, "signingKey"),
-                ProtocolSerializer.GetString(msg, "signedPreKey") ?? "",
-                ProtocolSerializer.GetString(msg, "signedPreKeySig") ?? "",
+                ProtocolSerializer.GetString(msg, "signedPreKey"),
+                ProtocolSerializer.GetString(msg, "signedPreKeySig"),
                 ProtocolSerializer.GetString(msg, "oneTimePreKey")
-            ));
+            );
         }
 
         int successCount = 0;
@@ -539,18 +598,25 @@ public class ChatService
                 continue;
             }
 
-            // Verify identity key matches known contact
+            // Verify identity key matches known contact (constant-time compare)
             bool keyValid = false;
-            if (contact.Devices.TryGetValue(devId ?? "primary", out var dev) && dev.PublicKey == bundle.IdentityKey)
+            if (contact.Devices.TryGetValue(devId ?? "primary", out var dev)
+                && dev.PublicKey.Length == bundle.IdentityKey.Length
+                && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(dev.PublicKey, bundle.IdentityKey))
                 keyValid = true;
-            if (!keyValid && contact.PublicKey == bundle.IdentityKey)
+            if (!keyValid
+                && contact.PublicKey.Length == bundle.IdentityKey.Length
+                && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(contact.PublicKey, bundle.IdentityKey))
                 keyValid = true;
 
             // New device — do NOT auto-accept (server could inject phantom devices).
             // Notify user and require explicit confirmation before trusting.
             if (!keyValid && devId is not null && bundle.SigningKey is not null)
             {
-                OnNewDeviceDetected?.Invoke(targetUserId, devId, bundle.IdentityKey, bundle.SigningKey);
+                OnNewDeviceDetected?.Invoke(
+                    targetUserId, devId,
+                    Convert.ToBase64String(bundle.IdentityKey),
+                    Convert.ToBase64String(bundle.SigningKey));
                 OnSystemMessage?.Invoke($"[SECURITY] Unknown device {devId} for {targetUserId}. Use /confirm {targetUserId} to accept new devices.");
             }
 
@@ -560,9 +626,9 @@ public class ChatService
                 continue;
             }
 
-            var otpk = bundle.OneTimePreKey is not null ? new X3dh.OneTimePreKeyPublic(0, bundle.OneTimePreKey) : null;
+            var otpk = bundle.OneTimePreKey is not null ? new X3dh.OneTimePreKeyBytes(0, bundle.OneTimePreKey) : null;
             var x3dhResult = X3dh.Initiate(Profile.SecretKey, new X3dh.RecipientBundle(
-                bundle.IdentityKey, bundle.SignedPreKey, bundle.SignedPreKeySig, bundle.SigningKey ?? "", otpk));
+                bundle.IdentityKey, bundle.SignedPreKey, bundle.SignedPreKeySig, bundle.SigningKey ?? Array.Empty<byte>(), otpk));
 
             if (x3dhResult is null)
             {
@@ -589,9 +655,9 @@ public class ChatService
                 }),
                 ("x3dh", new JsonObject
                 {
-                    ["identityKey"] = Profile.PublicKey,
-                    ["ephemeralKey"] = x3dhResult.EphemeralPublic,
-                    ["usedOTPKPub"] = bundle.OneTimePreKey,
+                    ["identityKey"] = Convert.ToBase64String(Profile.PublicKey),
+                    ["ephemeralKey"] = Convert.ToBase64String(x3dhResult.EphemeralPublic),
+                    ["usedOTPKPub"] = bundle.OneTimePreKeyB64,
                 })
             );
             if (pending.Ttl > 0) payload["ttl"] = pending.Ttl;

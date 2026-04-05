@@ -11,7 +11,21 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.15.0-beta";
+    private const string CurrentVersion = "2.16.0-beta";
+
+    /// <summary>
+    /// Ed25519 public key (base64, 32 bytes) of the release signing key. When set,
+    /// downloaded update binaries MUST be accompanied by a valid detached signature
+    /// (asset: "&lt;binary&gt;.sig", base64-encoded Ed25519 signature of the raw binary).
+    /// When empty (default), signature verification is skipped and the update flow
+    /// falls back to the SHA256 checksums mitigation.
+    ///
+    /// Release workflow to enable: generate an Ed25519 keypair out-of-band
+    /// (e.g. with libsodium), embed the 32-byte public key here as base64, keep the
+    /// private key offline, and sign each release binary so that
+    /// "sodium_sign_detached(sig, binary_bytes, sk)" produces the .sig asset.
+    /// </summary>
+    private const string ReleaseSigningPublicKeyB64 = "";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;
@@ -252,12 +266,25 @@ public class UpdateService
 
             var bytes = ms.ToArray();
 
-            // C2: Validate downloaded binary — magic bytes + SHA256 hash if available
+            // C2: Validate downloaded binary — magic bytes + signature + SHA256 hash.
             if (!IsValidExecutable(bytes))
             {
                 onStatus?.Invoke("Update failed: invalid binary.");
                 return false;
             }
+
+            // Ed25519 signature verification (preferred over SHA256 alone). When the
+            // release signing public key is configured, a valid .sig asset is REQUIRED.
+            // No fallback — an attacker who controls the GitHub Release cannot swap
+            // the binary without also forging an Ed25519 signature.
+            var sigResult = await VerifyReleaseSignatureAsync(release, bytes);
+            if (sigResult == false)
+            {
+                onStatus?.Invoke("Update failed: signature invalid or missing.");
+                return false;
+            }
+            // sigResult == null means signing is not configured for this build — fall
+            // through to SHA256 as a weaker mitigation.
 
             // C2: Try to verify SHA256 hash from release checksums file
             var hashVerified = await VerifyReleaseHashAsync(release, bytes);
@@ -267,6 +294,12 @@ public class UpdateService
                 return false;
             }
             // hashVerified == null means no checksum file available — proceed with warning
+            // (only acceptable when sigResult was not already null; if neither is
+            // available the release is effectively unverified — warn loudly).
+            if (sigResult is null && hashVerified is null)
+            {
+                onStatus?.Invoke("Warning: release is unsigned and has no checksums file — installing anyway.");
+            }
 
             onStatus?.Invoke("Installing...");
 
@@ -300,6 +333,63 @@ public class UpdateService
         {
             onStatus?.Invoke($"Update failed: {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Verify the Ed25519 detached signature of the downloaded binary against the
+    /// embedded release signing public key.
+    /// Returns true if verified, false if invalid/missing (hard fail),
+    /// null if release signing is not configured for this build (skip).
+    /// </summary>
+    private static async Task<bool?> VerifyReleaseSignatureAsync(ReleaseInfo release, byte[] bytes)
+    {
+        if (string.IsNullOrEmpty(ReleaseSigningPublicKeyB64)) return null;
+
+        byte[] pubKey;
+        try
+        {
+            pubKey = Convert.FromBase64String(ReleaseSigningPublicKeyB64);
+            if (pubKey.Length != 32) return false;
+        }
+        catch { return false; }
+
+        try
+        {
+            using var http = new HttpClient();
+            http.DefaultRequestHeaders.Add("User-Agent", "Rede-Desktop");
+            http.Timeout = TimeSpan.FromSeconds(10);
+
+            var url = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/{release.Tag}";
+            var json = await http.GetStringAsync(url);
+            var releaseDoc = JsonDocument.Parse(json);
+
+            var sigAssetName = release.AssetName + ".sig";
+            string? sigUrl = null;
+            foreach (var asset in releaseDoc.RootElement.GetProperty("assets").EnumerateArray())
+            {
+                var name = asset.GetProperty("name").GetString();
+                if (name == sigAssetName)
+                {
+                    sigUrl = asset.GetProperty("browser_download_url").GetString();
+                    break;
+                }
+            }
+
+            if (sigUrl is null) return false; // signing configured but sig asset missing
+
+            var sigB64 = (await http.GetStringAsync(sigUrl)).Trim();
+            var sig = Convert.FromBase64String(sigB64);
+            if (sig.Length != 64) return false;
+
+            // Sodium.PublicKeyAuth.VerifyDetached(signature, message, publicKey)
+            // returns true iff the signature is a valid Ed25519 signature over the
+            // message bytes under the given public key.
+            return Sodium.PublicKeyAuth.VerifyDetached(sig, bytes, pubKey);
+        }
+        catch
+        {
+            return false; // any error during fetch/parse/verify → reject
         }
     }
 

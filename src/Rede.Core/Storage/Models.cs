@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Rede.Core.Crypto;
 
 namespace Rede.Core.Storage;
 
@@ -19,16 +20,20 @@ public class Profile
     public string DeviceId { get; set; } = "";
 
     [JsonPropertyName("publicKey")]
-    public string PublicKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("secretKey")]
-    public string SecretKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] SecretKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("signingKey")]
-    public string SigningKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] SigningKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("signingSecretKey")]
-    public string SigningSecretKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] SigningSecretKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("contacts")]
     public Dictionary<string, Contact> Contacts { get; set; } = new();
@@ -47,7 +52,8 @@ public class Profile
     public KeyPairData? SignedPreKey { get; set; }
 
     [JsonPropertyName("signedPreKeySig")]
-    public string? SignedPreKeySig { get; set; }
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[]? SignedPreKeySig { get; set; }
 
     [JsonPropertyName("oneTimePreKeys")]
     public List<OneTimePreKey> OneTimePreKeys { get; set; } = new();
@@ -62,7 +68,8 @@ public class Profile
     public Dictionary<string, System.Text.Json.JsonElement> SenderKeys { get; set; } = new();
 
     [JsonPropertyName("serverSigningKey")]
-    public string? ServerSigningKey { get; set; }
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[]? ServerSigningKey { get; set; }
 
     [JsonPropertyName("previousSignedPreKeys")]
     public List<ArchivedSignedPreKey>? PreviousSignedPreKeys { get; set; }
@@ -125,21 +132,61 @@ public class Profile
     [JsonPropertyName("notificationShowContent")]
     public bool NotificationShowContent { get; set; } // false = privacy mode (default)
 
+    // System integration
+    [JsonPropertyName("minimizeToTray")]
+    public bool MinimizeToTray { get; set; } // true = pressing X hides window to tray instead of quitting
+
+    [JsonPropertyName("autostart")]
+    public bool Autostart { get; set; } // true = launch Rede on OS login
+
+    [JsonPropertyName("startMinimized")]
+    public bool StartMinimized { get; set; } // true = when launched (or autostarted) start hidden in tray
+
+    // Replay-protection: persisted NonceTracker snapshot (merged from chat/group/place trackers).
+    // Loaded into all nonce trackers at login; re-exported and saved on flush. Closes the
+    // restart-replay window that existed when nonces lived only in memory.
+    [JsonPropertyName("seenNonces")]
+    public Dictionary<string, long> SeenNonces { get; set; } = new();
+
     // Transient (not persisted in older profiles)
     [JsonPropertyName("_deliveryToken")]
     public string? DeliveryToken { get; set; }
 
     [JsonPropertyName("_pendingKeyChange")]
     public System.Text.Json.JsonElement? PendingKeyChange { get; set; }
+
+    /// <summary>
+    /// Zero all in-memory secret key material. Public keys and non-secret
+    /// metadata are left intact — this is meant to be called on logout/close
+    /// so long-lived process memory doesn't retain recoverable secrets.
+    /// </summary>
+    public void ZeroSecrets()
+    {
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(SecretKey);
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(SigningSecretKey);
+        if (SignedPreKey is not null)
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(SignedPreKey.SecretKey);
+        foreach (var otpk in OneTimePreKeys)
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(otpk.SecretKey);
+        if (PreviousSignedPreKeys is not null)
+            foreach (var old in PreviousSignedPreKeys)
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(old.SecretKey);
+        foreach (var group in Groups.Values)
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(group.Key);
+        foreach (var place in Places.Values)
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(place.MetadataKey);
+    }
 }
 
 public class Contact
 {
     [JsonPropertyName("publicKey")]
-    public string PublicKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("signingKey")]
-    public string? SigningKey { get; set; }
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[]? SigningKey { get; set; }
 
     [JsonPropertyName("devices")]
     public Dictionary<string, DeviceKeys> Devices { get; set; } = new();
@@ -172,10 +219,12 @@ public class Contact
 public class DeviceKeys
 {
     [JsonPropertyName("publicKey")]
-    public string PublicKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("signingKey")]
-    public string? SigningKey { get; set; }
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[]? SigningKey { get; set; }
 }
 
 public class Group
@@ -184,7 +233,8 @@ public class Group
     public string Name { get; set; } = "";
 
     [JsonPropertyName("key")]
-    public string Key { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] Key { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("members")]
     public List<string> Members { get; set; } = new();
@@ -196,7 +246,8 @@ public class Place
     public string Name { get; set; } = "";
 
     [JsonPropertyName("metadataKey")]
-    public string MetadataKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] MetadataKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("channels")]
     public Dictionary<string, PlaceChannel> Channels { get; set; } = new();
@@ -313,10 +364,12 @@ public class ChatMessage
 public class KeyPairData
 {
     [JsonPropertyName("publicKey")]
-    public string PublicKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("secretKey")]
-    public string SecretKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] SecretKey { get; set; } = Array.Empty<byte>();
 }
 
 public class OneTimePreKey
@@ -325,19 +378,23 @@ public class OneTimePreKey
     public int Id { get; set; }
 
     [JsonPropertyName("publicKey")]
-    public string PublicKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("secretKey")]
-    public string SecretKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] SecretKey { get; set; } = Array.Empty<byte>();
 }
 
 public class ArchivedSignedPreKey
 {
     [JsonPropertyName("publicKey")]
-    public string PublicKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("secretKey")]
-    public string SecretKey { get; set; } = "";
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] SecretKey { get; set; } = Array.Empty<byte>();
 
     [JsonPropertyName("archivedAt")]
     public long ArchivedAt { get; set; }

@@ -10,10 +10,12 @@ namespace Rede.Core.Services;
 /// Orchestrates registration, auth challenge-response, and device link flows.
 /// Mirrors: authenticate(), REGISTER_OK, AUTH_CHALLENGE, AUTH_OK handlers in index.js
 /// </summary>
-public class AuthService
+public class AuthService : IDisposable
 {
     private readonly RedeConnection _conn;
     private readonly ProfileStore _store;
+
+    public void Dispose() { GC.SuppressFinalize(this); }
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnSystemMessage;
@@ -71,14 +73,16 @@ public class AuthService
         Passphrase = passphrase;
         Profile = await _store.CreateProfileAsync("pending", displayName, passphrase);
 
-        var proof = CryptoService.SignString(
-            displayName + Profile.PublicKey,
+        var publicKeyB64 = Convert.ToBase64String(Profile.PublicKey);
+        var signingKeyB64 = Convert.ToBase64String(Profile.SigningKey);
+        var proof = CryptoService.SignStringB64(
+            displayName + publicKeyB64,
             Profile.SigningSecretKey);
 
         _conn.Send(Msg.Register, ProtocolSerializer.Payload(
             ("inviteCode", JsonValue.Create(inviteCode)),
-            ("publicKey", JsonValue.Create(Profile.PublicKey)),
-            ("signingKey", JsonValue.Create(Profile.SigningKey)),
+            ("publicKey", JsonValue.Create(publicKeyB64)),
+            ("signingKey", JsonValue.Create(signingKeyB64)),
             ("displayName", JsonValue.Create(displayName)),
             ("deviceId", JsonValue.Create(Profile.DeviceId)),
             ("proof", JsonValue.Create(proof))
@@ -95,15 +99,17 @@ public class AuthService
             System.Security.Cryptography.SHA256.HashData(
                 System.Text.Encoding.UTF8.GetBytes(linkCode))).ToLowerInvariant();
 
-        var proof = CryptoService.SignString(
-            $"DEVICE_LINK:{codeHash}:{Profile.PublicKey}",
+        var publicKeyB64 = Convert.ToBase64String(Profile.PublicKey);
+        var signingKeyB64 = Convert.ToBase64String(Profile.SigningKey);
+        var proof = CryptoService.SignStringB64(
+            $"DEVICE_LINK:{codeHash}:{publicKeyB64}",
             Profile.SigningSecretKey);
 
         _conn.Send(Msg.DeviceLinkUse, ProtocolSerializer.Payload(
             ("userId", JsonValue.Create(userId)),
             ("codeHash", JsonValue.Create(codeHash)),
-            ("publicKey", JsonValue.Create(Profile.PublicKey)),
-            ("signingKey", JsonValue.Create(Profile.SigningKey)),
+            ("publicKey", JsonValue.Create(publicKeyB64)),
+            ("signingKey", JsonValue.Create(signingKeyB64)),
             ("deviceId", JsonValue.Create(Profile.DeviceId)),
             ("proof", JsonValue.Create(proof))
         ));
@@ -142,8 +148,9 @@ public class AuthService
         var serverSigKey = ProtocolSerializer.GetString(msg, "serverSigningKey");
         if (serverSigKey is not null && IsValidBase64Key(serverSigKey, 32))
         {
-            Profile.ServerSigningKey = serverSigKey;
-            _conn.ServerSigningKey = serverSigKey;
+            var serverSigKeyBytes = Convert.FromBase64String(serverSigKey);
+            Profile.ServerSigningKey = serverSigKeyBytes;
+            _conn.ServerSigningKey = serverSigKeyBytes;
         }
 
         // Save under the real userId (server-assigned)
@@ -177,7 +184,7 @@ public class AuthService
         if (challenge is null) return;
 
         // Domain-separated: sign "AUTH_CHALLENGE:<base64>" to prevent cross-protocol signature reuse
-        var signature = CryptoService.SignString("AUTH_CHALLENGE:" + challenge, Profile.SigningSecretKey);
+        var signature = CryptoService.SignStringB64("AUTH_CHALLENGE:" + challenge, Profile.SigningSecretKey);
         _conn.Send(Msg.AuthResponse, ProtocolSerializer.Payload(
             ("signature", JsonValue.Create(signature))
         ));
@@ -195,19 +202,20 @@ public class AuthService
         var serverSigKey = ProtocolSerializer.GetString(msg, "serverSigningKey");
         if (serverSigKey is not null && IsValidBase64Key(serverSigKey, 32))
         {
-            if (Profile.ServerSigningKey is null)
+            var serverSigKeyBytes = Convert.FromBase64String(serverSigKey);
+            if (Profile.ServerSigningKey is null || Profile.ServerSigningKey.Length == 0)
             {
-                Profile.ServerSigningKey = serverSigKey;
-                _conn.ServerSigningKey = serverSigKey;
+                Profile.ServerSigningKey = serverSigKeyBytes;
+                _conn.ServerSigningKey = serverSigKeyBytes;
                 await _store.SaveProfileAsync(Profile, Passphrase);
             }
-            else if (Profile.ServerSigningKey != serverSigKey)
+            else if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(Profile.ServerSigningKey, serverSigKeyBytes))
             {
                 OnSystemMessage?.Invoke("WARNING: Server signing key has CHANGED! Possible MITM attack.");
             }
             else
             {
-                _conn.ServerSigningKey = serverSigKey;
+                _conn.ServerSigningKey = serverSigKeyBytes;
             }
         }
 
@@ -286,7 +294,7 @@ public class AuthService
             PublicKey = bundle.PrivateKeys.SignedPreKey.PublicKey,
             SecretKey = bundle.PrivateKeys.SignedPreKey.SecretKey,
         };
-        Profile.SignedPreKeySig = bundle.PublicBundle.SignedPreKeySig;
+        Profile.SignedPreKeySig = Convert.FromBase64String(bundle.PublicBundle.SignedPreKeySig);
 
         var startId = Profile.NextPreKeyId;
         foreach (var (otpk, i) in bundle.PrivateKeys.OneTimePreKeys.Select((v, i) => (v, i)))
@@ -304,8 +312,8 @@ public class AuthService
 
         // Upload public bundle
         var otpkArray = new JsonArray();
-        foreach (var otpk in bundle.PrivateKeys.OneTimePreKeys)
-            otpkArray.Add(JsonValue.Create(otpk.PublicKey));
+        foreach (var otpk in bundle.PublicBundle.OneTimePreKeys)
+            otpkArray.Add(JsonValue.Create(otpk.Key));
 
         _conn.Send(Msg.UploadPrekeys, ProtocolSerializer.Payload(
             ("signedPreKey", JsonValue.Create(bundle.PublicBundle.SignedPreKey)),

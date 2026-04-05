@@ -122,8 +122,18 @@ public static class ProfileEncryption
             Buffer.BlockCopy(combined, 32, hmacKey, 0, 32);
             CryptoService.ZeroOut(combined);
 
-            // HMAC verification
-            if (!string.IsNullOrEmpty(envelope.Hmac))
+            // HMAC verification — MANDATORY. A missing or empty HMAC field is a hard
+            // decrypt failure: an attacker must not be able to downgrade a profile to
+            // the unauthenticated legacy format. Profiles written by older client
+            // versions that never populated the HMAC field cannot be opened by this
+            // build; users on such profiles need to re-save from an older Rede once
+            // before upgrading (or restore from backup).
+            if (string.IsNullOrEmpty(envelope.Hmac))
+            {
+                CryptoService.ZeroOut(key);
+                CryptoService.ZeroOut(hmacKey);
+                return null;
+            }
             {
                 using var hmacAlg = new HMACSHA256(hmacKey);
                 var expected = Convert.ToHexString(hmacAlg.ComputeHash(encrypted)).ToLowerInvariant();
@@ -131,7 +141,9 @@ public static class ProfileEncryption
                     Encoding.UTF8.GetBytes(envelope.Hmac),
                     Encoding.UTF8.GetBytes(expected)))
                 {
-                    // Legacy fallback: HMAC key derived with separate salt+"hmac"
+                    // Legacy HMAC fallback: separate-salt "hmac" derivation. Kept only
+                    // as a single extra try — no second legacy layer. If this also
+                    // fails, the envelope is rejected.
                     CryptoService.ZeroOut(hmacKey);
                     var hmacSalt = new byte[salt.Length + 4];
                     Buffer.BlockCopy(salt, 0, hmacSalt, 0, salt.Length);

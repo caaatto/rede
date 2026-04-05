@@ -146,23 +146,18 @@ public class GroupCallService
         }
         if (callId.Length < 16 || callId.Length > 64) return null;
 
-        string? sharedKeyB64 = null;
+        byte[]? ikm = null;
         if (scope.Kind == "place")
         {
-            if (profile.Places.TryGetValue(scope.Id, out var place) && !string.IsNullOrEmpty(place.MetadataKey))
-                sharedKeyB64 = place.MetadataKey;
+            if (profile.Places.TryGetValue(scope.Id, out var place) && place.MetadataKey.Length > 0)
+                ikm = place.MetadataKey;
         }
         else if (scope.Kind == "group")
         {
-            if (profile.Groups.TryGetValue(scope.Id, out var group) && !string.IsNullOrEmpty(group.Key))
-                sharedKeyB64 = group.Key;
+            if (profile.Groups.TryGetValue(scope.Id, out var group) && group.Key.Length > 0)
+                ikm = group.Key;
         }
-        if (string.IsNullOrEmpty(sharedKeyB64)) return null;
-
-        byte[] ikm;
-        try { ikm = Convert.FromBase64String(sharedKeyB64); }
-        catch { return null; }
-        if (ikm.Length < 32) return null;
+        if (ikm is null || ikm.Length < 32) return null;
 
         // Domain-separated info so SFrame keys can never collide with any
         // other key derived from the same metadataKey (e.g. metadata encryption).

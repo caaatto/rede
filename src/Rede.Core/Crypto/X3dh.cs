@@ -13,6 +13,7 @@ public static class X3dh
         PreKeyBundlePrivate PrivateKeys
     );
 
+    /// <summary>Public wire format — base64 strings for JSON server transport.</summary>
     public record PreKeyBundlePublic(
         string SignedPreKey,
         string SignedPreKeySig,
@@ -21,102 +22,93 @@ public static class X3dh
 
     public record OneTimePreKeyPublic(int Id, string Key);
 
+    /// <summary>Private parts — byte[] for storage in Profile, zeroable.</summary>
     public record PreKeyBundlePrivate(
-        KeyPairB64 SignedPreKey,
+        DoubleRatchet.KeyPairBytes SignedPreKey,
         List<OneTimePreKeyPrivate> OneTimePreKeys
     );
 
-    public record OneTimePreKeyPrivate(int Id, string PublicKey, string SecretKey);
-    public record KeyPairB64(string PublicKey, string SecretKey);
+    public record OneTimePreKeyPrivate(int Id, byte[] PublicKey, byte[] SecretKey);
 
+    /// <summary>Recipient bundle with byte[] key material (decoded once at protocol boundary).</summary>
     public record RecipientBundle(
-        string IdentityKey,
-        string SignedPreKey,
-        string SignedPreKeySig,
-        string SigningKey,
-        OneTimePreKeyPublic? OneTimePreKey
+        byte[] IdentityKey,
+        byte[] SignedPreKey,
+        byte[] SignedPreKeySig,
+        byte[] SigningKey,
+        OneTimePreKeyBytes? OneTimePreKey
     );
 
-    public record X3dhInitiateResult(byte[] SharedSecret, string EphemeralPublic, int? UsedOtpkId);
+    public record OneTimePreKeyBytes(int Id, byte[] Key);
+
+    public record X3dhInitiateResult(byte[] SharedSecret, byte[] EphemeralPublic, int? UsedOtpkId);
     public record X3dhRespondResult(byte[] SharedSecret);
 
-    /// <summary>
-    /// Generate pre-key bundle for server upload.
-    /// Mirrors: generatePreKeyBundle(signingSecretKeyB64) in crypto.js
-    /// </summary>
-    public static PreKeyBundle GeneratePreKeyBundle(string signingSecretKeyB64)
+    /// <summary>Generate pre-key bundle for server upload.</summary>
+    public static PreKeyBundle GeneratePreKeyBundle(byte[] signingSecretKey)
     {
-        // Signed pre-key (ephemeral X25519, signed by Ed25519 identity)
+        // Signed pre-key
         var spk = PublicKeyBox.GenerateKeyPair();
-        var spkPub = Convert.ToBase64String(spk.PublicKey);
-        var spkSec = Convert.ToBase64String(spk.PrivateKey);
-        var spkSig = CryptoService.SignBytes(spk.PublicKey, signingSecretKeyB64);
+        var spkPub = (byte[])spk.PublicKey.Clone();
+        var spkSec = (byte[])spk.PrivateKey.Clone();
         CryptoService.ZeroOut(spk.PrivateKey);
 
-        // One-time pre-keys (20 X25519 keypairs)
+        var spkSigB64 = CryptoService.SignBytesB64(spkPub, signingSecretKey);
+
+        // One-time pre-keys
         var otpksPublic = new List<OneTimePreKeyPublic>();
         var otpksPrivate = new List<OneTimePreKeyPrivate>();
         for (int i = 0; i < 20; i++)
         {
             var kp = PublicKeyBox.GenerateKeyPair();
-            otpksPublic.Add(new OneTimePreKeyPublic(i, Convert.ToBase64String(kp.PublicKey)));
-            otpksPrivate.Add(new OneTimePreKeyPrivate(i, Convert.ToBase64String(kp.PublicKey), Convert.ToBase64String(kp.PrivateKey)));
+            var pk = (byte[])kp.PublicKey.Clone();
+            var sk = (byte[])kp.PrivateKey.Clone();
             CryptoService.ZeroOut(kp.PrivateKey);
+            otpksPublic.Add(new OneTimePreKeyPublic(i, Convert.ToBase64String(pk)));
+            otpksPrivate.Add(new OneTimePreKeyPrivate(i, pk, sk));
         }
 
         return new PreKeyBundle(
-            new PreKeyBundlePublic(spkPub, spkSig, otpksPublic),
+            new PreKeyBundlePublic(Convert.ToBase64String(spkPub), spkSigB64, otpksPublic),
             new PreKeyBundlePrivate(
-                new KeyPairB64(spkPub, spkSec),
+                new DoubleRatchet.KeyPairBytes(spkPub, spkSec),
                 otpksPrivate
             )
         );
     }
 
-    /// <summary>
-    /// Initiator side of X3DH (Alice sending first message to Bob).
-    /// Mirrors: x3dhInitiate(senderIdentitySecretB64, recipientBundle) in crypto.js
-    /// </summary>
-    public static X3dhInitiateResult? Initiate(string senderIdentitySecretB64, RecipientBundle recipientBundle)
+    /// <summary>Initiator side of X3DH.</summary>
+    public static X3dhInitiateResult? Initiate(byte[] senderIdentitySecret, RecipientBundle recipientBundle)
     {
-        // M1: Validate key lengths before use
-        try
-        {
-            if (Convert.FromBase64String(recipientBundle.IdentityKey).Length != 32) return null;
-            if (Convert.FromBase64String(recipientBundle.SignedPreKey).Length != 32) return null;
-            if (Convert.FromBase64String(recipientBundle.SigningKey).Length != 32) return null;
-            if (recipientBundle.OneTimePreKey is not null &&
-                Convert.FromBase64String(recipientBundle.OneTimePreKey.Key).Length != 32) return null;
-        }
-        catch { return null; }
+        // Validate key lengths
+        if (recipientBundle.IdentityKey.Length != 32) return null;
+        if (recipientBundle.SignedPreKey.Length != 32) return null;
+        if (recipientBundle.SigningKey.Length != 32) return null;
+        if (recipientBundle.OneTimePreKey is not null && recipientBundle.OneTimePreKey.Key.Length != 32) return null;
 
         // Verify signed pre-key signature
-        var spkBytes = Convert.FromBase64String(recipientBundle.SignedPreKey);
-        if (!CryptoService.VerifyBytes(spkBytes, recipientBundle.SignedPreKeySig, recipientBundle.SigningKey))
-            return null; // Invalid signature — abort
+        if (!CryptoService.Verify(recipientBundle.SignedPreKey, recipientBundle.SignedPreKeySig, recipientBundle.SigningKey))
+            return null;
 
-        // M1: try-finally ensures all secrets are zeroed even on exception
-        byte[]? ikA = null, dh1 = null, dh2 = null, dh3 = null, dh4 = null, dhConcat = null;
+        byte[]? dh1 = null, dh2 = null, dh3 = null, dh4 = null, dhConcat = null;
         KeyPair? ek = null;
+        byte[]? ekSecretCopy = null;
         try
         {
-            ikA = Convert.FromBase64String(senderIdentitySecretB64);
-            var ikB = Convert.FromBase64String(recipientBundle.IdentityKey);
-            var spkB = Convert.FromBase64String(recipientBundle.SignedPreKey);
-            var ikAPub = CryptoService.PublicKeyFromSecret(ikA);
+            var ikAPub = CryptoService.PublicKeyFromSecret(senderIdentitySecret);
 
             ek = PublicKeyBox.GenerateKeyPair();
+            ekSecretCopy = (byte[])ek.PrivateKey.Clone();
 
-            dh1 = CryptoService.Dh(ikA, spkB);
-            dh2 = CryptoService.Dh(ek.PrivateKey, ikB);
-            dh3 = CryptoService.Dh(ek.PrivateKey, spkB);
+            dh1 = CryptoService.Dh(senderIdentitySecret, recipientBundle.SignedPreKey);
+            dh2 = CryptoService.Dh(ekSecretCopy, recipientBundle.IdentityKey);
+            dh3 = CryptoService.Dh(ekSecretCopy, recipientBundle.SignedPreKey);
 
             int? usedOtpkId = null;
 
             if (recipientBundle.OneTimePreKey is not null)
             {
-                var opkB = Convert.FromBase64String(recipientBundle.OneTimePreKey.Key);
-                dh4 = CryptoService.Dh(ek.PrivateKey, opkB);
+                dh4 = CryptoService.Dh(ekSecretCopy, recipientBundle.OneTimePreKey.Key);
                 dhConcat = new byte[128];
                 Buffer.BlockCopy(dh1, 0, dhConcat, 0, 32);
                 Buffer.BlockCopy(dh2, 0, dhConcat, 32, 32);
@@ -132,9 +124,9 @@ public static class X3dh
                 Buffer.BlockCopy(dh3, 0, dhConcat, 64, 32);
             }
 
-            var x3dhSalt = Hkdf.X3dhIdentitySalt(ikAPub, ikB);
+            var x3dhSalt = Hkdf.X3dhIdentitySalt(ikAPub, recipientBundle.IdentityKey);
             var sharedSecret = Hkdf.DeriveKey(dhConcat, x3dhSalt, "RedeX3DH", 32);
-            var ephemeralPublic = Convert.ToBase64String(ek.PublicKey);
+            var ephemeralPublic = (byte[])ek.PublicKey.Clone();
 
             return new X3dhInitiateResult(sharedSecret, ephemeralPublic, usedOtpkId);
         }
@@ -145,49 +137,34 @@ public static class X3dh
             if (dh3 is not null) CryptoService.ZeroOut(dh3);
             if (dh4 is not null) CryptoService.ZeroOut(dh4);
             if (dhConcat is not null) CryptoService.ZeroOut(dhConcat);
-            if (ikA is not null) CryptoService.ZeroOut(ikA);
+            if (ekSecretCopy is not null) CryptoService.ZeroOut(ekSecretCopy);
             if (ek is not null) CryptoService.ZeroOut(ek.PrivateKey);
         }
     }
 
-    /// <summary>
-    /// Responder side of X3DH (Bob receiving first message from Alice).
-    /// Mirrors: x3dhRespond(...) in crypto.js
-    /// </summary>
+    /// <summary>Responder side of X3DH.</summary>
     public static X3dhRespondResult? Respond(
-        string recipientIdentitySecretB64,
-        string signedPreKeySecretB64,
-        string? oneTimePreKeySecretB64,
-        string senderIdentityKeyB64,
-        string senderEphemeralKeyB64)
+        byte[] recipientIdentitySecret,
+        byte[] signedPreKeySecret,
+        byte[]? oneTimePreKeySecret,
+        byte[] senderIdentityKey,
+        byte[] senderEphemeralKey)
     {
-        // H5: Validate sender key lengths before use
+        if (senderIdentityKey.Length != 32) return null;
+        if (senderEphemeralKey.Length != 32) return null;
+
+        byte[]? dh1 = null, dh2 = null, dh3 = null, dh4 = null, dhConcat = null;
         try
         {
-            if (Convert.FromBase64String(senderIdentityKeyB64).Length != 32) return null;
-            if (Convert.FromBase64String(senderEphemeralKeyB64).Length != 32) return null;
-        }
-        catch { return null; }
+            var ikBPub = CryptoService.PublicKeyFromSecret(recipientIdentitySecret);
 
-        // M1: try-finally ensures all secrets are zeroed even on exception
-        byte[]? ikB = null, spkB = null, dh1 = null, dh2 = null, dh3 = null, dh4 = null;
-        byte[]? dhConcat = null, opkB = null;
-        try
-        {
-            ikB = Convert.FromBase64String(recipientIdentitySecretB64);
-            spkB = Convert.FromBase64String(signedPreKeySecretB64);
-            var ikA = Convert.FromBase64String(senderIdentityKeyB64);
-            var ekA = Convert.FromBase64String(senderEphemeralKeyB64);
-            var ikBPub = CryptoService.PublicKeyFromSecret(ikB);
+            dh1 = CryptoService.Dh(signedPreKeySecret, senderIdentityKey);
+            dh2 = CryptoService.Dh(recipientIdentitySecret, senderEphemeralKey);
+            dh3 = CryptoService.Dh(signedPreKeySecret, senderEphemeralKey);
 
-            dh1 = CryptoService.Dh(spkB, ikA);
-            dh2 = CryptoService.Dh(ikB, ekA);
-            dh3 = CryptoService.Dh(spkB, ekA);
-
-            if (oneTimePreKeySecretB64 is not null)
+            if (oneTimePreKeySecret is not null)
             {
-                opkB = Convert.FromBase64String(oneTimePreKeySecretB64);
-                dh4 = CryptoService.Dh(opkB, ekA);
+                dh4 = CryptoService.Dh(oneTimePreKeySecret, senderEphemeralKey);
                 dhConcat = new byte[128];
                 Buffer.BlockCopy(dh1, 0, dhConcat, 0, 32);
                 Buffer.BlockCopy(dh2, 0, dhConcat, 32, 32);
@@ -202,7 +179,7 @@ public static class X3dh
                 Buffer.BlockCopy(dh3, 0, dhConcat, 64, 32);
             }
 
-            var x3dhSalt = Hkdf.X3dhIdentitySalt(ikA, ikBPub);
+            var x3dhSalt = Hkdf.X3dhIdentitySalt(senderIdentityKey, ikBPub);
             var sharedSecret = Hkdf.DeriveKey(dhConcat, x3dhSalt, "RedeX3DH", 32);
             return new X3dhRespondResult(sharedSecret);
         }
@@ -213,9 +190,6 @@ public static class X3dh
             if (dh3 is not null) CryptoService.ZeroOut(dh3);
             if (dh4 is not null) CryptoService.ZeroOut(dh4);
             if (dhConcat is not null) CryptoService.ZeroOut(dhConcat);
-            if (ikB is not null) CryptoService.ZeroOut(ikB);
-            if (spkB is not null) CryptoService.ZeroOut(spkB);
-            if (opkB is not null) CryptoService.ZeroOut(opkB);
         }
     }
 }

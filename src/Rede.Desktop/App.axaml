@@ -21,4 +21,20 @@
         <FluentTheme />
         <StyleInclude Source="/Themes/RedeTheme.axaml" />
     </Application.Styles>
+
+    <TrayIcon.Icons>
+        <TrayIcons>
+            <TrayIcon Icon="/Assets/icon.png"
+                      ToolTipText="Rede"
+                      Clicked="TrayIcon_Clicked">
+                <TrayIcon.Menu>
+                    <NativeMenu>
+                        <NativeMenuItem Header="Show Rede" Click="TrayShow_Click" />
+                        <NativeMenuItemSeparator />
+                        <NativeMenuItem Header="Quit" Click="TrayQuit_Click" />
+                    </NativeMenu>
+                </TrayIcon.Menu>
+            </TrayIcon>
+        </TrayIcons>
+    </TrayIcon.Icons>
 </Application>

@@ -76,13 +76,16 @@
                     <ListBoxItem>
                         <TextBlock Text="Security" FontSize="{StaticResource RedeBodySize}" />
                     </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="System" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
                 </ListBox>
             </Border>
 
             <!-- Content area -->
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="32,8,32,24">
                 <Grid MaxWidth="560" HorizontalAlignment="Center"
-                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
                     <!-- =========================================================== -->
                     <!-- PROFILE Category                                             -->
@@ -367,6 +370,51 @@
                                            TextWrapping="Wrap" />
                             </Border>
                         </StackPanel>
+                    </StackPanel>
+
+                    <!-- =========================================================== -->
+                    <!-- SYSTEM Category                                              -->
+                    <!-- =========================================================== -->
+                    <StackPanel Grid.Row="6" Spacing="16" IsVisible="{Binding IsSystemCategory}">
+                        <TextBlock Text="System" Classes="header" />
+                        <TextBlock Text="Control how Rede integrates with your operating system."
+                                   Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                            <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2">
+                                <TextBlock Text="Minimize to system tray" VerticalAlignment="Center" />
+                                <TextBlock Text="Pressing the close (X) button hides Rede to the tray instead of quitting."
+                                           Classes="secondary" FontSize="11" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Row="0" Grid.Column="1"
+                                          IsChecked="{Binding MinimizeToTray}"
+                                          OnContent="On" OffContent="Off"
+                                          VerticalAlignment="Center" />
+
+                            <StackPanel Grid.Row="1" Grid.Column="0" Spacing="2" Margin="0,12,0,0">
+                                <TextBlock Text="Launch on system startup" VerticalAlignment="Center" />
+                                <TextBlock Text="Rede starts automatically when you log into your computer."
+                                           Classes="secondary" FontSize="11" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Row="1" Grid.Column="1"
+                                          IsChecked="{Binding AutostartEnabled}"
+                                          IsEnabled="{Binding IsAutostartSupported}"
+                                          OnContent="On" OffContent="Off"
+                                          Margin="0,12,0,0"
+                                          VerticalAlignment="Center" />
+
+                            <StackPanel Grid.Row="2" Grid.Column="0" Spacing="2" Margin="0,12,0,0">
+                                <TextBlock Text="Start minimized to tray" VerticalAlignment="Center" />
+                                <TextBlock Text="When launched from autostart, skip the window and go straight to the tray."
+                                           Classes="secondary" FontSize="11" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Row="2" Grid.Column="1"
+                                          IsChecked="{Binding StartMinimized}"
+                                          IsEnabled="{Binding AutostartEnabled}"
+                                          OnContent="On" OffContent="Off"
+                                          Margin="0,12,0,0"
+                                          VerticalAlignment="Center" />
+                        </Grid>
                     </StackPanel>
 
                 </Grid>

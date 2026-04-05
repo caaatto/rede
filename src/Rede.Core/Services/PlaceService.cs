@@ -14,11 +14,16 @@ namespace Rede.Core.Services;
 /// Places are Discord-like servers with multiple channels.
 /// Channel metadata (names, topics) is E2EE - server only sees opaque IDs.
 /// </summary>
-public class PlaceService
+public class PlaceService : IDisposable
 {
     private readonly RedeConnection _conn;
     private readonly ProfileStore _store;
     private readonly NonceTracker _nonceTracker = new();
+
+    /// <summary>Replay-protection tracker — exposed for persistence across restarts.</summary>
+    public NonceTracker NonceTracker => _nonceTracker;
+
+    public void Dispose() { GC.SuppressFinalize(this); }
 
     public Profile? Profile { get; set; }
     public string? Passphrase { get; set; }
@@ -62,7 +67,7 @@ public class PlaceService
     // Metadata (name, channels, roles) is encrypted with a shared symmetric key.
     // Server never sees this data.
 
-    private static string EncryptMetadata(Place place, string metadataKey)
+    private static string EncryptMetadata(Place place, byte[] metadataKey)
     {
         var meta = new JsonObject
         {
@@ -81,18 +86,16 @@ public class PlaceService
         meta["adminColor"] = place.AdminColor;
         meta["memberColor"] = place.MemberColor;
         var json = meta.ToJsonString();
-        var keyBytes = Convert.FromBase64String(metadataKey);
         var nonce = Sodium.SodiumCore.GetRandomBytes(24);
         var plaintext = Encoding.UTF8.GetBytes(json);
-        var ciphertext = Sodium.SecretBox.Create(plaintext, nonce, keyBytes);
-        CryptoService.ZeroOut(keyBytes);
+        var ciphertext = Sodium.SecretBox.Create(plaintext, nonce, metadataKey);
         return Convert.ToBase64String(nonce) + ":" + Convert.ToBase64String(ciphertext);
     }
 
     // H1: Maximum decrypted metadata size (5MB) to prevent OOM
     private const int MaxMetadataSize = 5 * 1024 * 1024;
 
-    private static bool DecryptMetadata(string encrypted, string metadataKey, Place place)
+    private static bool DecryptMetadata(string encrypted, byte[] metadataKey, Place place)
     {
         try
         {
@@ -102,9 +105,7 @@ public class PlaceService
             if (parts.Length != 2) return false;
             var nonce = Convert.FromBase64String(parts[0]);
             var ciphertext = Convert.FromBase64String(parts[1]);
-            var keyBytes = Convert.FromBase64String(metadataKey);
-            var plaintext = Sodium.SecretBox.Open(ciphertext, nonce, keyBytes);
-            CryptoService.ZeroOut(keyBytes);
+            var plaintext = Sodium.SecretBox.Open(ciphertext, nonce, metadataKey);
             if (plaintext is null) return false;
 
             var json = Encoding.UTF8.GetString(plaintext);
@@ -214,7 +215,7 @@ public class PlaceService
             {
                 __rede_ctrl = "placekey",
                 placeId,
-                metadataKey = place.MetadataKey,
+                metadataKey = Convert.ToBase64String(place.MetadataKey),
                 metadata = encMeta,
             });
             chatService.SendMessage(userId, keyMsg, 0);
@@ -718,7 +719,7 @@ public class PlaceService
             return;
         }
 
-        place.MetadataKey = CryptoService.GenerateGroupKey();
+        place.MetadataKey = CryptoService.GenerateSymmetricKey();
         _store.SaveProfileDebounced(Profile, Passphrase);
 
         DistributeMetadata(placeId, place, chatService);
@@ -739,7 +740,7 @@ public class PlaceService
             {
                 __rede_ctrl = "placekey",
                 placeId,
-                metadataKey = place.MetadataKey,
+                metadataKey = Convert.ToBase64String(place.MetadataKey),
                 metadata = encMeta,
             });
             chatService.SendMessage(memberId, keyMsg, 0);
@@ -778,9 +779,10 @@ public class PlaceService
         {
             var parsed = JsonSerializer.Deserialize<JsonElement>(skStateJson.Value);
             var ownNode = parsed.GetProperty("own");
+            var ckB64 = ownNode.GetProperty("chainKey").GetString() ?? "";
             skState = new SenderKeys.SenderKeyState
             {
-                ChainKey = ownNode.GetProperty("chainKey").GetString() ?? "",
+                ChainKey = ckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(ckB64),
                 MessageNumber = ownNode.GetProperty("messageNumber").GetInt32(),
             };
         }
@@ -795,7 +797,7 @@ public class PlaceService
         {
             ["own"] = new JsonObject
             {
-                ["chainKey"] = skState.ChainKey,
+                ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
                 ["messageNumber"] = skState.MessageNumber,
             }
         };
@@ -840,7 +842,7 @@ public class PlaceService
         _pendingPlaceNames.TryDequeue(out var name);
         name ??= "Unnamed";
 
-        var metadataKey = CryptoService.GenerateGroupKey();
+        var metadataKey = CryptoService.GenerateSymmetricKey();
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var generalChannelId = DeriveChannelId(placeId, "general", nonce);
 
@@ -891,7 +893,7 @@ public class PlaceService
             Profile.Places[placeId] = new Place
             {
                 Name = placeId, // Temporary until metadata arrives
-                MetadataKey = "",
+                MetadataKey = Array.Empty<byte>(),
             };
             _store.SaveProfileDebounced(Profile, Passphrase);
         }
@@ -1010,9 +1012,10 @@ public class PlaceService
                 if (parsed.TryGetProperty("members", out var members) &&
                     members.TryGetProperty(from, out var memberData))
                 {
+                    var mckB64 = memberData.GetProperty("chainKey").GetString() ?? "";
                     memberState = new SenderKeys.SenderKeyState
                     {
-                        ChainKey = memberData.GetProperty("chainKey").GetString() ?? "",
+                        ChainKey = mckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(mckB64),
                         MessageNumber = memberData.GetProperty("messageNumber").GetInt32(),
                     };
                 }
@@ -1033,7 +1036,7 @@ public class PlaceService
                 var membersNode = parsed["members"] as JsonObject ?? new JsonObject();
                 membersNode[from] = new JsonObject
                 {
-                    ["chainKey"] = memberState.ChainKey,
+                    ["chainKey"] = Convert.ToBase64String(memberState.ChainKey),
                     ["messageNumber"] = memberState.MessageNumber,
                 };
                 parsed["members"] = membersNode;
@@ -1106,15 +1109,17 @@ public class PlaceService
             return Task.CompletedTask;
 
         // H11: Validate metadataKey format (must be exactly 32 bytes base64)
+        byte[] metadataKeyBytes;
         try
         {
-            if (Convert.FromBase64String(metadataKey).Length != 32) return Task.CompletedTask;
+            metadataKeyBytes = Convert.FromBase64String(metadataKey);
+            if (metadataKeyBytes.Length != 32) return Task.CompletedTask;
         }
         catch { return Task.CompletedTask; }
 
-        place.MetadataKey = metadataKey;
+        place.MetadataKey = metadataKeyBytes;
 
-        if (DecryptMetadata(encryptedMetadata, metadataKey, place))
+        if (DecryptMetadata(encryptedMetadata, metadataKeyBytes, place))
         {
             // Add ourselves to local member list if not present
             if (!place.Members.Contains(Profile.UserId))

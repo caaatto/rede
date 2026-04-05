@@ -28,7 +28,7 @@ public class RedeConnection : IDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Action<JsonObject>> _handlers = new();
     private string? _pinnedCertFingerprint;
 
-    public string? ServerSigningKey { get; set; }
+    public byte[]? ServerSigningKey { get; set; }
     public bool ShouldReconnect { get; set; } = true;
     public int ReconnectDelay { get; set; } = 2000;
     private int _reconnectAttempts;

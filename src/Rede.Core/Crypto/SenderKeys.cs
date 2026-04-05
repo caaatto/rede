@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text.Json.Serialization;
 using Sodium;
 
 namespace Rede.Core.Crypto;
@@ -14,48 +15,41 @@ public static class SenderKeys
 
     public class SenderKeyState
     {
-        public string ChainKey { get; set; } = "";  // base64
+        [JsonPropertyName("chainKey")]
+        [JsonConverter(typeof(Base64BytesJsonConverter))]
+        public byte[] ChainKey { get; set; } = Array.Empty<byte>();
+
+        [JsonPropertyName("messageNumber")]
         public int MessageNumber { get; set; }
 
-        /// <summary>Deep clone for backup/restore on failed decrypt (C2 fix).</summary>
         public SenderKeyState DeepClone() => new()
         {
-            ChainKey = ChainKey,
+            ChainKey = (byte[])ChainKey.Clone(),
             MessageNumber = MessageNumber,
         };
     }
 
     public record EncryptResult(string Ciphertext, string Nonce, int MessageNumber, string Signature);
 
-    /// <summary>
-    /// Generate a new sender key. Mirrors: generateSenderKey() in crypto.js
-    /// </summary>
+    /// <summary>Generate a new sender key.</summary>
     public static SenderKeyState Generate()
     {
-        var chainKey = SodiumCore.GetRandomBytes(32);
-        var result = new SenderKeyState
+        return new SenderKeyState
         {
-            ChainKey = Convert.ToBase64String(chainKey),
+            ChainKey = SodiumCore.GetRandomBytes(32),
             MessageNumber = 0,
         };
-        CryptoService.ZeroOut(chainKey);
-        return result;
     }
 
-    /// <summary>
-    /// Encrypt with sender key. Mirrors: senderKeyEncrypt(state, plaintext, signingSecretKeyB64)
-    /// </summary>
-    public static EncryptResult Encrypt(SenderKeyState state, string plaintext, string signingSecretKeyB64)
+    /// <summary>Encrypt with sender key.</summary>
+    public static EncryptResult Encrypt(SenderKeyState state, string plaintext, byte[] signingSecretKey)
     {
-        // M7: Bounds check BEFORE mutating state
         if (state.MessageNumber >= MaxMessageNumber)
             throw new InvalidOperationException("Sender key message limit reached — rekey required.");
 
-        var ck = Convert.FromBase64String(state.ChainKey);
-        var (newCK, msgKey) = DoubleRatchet.KdfCK(ck);
-        CryptoService.ZeroOut(ck);
-        state.ChainKey = Convert.ToBase64String(newCK);
-        CryptoService.ZeroOut(newCK);
+        var (newCK, msgKey) = DoubleRatchet.KdfCK(state.ChainKey);
+        CryptoService.ZeroOut(state.ChainKey);
+        state.ChainKey = newCK;
 
         var nonce = SodiumCore.GetRandomBytes(24);
         var paddedBytes = MessagePadding.Pad(plaintext);
@@ -63,11 +57,11 @@ public static class SenderKeys
         CryptoService.ZeroOut(msgKey);
         CryptoService.ZeroOut(paddedBytes);
 
-        // Sign ciphertext + messageNumber for authentication
+        // Sign ciphertext + messageNumber
         var sigData = new byte[ciphertext.Length + 4];
         Buffer.BlockCopy(ciphertext, 0, sigData, 0, ciphertext.Length);
         BinaryPrimitives.WriteUInt32BigEndian(sigData.AsSpan(ciphertext.Length), (uint)state.MessageNumber);
-        var signature = CryptoService.SignBytes(sigData, signingSecretKeyB64);
+        var signature = CryptoService.SignBytesB64(sigData, signingSecretKey);
 
         var messageNumber = state.MessageNumber;
         state.MessageNumber++;
@@ -80,29 +74,24 @@ public static class SenderKeys
         );
     }
 
-    /// <summary>
-    /// Decrypt with sender key. Mirrors: senderKeyDecrypt(state, ...) in crypto.js
-    /// </summary>
+    /// <summary>Decrypt with sender key.</summary>
     public static string? Decrypt(
         SenderKeyState state,
         string ciphertextB64,
         string nonceB64,
         int messageNumber,
-        string signature,
-        string signingKeyB64)
+        string signatureB64,
+        byte[] signingKey)
     {
-        // C2: Backup state before mutation — restore on failure
         var backup = state.DeepClone();
         try
         {
-            // Validate messageNumber range (C4: use >= to prevent off-by-one + overflow)
             if (messageNumber < 0 || messageNumber >= MaxMessageNumber)
                 return null;
 
             var ciphertext = Convert.FromBase64String(ciphertextB64);
             var nonce = Convert.FromBase64String(nonceB64);
 
-            // H5/H6: Validate nonce and ciphertext lengths
             if (nonce.Length != 24) return null;
             if (ciphertext.Length < 16) return null;
 
@@ -110,34 +99,28 @@ public static class SenderKeys
             var sigData = new byte[ciphertext.Length + 4];
             Buffer.BlockCopy(ciphertext, 0, sigData, 0, ciphertext.Length);
             BinaryPrimitives.WriteUInt32BigEndian(sigData.AsSpan(ciphertext.Length), (uint)messageNumber);
-            if (!CryptoService.VerifyBytes(sigData, signature, signingKeyB64))
-                return null; // Signature verification failed
-
-            // Old message check
-            if (messageNumber < state.MessageNumber)
+            if (!CryptoService.VerifyBytes(sigData, signatureB64, signingKey))
                 return null;
 
-            // Prevent DoS via massive forward skip
+            if (messageNumber < state.MessageNumber)
+                return null;
             if (messageNumber - state.MessageNumber > MaxSkip)
                 return null;
 
-            var ck = Convert.FromBase64String(state.ChainKey);
+            var ck = (byte[])state.ChainKey.Clone();
             byte[]? msgKey = null;
 
-            // Skip forward to the right message number
             for (int i = state.MessageNumber; i <= messageNumber; i++)
             {
                 var (newCK, mk) = DoubleRatchet.KdfCK(ck);
                 CryptoService.ZeroOut(ck);
                 ck = newCK;
-                if (i == messageNumber)
-                    msgKey = mk;
-                else
-                    CryptoService.ZeroOut(mk);
+                if (i == messageNumber) msgKey = mk;
+                else CryptoService.ZeroOut(mk);
             }
 
-            state.ChainKey = Convert.ToBase64String(ck);
-            CryptoService.ZeroOut(ck);
+            CryptoService.ZeroOut(state.ChainKey);
+            state.ChainKey = ck;
             state.MessageNumber = messageNumber + 1;
 
             var decrypted = SecretBox.Open(ciphertext, nonce, msgKey!);
@@ -148,7 +131,8 @@ public static class SenderKeys
         }
         catch
         {
-            // C2: Rollback state on any failure
+            // Rollback on failure
+            CryptoService.ZeroOut(state.ChainKey);
             state.ChainKey = backup.ChainKey;
             state.MessageNumber = backup.MessageNumber;
             return null;
