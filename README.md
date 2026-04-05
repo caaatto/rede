@@ -34,6 +34,7 @@ auto-updates when a new version is published.
 - **Groups** — Sender Keys for group PFS, Ed25519 signed
 - **Places** — Discord-like servers with channels, customizable profile (icon, accent color). All metadata is E2EE
 - **Voice calls** — E2EE audio via SRTP (AES-128-CM + HMAC-SHA1-80), Opus 96kbps, server relays encrypted packets
+- **Group calls** — LiveKit SFU for Places/Groups, E2EE via SFrame (key never leaves client), up to 25 participants, 1080p60 video
 - **Profile customization** — accent colors, avatar images (PNG/GIF/JPEG), shared with contacts
 - **Multi-device** — each device has its own keys, messages delivered to all devices
 - **Anonymous transport** — connect via I2P or Tor to hide your IP from the server
@@ -97,7 +98,8 @@ Type these in the message input box.
 /pleave <place>             leave a place
 /prekey <place>             rotate the place metadata key
 /ttl <days>                 auto-delete messages after N days (0 = off)
-/call <user#id>             start a voice call
+/call <user#id>             start a 1:1 voice call
+/call                       start a group call in the current place/group
 /hangup                     end the call
 /mute                       toggle microphone
 /link                       generate a device link code
@@ -126,6 +128,12 @@ session, so the server never has access to audio.
 
 Calls appear as an overlay in the chat area with accept/decline, mute, and
 hang up controls.
+
+**Group calls** (Places/Groups) use a LiveKit SFU for media routing, but
+audio and video are still end-to-end encrypted with SFrame. The SFrame key
+is derived from the Place's metadata key (or Group's shared key) via HKDF
+with domain separation — neither the Rede server nor the LiveKit SFU ever
+see it. Up to 25 participants per call, 1080p60 video, Opus audio.
 
 
 ## places
@@ -169,6 +177,7 @@ message size .............. hidden (fixed-size padding)
 group/place membership .... visible (server manages roster)
 channel names/place profile  hidden (E2EE metadata)
 voice audio ............... never visible (SRTP, blind relay)
+group call media .......... never visible (SFrame, SFU blind forward)
 call participants ......... visible (server routes signaling)
 your IP address ........... hidden with I2P/Tor, visible with direct WSS
 ```
