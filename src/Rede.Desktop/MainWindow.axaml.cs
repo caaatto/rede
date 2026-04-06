@@ -1349,6 +1349,20 @@ public partial class MainWindow : Window
                 }
                 break;
 
+            case "resync" when args.Length >= 1:
+                if (_auth?.Profile is not null && _auth.Passphrase is not null)
+                {
+                    var uid = args[0];
+                    // Delete all ratchet states for this contact to force new X3DH
+                    var keysToRemove = _auth.Profile.RatchetStates.Keys
+                        .Where(k => k == uid || k.StartsWith(uid + ":")).ToList();
+                    foreach (var key in keysToRemove)
+                        _auth.Profile.RatchetStates.Remove(key);
+                    _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+                    _mainVm.AddSystemMessage($"Ratchet session reset for {uid}. Next message will establish a new session.");
+                }
+                break;
+
             case "confirm" when args.Length >= 1:
                 // Accept pending new devices for this contact
                 AcceptPendingDevices(args[0]);
