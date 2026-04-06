@@ -207,7 +207,7 @@ public static class CryptoService
     {
         var result = Sodium.ScalarMult.Mult(secretKey, publicKey);
         if (result.All(b => b == 0))
-            throw new CryptographicException("DH produced all-zeros output — invalid public key.");
+            throw new CryptographicException("DH produced all-zeros output - invalid public key.");
         return result;
     }
 

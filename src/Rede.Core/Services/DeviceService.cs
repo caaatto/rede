@@ -80,13 +80,13 @@ public class DeviceService : IDisposable
             skBytes = Convert.FromBase64String(signingKey);
             if (pkBytes.Length != 32 || skBytes.Length != 32)
             {
-                OnSystemMessage?.Invoke("[SECURITY] Invalid device keys in DEVICE_ADDED — ignored.");
+                OnSystemMessage?.Invoke("[SECURITY] Invalid device keys in DEVICE_ADDED - ignored.");
                 return;
             }
         }
         catch
         {
-            OnSystemMessage?.Invoke("[SECURITY] Invalid device keys in DEVICE_ADDED — ignored.");
+            OnSystemMessage?.Invoke("[SECURITY] Invalid device keys in DEVICE_ADDED - ignored.");
             return;
         }
 

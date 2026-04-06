@@ -190,10 +190,10 @@ public class DoubleRatchet
         }
 
         if (state.CKs is null)
-            throw new InvalidOperationException("Sending chain not initialized — wait for first incoming message");
+            throw new InvalidOperationException("Sending chain not initialized - wait for first incoming message");
 
         if (state.Ns >= MaxMessageNumber)
-            throw new InvalidOperationException("Message counter limit reached — session must be re-established.");
+            throw new InvalidOperationException("Message counter limit reached - session must be re-established.");
 
         var (newCK, msgKey) = KdfCK(state.CKs);
         CryptoService.ZeroOut(state.CKs);

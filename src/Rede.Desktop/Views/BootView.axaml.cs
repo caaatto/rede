@@ -290,7 +290,7 @@ public partial class BootView : UserControl
         Dispatcher.UIThread.Post(() =>
         {
             // Replace or append queue line
-            var queueLine = $"  [QUEUE   ] ... Position {position}/{total} — waiting for slot";
+            var queueLine = $"  [QUEUE   ] ... Position {position}/{total} - waiting for slot";
             var text = _buffer.ToString();
             var idx = text.IndexOf("  [QUEUE   ]", StringComparison.Ordinal);
             if (idx >= 0)
@@ -320,7 +320,7 @@ public partial class BootView : UserControl
                 var end = text.IndexOf('\n', idx);
                 if (end < 0) end = text.Length;
                 _buffer.Remove(idx, end - idx);
-                _buffer.Insert(idx, "  [QUEUE   ] ... ADMITTED — connecting");
+                _buffer.Insert(idx, "  [QUEUE   ] ... ADMITTED - connecting");
             }
             _bootText.Text = _buffer.ToString();
             _scroller.ScrollToEnd();

@@ -156,7 +156,7 @@ public class RedeConnection : IDisposable
             {
                 _pinnedCertFingerprint = fp;
                 SavePinnedCert(fp);
-                OnError?.Invoke("[TOFU] First connection — certificate pinned. Verify with server admin!");
+                OnError?.Invoke("[TOFU] First connection - certificate pinned. Verify with server admin!");
                 return true;
             }
             if (_pinnedCertFingerprint != fp)
@@ -222,7 +222,7 @@ public class RedeConnection : IDisposable
         // L3: Reject oversized outgoing messages
         if (bytes.Length > MaxOutgoingSize)
         {
-            OnError?.Invoke("[WARNING] Outgoing message too large — dropped.");
+            OnError?.Invoke("[WARNING] Outgoing message too large - dropped.");
             return false;
         }
 
@@ -277,7 +277,7 @@ public class RedeConnection : IDisposable
         // H7: Outgoing size limit (same as sync Send)
         if (bytes.Length > MaxOutgoingSize)
         {
-            OnError?.Invoke("[WARNING] Outgoing message too large — dropped.");
+            OnError?.Invoke("[WARNING] Outgoing message too large - dropped.");
             return false;
         }
 

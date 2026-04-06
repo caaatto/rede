@@ -238,8 +238,8 @@ public partial class SettingsViewModel : ViewModelBase
     public string OutputVolumeText => $"{(int)OutputVolume}%";
     public string NoiseGateText => NoiseGateThreshold < 1 ? "Off" : $"{(int)NoiseGateThreshold}%";
     public string NoiseSuppressionStatus => IsNoiseSuppressionAvailable
-        ? "RNNoise — removes background noise from your mic"
-        : "Not available — install librnnoise on your system";
+        ? "RNNoise - removes background noise from your mic"
+        : "RNNoise unavailable on this platform";
 
     public event Action? OnBackRequested;
     public event Action? OnAudioSettingsChanged;

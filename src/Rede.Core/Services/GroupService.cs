@@ -86,11 +86,11 @@ public class GroupService : IDisposable
                 sig,
             });
             chatService.SendMessage(userId, keyMsg, 0);
-            OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" — group key sent.");
+            OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" - group key sent.");
         }
         else
         {
-            OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" (key must be sent manually — add them as contact first).");
+            OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" (key must be sent manually - add them as contact first).");
         }
     }
 
@@ -289,13 +289,13 @@ public class GroupService : IDisposable
         // C4: Verify group exists and sender is a member
         if (!Profile.Groups.TryGetValue(groupId, out var group))
         {
-            OnSystemMessage?.Invoke($"Message for unknown group {groupId} — dropped.");
+            OnSystemMessage?.Invoke($"Message for unknown group {groupId} - dropped.");
             return;
         }
         // M5: Also reject if member list is empty (not yet populated)
         if (group.Members is null || group.Members.Count == 0 || !group.Members.Contains(from))
         {
-            OnSystemMessage?.Invoke($"[SECURITY] Non-member {from} sent to group {groupId} — dropped.");
+            OnSystemMessage?.Invoke($"[SECURITY] Non-member {from} sent to group {groupId} - dropped.");
             return;
         }
 

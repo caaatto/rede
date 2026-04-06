@@ -92,7 +92,7 @@ public class NotificationService
         if (_showContent)
         {
             var preview = messageText.Length > 200 ? messageText[..200] + "..." : messageText;
-            Show($"{groupName} — {senderName}", preview);
+            Show($"{groupName} - {senderName}", preview);
         }
         else
         {

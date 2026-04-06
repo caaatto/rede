@@ -230,7 +230,7 @@ public class DiscordImportService
             }
         }
 
-        OnStatus?.Invoke($"Discord import ready: \"{data.Name}\" — {data.Channels.Count} channels, {data.Emotes.Count} emotes, {data.Channels.Sum(c => c.Messages.Count)} messages total.");
+        OnStatus?.Invoke($"Discord import ready: \"{data.Name}\" - {data.Channels.Count} channels, {data.Emotes.Count} emotes, {data.Channels.Sum(c => c.Messages.Count)} messages total.");
         return data;
     }
 
@@ -379,7 +379,7 @@ public class DiscordImportService
             }
         }
 
-        OnStatus?.Invoke($"Import complete: \"{data.Name}\" — {channelIdMap.Count} channels, {data.Emotes.Count} emotes, {totalMsgs} messages imported.");
+        OnStatus?.Invoke($"Import complete: \"{data.Name}\" - {channelIdMap.Count} channels, {data.Emotes.Count} emotes, {totalMsgs} messages imported.");
     }
 
     private static string FormatMessageBatch(List<DiscordMessage> messages)

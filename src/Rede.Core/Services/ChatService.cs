@@ -156,7 +156,7 @@ public class ChatService : IDisposable
             // H9: Bound pending queue to prevent memory exhaustion
             if (_pendingOutgoing[targetId].Count >= 100)
             {
-                OnSystemMessage?.Invoke("Too many pending messages — wait for session to establish.");
+                OnSystemMessage?.Invoke("Too many pending messages - wait for session to establish.");
                 return;
             }
             _pendingOutgoing[targetId].Add((text, ttl));
@@ -208,7 +208,7 @@ public class ChatService : IDisposable
             // Restore ratchet state on failure
             var backupJson = JsonSerializer.SerializeToElement(backup);
             _store.SaveRatchetStateAsync(Profile, targetId, backupJson, Passphrase, devId);
-            OnSystemMessage?.Invoke("Message not sent — connection lost. Ratchet state preserved.");
+            OnSystemMessage?.Invoke("Message not sent - connection lost. Ratchet state preserved.");
             return;
         }
 
@@ -415,7 +415,7 @@ public class ChatService : IDisposable
 
         if (Profile.SignedPreKey is null)
         {
-            OnSystemMessage?.Invoke("Cannot establish session — no signed pre-key.");
+            OnSystemMessage?.Invoke("Cannot establish session - no signed pre-key.");
             return null;
         }
 
@@ -531,7 +531,7 @@ public class ChatService : IDisposable
 
         if (!Profile.Contacts.TryGetValue(targetUserId, out var contact))
         {
-            OnSystemMessage?.Invoke($"Cannot establish session — {targetUserId} is not a contact.");
+            OnSystemMessage?.Invoke($"Cannot establish session - {targetUserId} is not a contact.");
             return;
         }
 
@@ -632,7 +632,7 @@ public class ChatService : IDisposable
 
             if (x3dhResult is null)
             {
-                OnSystemMessage?.Invoke($"X3DH failed for device {devId ?? "primary"} — invalid pre-key signature.");
+                OnSystemMessage?.Invoke($"X3DH failed for device {devId ?? "primary"} - invalid pre-key signature.");
                 continue;
             }
 

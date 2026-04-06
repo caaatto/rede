@@ -129,7 +129,7 @@ public partial class GroupCallWindow : Window
 
     private void ShowError(string title, string message)
     {
-        Title = title + " — " + message;
+        Title = title + " - " + message;
         var loading = this.FindControl<TextBlock>("LoadingDetail");
         if (loading is not null) loading.Text = message;
     }

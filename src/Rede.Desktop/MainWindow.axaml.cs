@@ -202,7 +202,7 @@ public partial class MainWindow : Window
                 Dispatcher.UIThread.Post(() =>
                 {
                     _loginVm.StatusMessage = release.DownloadUrl is not null
-                        ? $"Update available: {release.Tag} — click to install"
+                        ? $"Update available: {release.Tag} - click to install"
                         : $"Update available: {release.Tag} (no binary for this platform)";
                     _loginVm.IsUpdateAvailable = release.DownloadUrl is not null;
                 });
@@ -469,7 +469,7 @@ public partial class MainWindow : Window
             var key = GroupCallService.DeriveSFrameKey(_auth.Profile, info.Scope, info.CallId);
             if (key is null)
             {
-                _mainVm.AddSystemMessage("[Call] No E2EE key available for this scope — call aborted.");
+                _mainVm.AddSystemMessage("[Call] No E2EE key available for this scope - call aborted.");
                 _groupCall?.EndCall();
                 return;
             }
@@ -847,14 +847,14 @@ public partial class MainWindow : Window
             if (string.IsNullOrEmpty(senderId) || string.IsNullOrEmpty(sig))
             {
                 Dispatcher.UIThread.Post(() =>
-                    _mainVm.AddSystemMessage($"[SECURITY] Group key without sender/signature — rejected."));
+                    _mainVm.AddSystemMessage($"[SECURITY] Group key without sender/signature - rejected."));
                 return;
             }
 
             if (!profile.Contacts.TryGetValue(senderId, out var sender) || sender.SigningKey is null)
             {
                 Dispatcher.UIThread.Post(() =>
-                    _mainVm.AddSystemMessage($"[SECURITY] Group key from unknown sender {senderId} — rejected."));
+                    _mainVm.AddSystemMessage($"[SECURITY] Group key from unknown sender {senderId} - rejected."));
                 return;
             }
 
@@ -867,7 +867,7 @@ public partial class MainWindow : Window
             catch
             {
                 Dispatcher.UIThread.Post(() =>
-                    _mainVm.AddSystemMessage($"[SECURITY] Malformed group key payload from {senderId} — rejected."));
+                    _mainVm.AddSystemMessage($"[SECURITY] Malformed group key payload from {senderId} - rejected."));
                 return;
             }
 
@@ -1355,7 +1355,7 @@ public partial class MainWindow : Window
                 // K3: Clamp TTL to valid range (0=off, 1-365 days)
                 ttl = Math.Clamp(ttl, 0, 365);
                 _mainVm.TtlSeconds = ttl;
-                _mainVm.AddSystemMessage(ttl > 0 ? $"TTL set to {ttl} day(s) — messages auto-delete after {ttl}d" : "TTL disabled");
+                _mainVm.AddSystemMessage(ttl > 0 ? $"TTL set to {ttl} day(s) - messages auto-delete after {ttl}d" : "TTL disabled");
                 break;
 
             case "link":

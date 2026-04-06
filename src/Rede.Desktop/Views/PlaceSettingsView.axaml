@@ -47,7 +47,7 @@
                                Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <TextBlock Text="{Binding PlaceName}" Classes="title" VerticalAlignment="Center" />
-                <TextBlock Text="— Settings" Classes="secondary" VerticalAlignment="Center" />
+                <TextBlock Text="- Settings" Classes="secondary" VerticalAlignment="Center" />
             </StackPanel>
             <Border Grid.Column="2" Width="60" />
         </Grid>

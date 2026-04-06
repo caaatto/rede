@@ -326,7 +326,7 @@ public partial class BanViewModel : ViewModelBase
 
     public string DisplayId => UserId.Length > 16 ? UserId[..16] + "..." : UserId;
     public string Summary => $"{DisplayId} banned by {BannedBy}";
-    public string DetailLine => string.IsNullOrEmpty(Reason) ? BannedAt : $"{Reason} — {BannedAt}";
+    public string DetailLine => string.IsNullOrEmpty(Reason) ? BannedAt : $"{Reason} - {BannedAt}";
 }
 
 public partial class EmoteViewModel : ViewModelBase
@@ -335,5 +335,5 @@ public partial class EmoteViewModel : ViewModelBase
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private string _uploadedBy = "";
 
-    public string DisplayText => $":{Name}: — uploaded by {UploadedBy}";
+    public string DisplayText => $":{Name}: - uploaded by {UploadedBy}";
 }

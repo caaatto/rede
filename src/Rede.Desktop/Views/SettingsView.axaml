@@ -180,7 +180,7 @@
                             </ComboBox>
                         </Grid>
 
-                        <TextBlock Text="Dark — default near-black cinematic. Midnight — pure black, higher contrast. Dim — softer dark gray. Light — white/gray for bright environments."
+                        <TextBlock Text="Dark - default near-black cinematic. Midnight - pure black, higher contrast. Dim - softer dark gray. Light - white/gray for bright environments."
                                    Classes="secondary" TextWrapping="Wrap" FontSize="11" />
                     </StackPanel>
 
@@ -256,7 +256,7 @@
                                           OnContent="On" OffContent="Off"
                                           Margin="0,8,0,0" />
                         </Grid>
-                        <TextBlock Text="When 'Show Sender &amp; Content' is off (default), notifications only say 'New message' — no metadata is leaked to the OS notification system. Suppressed when status is Do Not Disturb."
+                        <TextBlock Text="When 'Show Sender &amp; Content' is off (default), notifications only say 'New message' - no metadata is leaked to the OS notification system. Suppressed when status is Do Not Disturb."
                                    Classes="secondary" TextWrapping="Wrap" FontSize="11" />
                     </StackPanel>
 

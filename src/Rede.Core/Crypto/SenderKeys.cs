@@ -62,7 +62,7 @@ public static class SenderKeys
     public static EncryptResult Encrypt(SenderKeyState state, string plaintext, byte[] signingSecretKey, string contextId)
     {
         if (state.MessageNumber >= MaxMessageNumber)
-            throw new InvalidOperationException("Sender key message limit reached — rekey required.");
+            throw new InvalidOperationException("Sender key message limit reached - rekey required.");
 
         var (newCK, msgKey) = DoubleRatchet.KdfCK(state.ChainKey);
         CryptoService.ZeroOut(state.ChainKey);

@@ -185,7 +185,7 @@ public class CallService : IDisposable
         {
             if (_state == CallState.Offering)
             {
-                EndCall("Timeout — no answer");
+                EndCall("Timeout - no answer");
             }
         };
         _offerTimeout.Start();
