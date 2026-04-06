@@ -87,6 +87,36 @@ public class ContactService : IDisposable
         return null;
     }
 
+    /// <summary>Remove a contact and all associated data (chat history, ratchet states).</summary>
+    public async Task<bool> RemoveContact(string userId)
+    {
+        if (Profile is null || Passphrase is null) return false;
+        if (!Profile.Contacts.Remove(userId)) return false;
+
+        // Remove chat history for this contact
+        Profile.ChatHistory.Remove(userId);
+
+        // Remove ratchet states for all devices of this contact (keyed as "userId:deviceId")
+        var ratchetKeysToRemove = Profile.RatchetStates.Keys
+            .Where(k => k == userId || k.StartsWith(userId + ":"))
+            .ToList();
+        foreach (var key in ratchetKeysToRemove)
+            Profile.RatchetStates.Remove(key);
+
+        // Remove sender keys for this contact (if any)
+        var senderKeysToRemove = Profile.SenderKeys.Keys
+            .Where(k => k == userId || k.StartsWith(userId + ":"))
+            .ToList();
+        foreach (var key in senderKeysToRemove)
+            Profile.SenderKeys.Remove(key);
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        await _store.FlushAsync(Profile, Passphrase);
+        OnContactsChanged?.Invoke();
+        OnSystemMessage?.Invoke($"Contact {userId} removed.");
+        return true;
+    }
+
     /// <summary>Get all contacts.</summary>
     public IReadOnlyDictionary<string, Contact>? GetContacts() => Profile?.Contacts;
 

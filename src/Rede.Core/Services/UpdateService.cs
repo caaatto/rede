@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.18.8-beta";
+    private const string CurrentVersion = "2.18.9-beta";
 
     /// <summary>
     /// Ed25519 public key (base64, 32 bytes) of the release signing key. When set,

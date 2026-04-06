@@ -1135,6 +1135,16 @@ public partial class MainView : UserControl
         fpItem.Click += (_, _) => vm.ExecuteCommand("fingerprint", new[] { contact.UserId });
         menu.Items.Add(fpItem);
 
+        menu.Items.Add(new Separator());
+
+        var deleteItem = new MenuItem
+        {
+            Header = "Delete contact",
+            Foreground = Brush.Parse("#ef4444"),
+        };
+        deleteItem.Click += (_, _) => vm.ExecuteCommand("remove", new[] { contact.UserId });
+        menu.Items.Add(deleteItem);
+
         btn.ContextMenu = menu;
         menu.Closed += (_, _) => btn.ContextMenu = null;
         menu.Open(btn);

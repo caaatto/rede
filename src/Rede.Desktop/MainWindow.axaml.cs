@@ -1329,6 +1329,26 @@ public partial class MainWindow : Window
                 _contacts?.AddContact(args[0]);
                 break;
 
+            case "remove" or "delete" when args.Length >= 1:
+                if (_contacts is not null)
+                {
+                    var contactId = args[0];
+                    _ = _contacts.RemoveContact(contactId).ContinueWith(t =>
+                    {
+                        if (t.Result)
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                if (_mainVm.SelectedConversation is ContactItemViewModel selC && selC.UserId == contactId)
+                                {
+                                    _mainVm.SelectedConversation = null;
+                                    _mainVm.Messages.Clear();
+                                }
+                                RefreshContacts();
+                            });
+                    }, TaskScheduler.Default);
+                }
+                break;
+
             case "confirm" when args.Length >= 1:
                 // Accept pending new devices for this contact
                 AcceptPendingDevices(args[0]);
@@ -1646,7 +1666,7 @@ public partial class MainWindow : Window
                 break;
 
             case "help":
-                _mainVm.AddSystemMessage("Commands: /add <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id>, /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pban <place> <uid> [reason], /punban <place> <uid>, /prole <place> <uid> <admin|member>, /ptopic <place> <chId> <text>, /pcategory <place> <name>, /pcategoryrm <place> <name>, /pleave <place>, /prekey <place>, /discord <token> <guild-id>");
+                _mainVm.AddSystemMessage("Commands: /add <id>, /remove <id>, /confirm <id>, /fingerprint [id], /group <name>, /ginvite <gid> <uid>, /kick <gid> <uid>, /ttl <days>, /link, /devices, /call <id>, /hangup, /mute, /settings, /place <name>, /pchannel <place> <name>, /pinvite <place> <uid>, /pkick <place> <uid>, /pban <place> <uid> [reason], /punban <place> <uid>, /prole <place> <uid> <admin|member>, /ptopic <place> <chId> <text>, /pcategory <place> <name>, /pcategoryrm <place> <name>, /pleave <place>, /prekey <place>, /discord <token> <guild-id>");
                 break;
 
             default:
