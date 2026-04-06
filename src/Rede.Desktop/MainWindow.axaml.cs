@@ -793,11 +793,14 @@ public partial class MainWindow : Window
         // Chat events
         _chat.OnMessageReceived += (from, text, chatId, ts, isSealed) => Dispatcher.UIThread.Post(() =>
         {
-            _mainVm.AddIncomingMessage(from, text, ts);
+            // Only render in chat if the matching conversation is selected;
+            // message is already persisted in chat history by the service layer
+            if (_mainVm.SelectedConversation is ContactItemViewModel sel && sel.UserId == from)
+                _mainVm.AddIncomingMessage(from, text, ts);
             MarkContactUnread(from);
 
             // Desktop notification if not viewing this conversation
-            if (_mainVm.SelectedConversation is not ContactItemViewModel sel || sel.UserId != from)
+            if (_mainVm.SelectedConversation is not ContactItemViewModel selN || selN.UserId != from)
             {
                 var displayName = _auth?.Profile?.Contacts.TryGetValue(from, out var c) == true
                     ? c.DisplayName ?? from : from;
@@ -911,11 +914,13 @@ public partial class MainWindow : Window
         // Group events
         _groups.OnGroupMessageReceived += (groupId, from, text, ts) => Dispatcher.UIThread.Post(() =>
         {
-            _mainVm.AddIncomingMessage(from, text, ts);
+            // Only render in chat if the matching group is selected
+            if (_mainVm.SelectedConversation is GroupItemViewModel selG && selG.GroupId == groupId)
+                _mainVm.AddIncomingMessage(from, text, ts);
             MarkGroupUnread(groupId);
 
             // Desktop notification if not viewing this group
-            if (_mainVm.SelectedConversation is not GroupItemViewModel selG || selG.GroupId != groupId)
+            if (_mainVm.SelectedConversation is not GroupItemViewModel selGn || selGn.GroupId != groupId)
             {
                 var groupName = _auth?.Profile?.Groups.TryGetValue(groupId, out var g) == true
                     ? g.Name : groupId;

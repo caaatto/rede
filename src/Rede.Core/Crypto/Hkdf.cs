@@ -34,11 +34,17 @@ public static class Hkdf
             hmac.TransformBlock(t, 0, t.Length, null, 0);
             hmac.TransformBlock(info, 0, info.Length, null, 0);
             hmac.TransformFinalBlock(new[] { (byte)i }, 0, 1);
+            var prev = t;
             t = hmac.Hash!;
+            // Zero previous HMAC intermediate (defense-in-depth)
+            if (prev.Length > 0) CryptoService.ZeroOut(prev);
             int toCopy = Math.Min(t.Length, length - offset);
             Buffer.BlockCopy(t, 0, okm, offset, toCopy);
             offset += toCopy;
         }
+
+        // Zero final HMAC intermediate
+        if (t.Length > 0) CryptoService.ZeroOut(t);
 
         return okm;
     }

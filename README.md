@@ -33,7 +33,7 @@ auto-updates when a new version is published.
 - **Sealed sender** — the server can't see who sent a message
 - **Groups** — Sender Keys for group PFS, Ed25519 signed
 - **Places** — Discord-like servers with channels, customizable profile (icon, accent color). All metadata is E2EE
-- **Voice calls** — E2EE audio via SRTP (AES-128-CM + HMAC-SHA1-80), Opus 96kbps, server relays encrypted packets
+- **Voice calls** — E2EE audio via SRTP (AES-128-CM + HMAC-SHA1-80), Opus 96kbps, RNNoise suppression, AGC, echo cancellation
 - **Group calls** — LiveKit SFU for Places/Groups, E2EE via SFrame (key never leaves client), up to 25 participants, 1080p60 video
 - **Profile customization** — accent colors, avatar images (PNG/GIF/JPEG), shared with contacts
 - **Multi-device** — each device has its own keys, messages delivered to all devices

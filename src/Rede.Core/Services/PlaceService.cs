@@ -273,6 +273,13 @@ public class PlaceService : IDisposable
             return;
         }
 
+        // Permission check: admin+ required to create channels
+        if (!HasPermission(place, Profile.UserId!, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only admins can create channels.");
+            return;
+        }
+
         // Sanitize channel name
         name = SanitizeMetadataString(name, 64);
         if (string.IsNullOrEmpty(name))

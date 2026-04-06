@@ -88,7 +88,7 @@ public partial class GroupCallWindow : Window
             ["displayName"] = _displayName ?? "",
             ["e2eeKey"] = _e2eeKeyBase64 ?? "",
         };
-        var json = cfg.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        var json = cfg.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default });
 
         // Wrap in a self-zeroing call so the config object is not left reachable
         // on window.* after __redeInit has consumed it.

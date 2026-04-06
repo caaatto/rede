@@ -296,8 +296,40 @@
 [x] L4: `blobFetchLimits` Cleanup — Hinzugefügt zum 60s-Cleanup-Interval.
 [x] L5: `store.cleanupBlobs()` fehlender `await` — Hinzugefügt im Cleanup-Interval.
 
+## Security Audit (2026-04-06, Runde 12) — Gefixte Findings
+
+### Medium (Crypto)
+[x] M1: X3dh.Initiate() fehlende Low-Order-Point-Validierung — `IsValidDhPublicKey()` Checks für IdentityKey, SignedPreKey und OneTimePreKey vor DH-Operationen. Respond() hatte bereits Length-Checks, DH() rejectet All-Zeros Output — Initiate fehlte die Subgroup-Check-Schicht.
+[x] M2: HKDF.Expand() Intermediate `t` nicht gezeroed — Vorheriger HMAC-Output wird jetzt per `CryptoService.ZeroOut()` gezeroed bevor neuer `t` zugewiesen wird. Finaler `t` nach Loop ebenfalls gezeroed.
+
+### Medium (Server)
+[x] M3: gcallPseudonym ohne callId — `callId` wird jetzt in den HMAC-Input gemischt (`PSEUDO:userId:roomName:callId`). Pseudonyme sind damit über verschiedene Call-Sessions hinweg unlinkable, selbst wenn der gleiche Room wiederverwendet wird.
+
+### Medium (Services)
+[x] M4: PlaceService.CreateChannel ohne Permission-Check — `HasPermission(place, Profile.UserId, PlaceRole.Admin)` Guard hinzugefügt. Nur Admins+ können Channels erstellen.
+
+### Medium (Crypto, defense-in-depth)
+[x] M5: DoubleRatchet.InitSender fehlende Low-Order-Point-Validierung — `IsValidDhPublicKey(recipientDHPub)` Check vor Ratchet-Initialisierung. DhRatchetStep hatte den Check bereits, InitSender fehlte.
+
+### Medium (UI)
+[x] M6: Nachrichten aus falscher Conversation in aktiver Chat-View — `OnMessageReceived` und `OnGroupMessageReceived` renderten Nachrichten unabhängig von der selektierten Conversation. Jetzt: `AddIncomingMessage` nur wenn `SelectedConversation` zum Sender/Gruppe passt. History-Persistierung war bereits korrekt (Service-Layer), `LoadChatHistory` zeigt Nachrichten beim Conversation-Wechsel.
+[x] M7: `UnsafeRelaxedJsonEscaping` in GroupCallWindow WebView — Erlaubte `<`, `>`, `'` in JSON-String der per `ExecuteScriptAsync` injiziert wird. Ein bösartiger Server-Response (Token/RoomName) konnte aus dem JSON-Literal ausbrechen. Fix: `JavaScriptEncoder.Default` (escapet HTML-sensitive Zeichen).
+
+### Medium (v1 JS Client)
+[x] M8: crypto.js fehlende Counter-Limits — `ratchetEncrypt` und `senderKeyEncrypt` hatten kein Limit für `Ns`/`messageNumber`. v2 C# hat `MaxMessageNumber` (1B/10K), v1 JS konnte unbegrenzt weiter senden. Fix: `MAX_RATCHET_MESSAGE_NUMBER = 1_000_000_000`, `MAX_SENDER_KEY_MESSAGE_NUMBER = 10_000` mit throw bei Erschöpfung.
+
+### Analysiert, kein Fix nötig
+- Blob-Fetch ohne Zugriffskontrolle — Blobs sind E2EE (AES/nacl.secretbox), blobIds random (128-bit). Explizite ACLs würden erfordern, dass der Server Message-Routing-Metadaten persistiert (wer hat welchen blobId an wen geschickt), was die Sealed-Sender-Privacy untergraben würde. Risiko akzeptiert: Auth + Rate-Limit (30/min) + E2EE + Random-IDs sind ausreichend.
+- SRTP uint32 Sequence-Overflow nach ~25h — Kein realistisches Szenario (Calls werden nicht 25h gehalten). Bei Bedarf Reconnect.
+- NonceTracker Flooding — Hard-Cap (10k) + Stale-Eviction (>1h) bereits implementiert (Runde 8 H1).
+- Delivery Token nicht Connection-gebunden — HMAC(secret, timestamp) ohne userId-Binding, 24h gültig. Risiko niedrig: gestohlenes Token erlaubt nur opaque Sealed Messages (ohne Ratchet-Session nicht entschlüsselbar).
+- Place Member-List Client-Desync — Lokale Member-Liste aus E2EE Metadata kann bei Kick-Propagierung verzögert sein. Server-seitige Checks sind autoritativ, E2EE-Schicht bleibt korrekt.
+- Metadata Bandwidth Amplification — Volle Metadata (inkl. Emotes, Bans) bei jedem Admin-Action an alle Members. Inkrementelle Updates wären besser, aber architekturell aufwändig.
+- ProfileEncryption Legacy-HMAC Triple-scrypt — Bis zu 3 scrypt-Derivationen bei Legacy-Profilen. Akzeptiert: betrifft nur Migration von sehr alten Profilen.
+- SecureTextBox IME-Kompatibilität — Kein IME-Support (CJK-Input). Feature-Gap, kein Security-Issue.
+
 ### Bekannte Einschränkungen (nicht gefixt)
 - Status-Broadcast O(N²) — Architekturelles Trade-off für Privacy (Server kennt keine Contact-Listen). Rate-Limited 5/min pro User (Runde 6 H5). Kein Fix ohne Subscription-Modell, das den Social Graph leaken würde.
 - ~~Sender Keys Legacy-Signatur-Fallback (ohne contextId)~~ — GEFIXT: Legacy-Fallback in `SenderKeys.cs` (C#) und `crypto.js` (JS) entfernt. Alle Clients seit v2.17.3 signieren mit contextId. Pre-v2.17.3 Nachrichten werden nicht mehr akzeptiert.
 - ~~Ed25519 Release-Signatur~~ — GEFIXT: Keypair generiert, Public Key eingetragen, Signing-Script erstellt. Siehe oben.
-- OTP-Verbrauch vor Decrypt-Verifizierung (v1) — Server-seitig konsumiert, kann nicht client-seitig rückgängig gemacht werden. Rate-Limited 20/hr.
+- ~~OTP-Verbrauch vor Decrypt-Verifizierung~~ — GEFIXT: Deferred OTP Consumption. `fetchPreKeyBundle` gibt OTPs zurück ohne sie zu poppen. OTP-Reservierung pro Sender+Target (5min TTL) verhindert, dass verschiedene Sender denselben OTP bekommen. `consumeOTP(userId, deviceId, otpkId)` wird erst in `handleMessage` aufgerufen, wenn ein `x3dh.usedOTPKId` im tatsächlich gesendeten Message vorhanden ist. Abgelaufene Reservierungen werden im 60s-Cleanup recycled. Beide Stores (SQLite `store.js` + PostgreSQL `pg-store.js`) aktualisiert.

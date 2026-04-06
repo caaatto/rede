@@ -121,6 +121,10 @@ public class DoubleRatchet
     /// <summary>Initialize ratchet as sender (after X3DH initiator). sharedSecret is zeroed.</summary>
     public static RatchetState InitSender(byte[] sharedSecret, byte[] recipientDHPub)
     {
+        // Reject low-order / small-subgroup DH public keys (defense-in-depth)
+        if (!CryptoService.IsValidDhPublicKey(recipientDHPub))
+            throw new CryptographicException("Recipient DH public key is a low-order point.");
+
         var dhKP = PublicKeyBox.GenerateKeyPair();
         var rkCopy = (byte[])sharedSecret.Clone();
         CryptoService.ZeroOut(sharedSecret);

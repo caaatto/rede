@@ -441,7 +441,14 @@ function ratchetInitReceiver(sharedSecret, ourDHKeyPair) {
 }
 
 // Encrypt a message with the Double Ratchet
+const MAX_RATCHET_MESSAGE_NUMBER = 1_000_000_000;
+const MAX_SENDER_KEY_MESSAGE_NUMBER = 10_000;
+
 function ratchetEncrypt(state, plaintext) {
+  if (state.Ns >= MAX_RATCHET_MESSAGE_NUMBER) {
+    throw new Error('Ratchet message counter exhausted — session reset required');
+  }
+
   // If this is the first message and we have DHr (recipient's key), perform DH ratchet step
   if (!state.CKs && state.DHr) {
     const dhSec = naclUtil.decodeBase64(state.DHs.secretKey);
@@ -635,6 +642,10 @@ function buildSigData(ciphertext, messageNumber, contextId) {
 }
 
 function senderKeyEncrypt(state, plaintext, signingSecretKeyB64, contextId) {
+  if (state.messageNumber >= MAX_SENDER_KEY_MESSAGE_NUMBER) {
+    throw new Error('Sender key counter exhausted — rekey required');
+  }
+
   const ck = naclUtil.decodeBase64(state.chainKey);
   const [newCK, msgKey] = kdfCK(ck);
   zeroOut(ck);

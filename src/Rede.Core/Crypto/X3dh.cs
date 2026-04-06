@@ -86,6 +86,11 @@ public static class X3dh
         if (recipientBundle.SigningKey.Length != 32) return null;
         if (recipientBundle.OneTimePreKey is not null && recipientBundle.OneTimePreKey.Key.Length != 32) return null;
 
+        // Reject low-order / small-subgroup public keys (defense-in-depth)
+        if (!CryptoService.IsValidDhPublicKey(recipientBundle.IdentityKey)) return null;
+        if (!CryptoService.IsValidDhPublicKey(recipientBundle.SignedPreKey)) return null;
+        if (recipientBundle.OneTimePreKey is not null && !CryptoService.IsValidDhPublicKey(recipientBundle.OneTimePreKey.Key)) return null;
+
         // Verify signed pre-key signature
         if (!CryptoService.Verify(recipientBundle.SignedPreKey, recipientBundle.SignedPreKeySig, recipientBundle.SigningKey))
             return null;
