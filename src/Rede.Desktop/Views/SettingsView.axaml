@@ -84,7 +84,7 @@
             </Border>
 
             <!-- Content area -->
-            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="32,8,32,24">
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,8,32,24">
                 <Grid MaxWidth="560" HorizontalAlignment="Center"
                       RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 

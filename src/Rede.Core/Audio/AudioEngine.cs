@@ -158,6 +158,92 @@ public class AudioEngine : IDisposable
 
     public bool IsRunning => _running;
 
+    private volatile bool _monitorOnly;
+    private PortAudioSharp.Stream? _monitorStream;
+
+    /// <summary>
+    /// Start input-only monitoring for the level meter (no encoding, no call).
+    /// Used by Settings to show live mic level. Call StopMonitor() when leaving Settings.
+    /// </summary>
+    public void StartMonitor()
+    {
+        if (_running || _monitorOnly) return;
+        try
+        {
+            PortAudioSharp.PortAudio.Initialize();
+            var inputDev = _selectedInputDevice >= 0 ? _selectedInputDevice : PortAudioSharp.PortAudio.DefaultInputDevice;
+            var inputParams = new PortAudioSharp.StreamParameters
+            {
+                device = inputDev,
+                channelCount = Channels,
+                sampleFormat = PortAudioSharp.SampleFormat.Int16,
+                suggestedLatency = PortAudioSharp.PortAudio.GetDeviceInfo(inputDev).defaultLowInputLatency,
+            };
+
+            // Initialize RNNoise if enabled (for accurate level display after suppression)
+            if (_noiseSuppression && _rnnoise is null && RNNoise.IsAvailable)
+            {
+                try { _rnnoise = new RNNoise(); } catch { _rnnoise = null; }
+            }
+
+            _monitorOnly = true;
+            _monitorStream = new PortAudioSharp.Stream(
+                inParams: inputParams, outParams: null,
+                sampleRate: SampleRate, framesPerBuffer: (uint)FrameSize,
+                streamFlags: PortAudioSharp.StreamFlags.ClipOff,
+                callback: MonitorCallback, userData: IntPtr.Zero);
+            _monitorStream.Start();
+        }
+        catch { _monitorOnly = false; }
+    }
+
+    /// <summary>Stop input monitoring (called when leaving Settings).</summary>
+    public void StopMonitor()
+    {
+        _monitorOnly = false;
+        try { _monitorStream?.Stop(); } catch { }
+        try { _monitorStream?.Dispose(); } catch { }
+        _monitorStream = null;
+        _currentInputLevelDb = -100f;
+        try { PortAudioSharp.PortAudio.Terminate(); } catch { }
+    }
+
+    private PortAudioSharp.StreamCallbackResult MonitorCallback(
+        IntPtr input, IntPtr output, uint frameCount,
+        ref PortAudioSharp.StreamCallbackTimeInfo timeInfo,
+        PortAudioSharp.StreamCallbackFlags statusFlags, IntPtr userData)
+    {
+        if (!_monitorOnly) return PortAudioSharp.StreamCallbackResult.Complete;
+        try
+        {
+            var pcm = new short[frameCount];
+            System.Runtime.InteropServices.Marshal.Copy(input, pcm, 0, (int)frameCount);
+
+            // Apply input volume
+            var vol = _inputVolume;
+            if (vol != 1.0f)
+            {
+                for (int i = 0; i < pcm.Length; i++)
+                    pcm[i] = (short)Math.Clamp(pcm[i] * vol, short.MinValue, short.MaxValue);
+            }
+
+            // RNNoise if enabled
+            if (_noiseSuppression && _rnnoise is not null)
+            {
+                try { _rnnoise.ProcessFrame(pcm, pcm.Length); } catch { }
+            }
+
+            // Compute RMS for level meter
+            double sumSq = 0;
+            for (int i = 0; i < pcm.Length; i++)
+                sumSq += (double)pcm[i] * pcm[i];
+            double rms = Math.Sqrt(sumSq / pcm.Length) / 32768.0;
+            _currentInputLevelDb = rms > 0 ? (float)Math.Max(-100.0, 20.0 * Math.Log10(rms)) : -100f;
+        }
+        catch { }
+        return PortAudioSharp.StreamCallbackResult.Continue;
+    }
+
     /// <summary>
     /// List all available audio devices. Call before Start().
     /// </summary>

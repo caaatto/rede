@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace Rede.Core.Audio;
@@ -10,18 +11,19 @@ namespace Rede.Core.Audio;
 public sealed class RNNoise : IDisposable
 {
     private const int RNNoiseFrameSize = 480; // 10ms at 48kHz
+    private const string LibName = "rnnoise";
 
-    [DllImport("rnnoise", EntryPoint = "rnnoise_create", CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(LibName, EntryPoint = "rnnoise_create", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr rnnoise_create(IntPtr model);
 
-    [DllImport("rnnoise", EntryPoint = "rnnoise_destroy", CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(LibName, EntryPoint = "rnnoise_destroy", CallingConvention = CallingConvention.Cdecl)]
     private static extern void rnnoise_destroy(IntPtr state);
 
     /// <summary>
     /// Process one frame (480 float samples). Input is modified in-place.
     /// Returns voice activity probability (0.0 - 1.0).
     /// </summary>
-    [DllImport("rnnoise", EntryPoint = "rnnoise_process_frame", CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(LibName, EntryPoint = "rnnoise_process_frame", CallingConvention = CallingConvention.Cdecl)]
     private static extern float rnnoise_process_frame(IntPtr state, float[] output, float[] input);
 
     private IntPtr _state;
@@ -34,6 +36,32 @@ public sealed class RNNoise : IDisposable
 
     static RNNoise()
     {
+        // Register a custom resolver so .NET can find the lib in runtimes/{RID}/native/
+        // even when the default probing paths don't cover it (e.g. single-file publish).
+        NativeLibrary.SetDllImportResolver(typeof(RNNoise).Assembly, (name, asm, searchPath) =>
+        {
+            if (name != LibName) return IntPtr.Zero;
+            // Try default resolution first
+            if (NativeLibrary.TryLoad(name, asm, searchPath, out var handle))
+                return handle;
+            // Try explicit paths relative to the assembly location
+            var asmDir = Path.GetDirectoryName(asm.Location) ?? AppContext.BaseDirectory;
+            var rid = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win-x64" : "linux-x64";
+            var libFile = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "rnnoise.dll" : "librnnoise.so";
+            var candidates = new[]
+            {
+                Path.Combine(asmDir, "runtimes", rid, "native", libFile),
+                Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", libFile),
+                Path.Combine(asmDir, libFile),
+            };
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path) && NativeLibrary.TryLoad(path, out handle))
+                    return handle;
+            }
+            return IntPtr.Zero;
+        });
+
         try
         {
             var state = rnnoise_create(IntPtr.Zero);

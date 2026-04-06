@@ -2226,11 +2226,34 @@ public partial class MainWindow : Window
             }
         };
 
+        // Start a standalone audio monitor for the level meter (works without an active call)
+        Rede.Core.Audio.AudioEngine? settingsMonitor = null;
+        try
+        {
+            settingsMonitor = new Rede.Core.Audio.AudioEngine();
+            settingsMonitor.InputVolume = (float)(vm.InputVolume / 100.0);
+            settingsMonitor.NoiseSuppression = vm.NoiseSuppression;
+
+            // Apply selected input device
+            var monDevices = Rede.Core.Audio.AudioEngine.GetDevices();
+            var monInputDevs = monDevices.Where(d => d.IsInput).ToList();
+            if (p.InputDeviceName is not null)
+            {
+                var idx = monInputDevs.FindIndex(d => d.Name == p.InputDeviceName);
+                if (idx >= 0) settingsMonitor.SelectedInputDevice = monInputDevs[idx].Index;
+            }
+
+            settingsMonitor.StartMonitor();
+        }
+        catch { settingsMonitor = null; }
+
         // Live input level meter: poll audio engine every 50ms while settings is open
         var levelTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         levelTimer.Tick += (_, _) =>
         {
-            if (_call?.Audio is not null)
+            if (settingsMonitor is not null)
+                vm.CurrentInputLevelDb = settingsMonitor.CurrentInputLevelDb;
+            else if (_call?.Audio is not null)
                 vm.CurrentInputLevelDb = _call.Audio.CurrentInputLevelDb;
         };
         levelTimer.Start();
@@ -2238,6 +2261,9 @@ public partial class MainWindow : Window
         vm.OnBackRequested += () =>
         {
             levelTimer.Stop();
+            settingsMonitor?.StopMonitor();
+            settingsMonitor?.Dispose();
+            settingsMonitor = null;
             // H5: Re-wire retry handler when returning from settings
             RootContent.Content = CreateMainView();
         };
