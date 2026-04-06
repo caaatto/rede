@@ -520,7 +520,19 @@ public class ChatService : IDisposable
         var nonce = ProtocolSerializer.GetString(msg, "nonce");
         if (encrypted is null || nonce is null) return null;
 
-        var plaintext = DoubleRatchet.Decrypt(state, header, encrypted, nonce);
+        string? plaintext = null;
+        try
+        {
+            plaintext = DoubleRatchet.Decrypt(state, header, encrypted, nonce);
+        }
+        catch (Exception ex)
+        {
+            OnSystemMessage?.Invoke($"[DEBUG] Decrypt exception: {ex.GetType().Name}: {ex.Message}");
+        }
+        if (plaintext is null)
+        {
+            OnSystemMessage?.Invoke($"[DEBUG] Decrypt failed: stateKey={stateJson?.ValueKind} dh={dhVal?[..Math.Min(8, dhVal.Length)]}... n={header.N} pn={header.Pn}");
+        }
 
         // K2 fix: rollback on failed decrypt
         var toSave = plaintext is not null ? state : backup;
