@@ -2221,8 +2221,18 @@ public partial class MainWindow : Window
             }
         };
 
+        // Live input level meter: poll audio engine every 50ms while settings is open
+        var levelTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        levelTimer.Tick += (_, _) =>
+        {
+            if (_call?.Audio is not null)
+                vm.CurrentInputLevelDb = _call.Audio.CurrentInputLevelDb;
+        };
+        levelTimer.Start();
+
         vm.OnBackRequested += () =>
         {
+            levelTimer.Stop();
             // H5: Re-wire retry handler when returning from settings
             RootContent.Content = CreateMainView();
         };
@@ -2257,8 +2267,14 @@ public partial class MainWindow : Window
             // Load saved volume/gate (profile stores 0-2 float, UI uses 0-200 percentage)
             vm.InputVolume = p.InputVolume * 100;
             vm.OutputVolume = p.OutputVolume * 100;
-            vm.NoiseGateThreshold = p.NoiseGateThreshold * 100 / 1.0; // 0.02 → 2
+            // Convert linear threshold (0-1) to dB (-100..0) for UI
+            vm.NoiseGateThreshold = p.NoiseGateThreshold > 0
+                ? Math.Max(-100.0, 20.0 * Math.Log10(p.NoiseGateThreshold))
+                : -100.0;
             vm.NoiseSuppression = p.NoiseSuppression;
+            vm.AutoInputSensitivity = p.AutoInputSensitivity;
+            vm.AutoGainControl = p.AutoGainControl;
+            vm.EchoCancellation = p.EchoCancellation;
             vm.IsNoiseSuppressionAvailable = Rede.Core.Audio.AudioEngine.IsNoiseSuppressionAvailable;
         }
         catch { /* PortAudio not available */ }
@@ -2281,8 +2297,12 @@ public partial class MainWindow : Window
                 // Convert UI percentage (0-200) to engine float (0-2)
                 _auth.Profile.InputVolume = (float)(vm.InputVolume / 100.0);
                 _auth.Profile.OutputVolume = (float)(vm.OutputVolume / 100.0);
-                _auth.Profile.NoiseGateThreshold = (float)(vm.NoiseGateThreshold / 100.0);
+                // Convert dB (-100..0) to linear (0-1) for engine
+                _auth.Profile.NoiseGateThreshold = (float)Math.Pow(10.0, vm.NoiseGateThreshold / 20.0);
                 _auth.Profile.NoiseSuppression = vm.NoiseSuppression;
+                _auth.Profile.AutoInputSensitivity = vm.AutoInputSensitivity;
+                _auth.Profile.AutoGainControl = vm.AutoGainControl;
+                _auth.Profile.EchoCancellation = vm.EchoCancellation;
 
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
 
@@ -2293,6 +2313,9 @@ public partial class MainWindow : Window
                     _call.Audio.OutputVolume = _auth.Profile.OutputVolume;
                     _call.Audio.NoiseGateThreshold = _auth.Profile.NoiseGateThreshold;
                     _call.Audio.NoiseSuppression = _auth.Profile.NoiseSuppression;
+                    _call.Audio.AutoInputSensitivity = _auth.Profile.AutoInputSensitivity;
+                    _call.Audio.AutoGainControl = _auth.Profile.AutoGainControl;
+                    _call.Audio.EchoCancellation = _auth.Profile.EchoCancellation;
 
                     if (inIdx >= 0 && inIdx < cachedInputDevs.Count)
                         _call.Audio.SelectedInputDevice = cachedInputDevs[inIdx].Index;

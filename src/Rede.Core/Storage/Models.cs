@@ -105,6 +105,15 @@ public class Profile
     [JsonPropertyName("noiseSuppression")]
     public bool NoiseSuppression { get; set; }
 
+    [JsonPropertyName("autoInputSensitivity")]
+    public bool AutoInputSensitivity { get; set; } = true;
+
+    [JsonPropertyName("autoGainControl")]
+    public bool AutoGainControl { get; set; }
+
+    [JsonPropertyName("echoCancellation")]
+    public bool EchoCancellation { get; set; } = true;
+
     // Profile customization
     [JsonPropertyName("accentColor")]
     public string? AccentColor { get; set; } // hex color, e.g. "#8b5cf6"

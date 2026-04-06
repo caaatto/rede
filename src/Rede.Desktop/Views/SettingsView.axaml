@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Rede.Desktop.ViewModels"
+             xmlns:local="using:Rede.Desktop.Converters"
              x:Class="Rede.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
@@ -285,7 +286,7 @@
                         <!-- Audio Devices -->
                         <StackPanel Spacing="12">
                             <TextBlock Text="Audio" Classes="header" />
-                            <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                            <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto">
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Microphone" Classes="secondary" VerticalAlignment="Center" />
                                 <ComboBox Grid.Row="0" Grid.Column="1"
                                           ItemsSource="{Binding InputDevices}"
@@ -313,27 +314,96 @@
                                         Minimum="0" Maximum="200" Value="{Binding OutputVolume}"
                                         TickFrequency="1" IsSnapToTickEnabled="True"
                                         Margin="0,12,0,0" />
-
-                                <TextBlock Grid.Row="4" Grid.Column="0" Classes="secondary" VerticalAlignment="Center" Margin="0,12,0,0">
-                                    <Run Text="Noise Gate " /><Run Text="{Binding NoiseGateText}" />
-                                </TextBlock>
-                                <Slider Grid.Row="4" Grid.Column="1"
-                                        Minimum="0" Maximum="100" Value="{Binding NoiseGateThreshold}"
-                                        TickFrequency="1" IsSnapToTickEnabled="True"
-                                        Margin="0,12,0,0" />
                             </Grid>
 
-                            <TextBlock Text="Noise gate mutes mic when input is below threshold. 0 = off. Volumes above 100% amplify the signal."
+                            <TextBlock Text="Volumes above 100% amplify the signal."
                                        Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                        </StackPanel>
+
+                        <Separator />
+
+                        <!-- Input Sensitivity -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Input Sensitivity" Classes="header" />
+
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <ToggleSwitch IsChecked="{Binding AutoInputSensitivity}"
+                                              OnContent="On" OffContent="Off"
+                                              VerticalAlignment="Center" />
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Automatically Adjust Input Sensitivity" VerticalAlignment="Center" />
+                                    <TextBlock Text="Adapts to your environment so you don't have to manually set a threshold."
+                                               Classes="secondary" FontSize="11" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Noise Gate slider (manual mode) -->
+                            <StackPanel Spacing="4" IsVisible="{Binding !AutoInputSensitivity}">
+                                <TextBlock Classes="secondary">
+                                    <Run Text="Noise Gate " /><Run Text="{Binding NoiseGateText}" />
+                                </TextBlock>
+                                <!-- dB scale: -100 (silent) to 0 (max) -->
+                                <Grid ColumnDefinitions="40,*,30">
+                                    <TextBlock Grid.Column="0" Text="-100" Classes="secondary" FontSize="10" VerticalAlignment="Center" />
+                                    <Slider Grid.Column="1"
+                                            Minimum="-100" Maximum="0" Value="{Binding NoiseGateThreshold}"
+                                            TickFrequency="1" IsSnapToTickEnabled="True" />
+                                    <TextBlock Grid.Column="2" Text="0 dB" Classes="secondary" FontSize="10" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                </Grid>
+                                <TextBlock Text="Audio below this level is muted. Slide left for more sensitivity, right for less."
+                                           Classes="secondary" FontSize="11" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <!-- Input level meter -->
+                            <Grid ColumnDefinitions="80,*" Margin="0,4,0,0">
+                                <TextBlock Grid.Column="0" Text="Input Level" Classes="secondary" FontSize="11" VerticalAlignment="Center" />
+                                <Border Grid.Column="1" Background="#1a1a2e" CornerRadius="4" Height="8" ClipToBounds="True">
+                                    <Border Background="{DynamicResource RedeAccentTealBrush}" CornerRadius="4" Height="8"
+                                            HorizontalAlignment="Left"
+                                            Width="{Binding CurrentInputLevelDb, Converter={x:Static local:InputLevelConverter.Instance}}" />
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+
+                        <Separator />
+
+                        <!-- Voice Processing -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Voice Processing" Classes="header" />
 
                             <!-- Noise Suppression (RNNoise) -->
-                            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,12,0,0">
-                                <CheckBox IsChecked="{Binding NoiseSuppression}"
-                                          IsEnabled="{Binding IsNoiseSuppressionAvailable}"
-                                          VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <ToggleSwitch IsChecked="{Binding NoiseSuppression}"
+                                              IsEnabled="{Binding IsNoiseSuppressionAvailable}"
+                                              OnContent="On" OffContent="Off"
+                                              VerticalAlignment="Center" />
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="Noise Suppression" VerticalAlignment="Center" />
                                     <TextBlock Text="{Binding NoiseSuppressionStatus}" Classes="secondary" FontSize="11" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Echo Cancellation -->
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <ToggleSwitch IsChecked="{Binding EchoCancellation}"
+                                              OnContent="On" OffContent="Off"
+                                              VerticalAlignment="Center" />
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Echo Cancellation" VerticalAlignment="Center" />
+                                    <TextBlock Text="Reduces feedback from speakers picked up by your mic."
+                                               Classes="secondary" FontSize="11" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Automatic Gain Control -->
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <ToggleSwitch IsChecked="{Binding AutoGainControl}"
+                                              OnContent="On" OffContent="Off"
+                                              VerticalAlignment="Center" />
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Automatic Gain Control" VerticalAlignment="Center" />
+                                    <TextBlock Text="Automatically adjusts mic volume to keep it clear and consistent."
+                                               Classes="secondary" FontSize="11" TextWrapping="Wrap" />
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>

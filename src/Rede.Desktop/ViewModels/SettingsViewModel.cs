@@ -230,13 +230,17 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private int _selectedOutputDeviceIndex;
     [ObservableProperty] private double _inputVolume = 100;       // 0-200 (percentage)
     [ObservableProperty] private double _outputVolume = 100;      // 0-200 (percentage)
-    [ObservableProperty] private double _noiseGateThreshold = 2;  // 0-100 (percentage, 0=off)
+    [ObservableProperty] private double _noiseGateThreshold = -60;  // dB: -100 to 0
     [ObservableProperty] private bool _noiseSuppression;
     [ObservableProperty] private bool _isNoiseSuppressionAvailable;
+    [ObservableProperty] private bool _autoInputSensitivity = true;
+    [ObservableProperty] private bool _autoGainControl;
+    [ObservableProperty] private bool _echoCancellation = true;
+    [ObservableProperty] private double _currentInputLevelDb = -100; // live mic level for UI meter
 
     public string InputVolumeText => $"{(int)InputVolume}%";
     public string OutputVolumeText => $"{(int)OutputVolume}%";
-    public string NoiseGateText => NoiseGateThreshold < 1 ? "Off" : $"{(int)NoiseGateThreshold}%";
+    public string NoiseGateText => AutoInputSensitivity ? "Auto" : $"{(int)NoiseGateThreshold} dB";
     public string NoiseSuppressionStatus => IsNoiseSuppressionAvailable
         ? "RNNoise - removes background noise from your mic"
         : "RNNoise unavailable on this platform";
@@ -279,6 +283,19 @@ public partial class SettingsViewModel : ViewModelBase
         DebouncedAudioChange();
     }
     partial void OnNoiseSuppressionChanged(bool value)
+    {
+        DebouncedAudioChange();
+    }
+    partial void OnAutoInputSensitivityChanged(bool value)
+    {
+        OnPropertyChanged(nameof(NoiseGateText));
+        DebouncedAudioChange();
+    }
+    partial void OnAutoGainControlChanged(bool value)
+    {
+        DebouncedAudioChange();
+    }
+    partial void OnEchoCancellationChanged(bool value)
     {
         DebouncedAudioChange();
     }

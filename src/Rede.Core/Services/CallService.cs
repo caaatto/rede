@@ -488,6 +488,19 @@ public class CallService : IDisposable
 
         _srtpSession = new SrtpSession(_srtpMasterKey, _srtpMasterSalt);
         _audioEngine = new AudioEngine();
+
+        // Apply saved audio settings from profile
+        if (Profile is not null)
+        {
+            _audioEngine.InputVolume = Profile.InputVolume;
+            _audioEngine.OutputVolume = Profile.OutputVolume;
+            _audioEngine.NoiseGateThreshold = Profile.NoiseGateThreshold;
+            _audioEngine.NoiseSuppression = Profile.NoiseSuppression;
+            _audioEngine.AutoInputSensitivity = Profile.AutoInputSensitivity;
+            _audioEngine.AutoGainControl = Profile.AutoGainControl;
+            _audioEngine.EchoCancellation = Profile.EchoCancellation;
+        }
+
         _audioEngine.OnEncodedFrame += OnLocalAudioFrame;
 
         try

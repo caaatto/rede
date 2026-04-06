@@ -49,3 +49,23 @@ public class CollapseIconConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
+
+/// <summary>
+/// Converts input level dB (-100 to 0) to a pixel width for the level meter bar.
+/// Assumes max width ~300px (parent container width).
+/// </summary>
+public class InputLevelConverter : IValueConverter
+{
+    public static readonly InputLevelConverter Instance = new();
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is not double db) return 0.0;
+        // Map -100..0 dB to 0..1, then scale to pixel width
+        var normalized = Math.Clamp((db + 100.0) / 100.0, 0.0, 1.0);
+        return normalized * 300.0; // max bar width
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
