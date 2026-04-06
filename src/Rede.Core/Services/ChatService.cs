@@ -320,11 +320,7 @@ public class ChatService : IDisposable
         if (from is null) return;
 
         var plaintext = ReceiveRatcheted(innerObj, from);
-        if (plaintext is null)
-        {
-            OnSystemMessage?.Invoke($"[DEBUG] Sealed message from {from}: ReceiveRatcheted returned null (decrypt failed or no session)");
-            return;
-        }
+        if (plaintext is null) return;
 
         // Check for control messages (group key distribution)
         if (TryHandleControlMessage(plaintext, from)) return;
@@ -345,10 +341,7 @@ public class ChatService : IDisposable
         if (Profile is null || Passphrase is null) return null;
 
         if (!Profile.Contacts.TryGetValue(from, out var contact))
-        {
-            OnSystemMessage?.Invoke($"[DEBUG] ReceiveRatcheted: contact '{from}' not found in profile");
             return null;
-        }
 
         var fromDeviceId = ProtocolSerializer.GetString(msg, "fromDeviceId");
         var headerNode = msg["header"];
@@ -356,22 +349,11 @@ public class ChatService : IDisposable
         // X3DH initial message
         var x3dhNode = msg["x3dh"];
         if (x3dhNode is not null)
-        {
-            OnSystemMessage?.Invoke($"[DEBUG] ReceiveRatcheted: X3DH message from {from} device={fromDeviceId}");
-            var x3dhResult = HandleX3dhMessage(msg, from, fromDeviceId, contact);
-            if (x3dhResult is null) OnSystemMessage?.Invoke($"[DEBUG] HandleX3dhMessage returned null");
-            return x3dhResult;
-        }
+            return HandleX3dhMessage(msg, from, fromDeviceId, contact);
 
         // Existing ratchet session
         if (headerNode is not null)
-        {
-            OnSystemMessage?.Invoke($"[DEBUG] ReceiveRatcheted: ratchet msg from {from} device={fromDeviceId}");
-            var ratchetResult = HandleRatchetMessage(msg, from, fromDeviceId);
-            if (ratchetResult is null) OnSystemMessage?.Invoke($"[DEBUG] HandleRatchetMessage returned null");
-            return ratchetResult;
-        }
-        OnSystemMessage?.Invoke($"[DEBUG] ReceiveRatcheted: no x3dh and no header from {from}");
+            return HandleRatchetMessage(msg, from, fromDeviceId);
 
         return null;
     }
@@ -525,14 +507,7 @@ public class ChatService : IDisposable
         {
             plaintext = DoubleRatchet.Decrypt(state, header, encrypted, nonce);
         }
-        catch (Exception ex)
-        {
-            OnSystemMessage?.Invoke($"[DEBUG] Decrypt exception: {ex.GetType().Name}: {ex.Message}");
-        }
-        if (plaintext is null)
-        {
-            OnSystemMessage?.Invoke($"[DEBUG] Decrypt failed: stateKey={stateJson?.ValueKind} dh={dhVal?[..Math.Min(8, dhVal.Length)]}... n={header.N} pn={header.Pn}");
-        }
+        catch { }
 
         // K2 fix: rollback on failed decrypt
         var toSave = plaintext is not null ? state : backup;

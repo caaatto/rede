@@ -11,7 +11,14 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.18.12-beta";
+    private const string CurrentVersion = "2.18.13-beta";
+
+    /// <summary>
+    /// Path to a file that records the last successfully installed release tag.
+    /// Prevents re-prompting for an update that was already downloaded and swapped.
+    /// </summary>
+    private static string InstalledTagPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".rede", ".last-update");
 
     /// <summary>
     /// Ed25519 public key (base64, 32 bytes) of the release signing key. When set,
@@ -177,6 +184,11 @@ public class UpdateService
                 if (!tag.Contains("beta")) continue;
                 if (tag == CurrentVersion || tag == $"v{CurrentVersion}") continue;
 
+                // Skip if this tag was already installed (prevents re-prompt loop
+                // when the binary was swapped but CurrentVersion wasn't bumped)
+                var installedTag = ReadInstalledTag();
+                if (installedTag is not null && (tag == installedTag || tag == $"v{installedTag}" || $"v{tag}" == installedTag)) continue;
+
                 // Newer if tag version is higher
                 var remoteVer = ParseVersion(tag);
                 var localVer = ParseVersion(CurrentVersion);
@@ -327,6 +339,9 @@ public class UpdateService
             if (File.Exists(backupPath)) File.Delete(backupPath);
             File.Move(currentExe, backupPath);
             File.Move(newPath, currentExe);
+
+            // Persist the installed tag to prevent re-prompt on next launch
+            WriteInstalledTag(release.Tag);
 
             onStatus?.Invoke($"Updated to {release.Tag}. Restart to apply.");
             return true;
@@ -490,6 +505,27 @@ public class UpdateService
         public string Tag { get; set; } = "";
         public string? DownloadUrl { get; set; }
         public string AssetName { get; set; } = "";
+    }
+
+    private static string? ReadInstalledTag()
+    {
+        try
+        {
+            var path = InstalledTagPath;
+            return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+        }
+        catch { return null; }
+    }
+
+    private static void WriteInstalledTag(string tag)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(InstalledTagPath);
+            if (dir is not null) Directory.CreateDirectory(dir);
+            File.WriteAllText(InstalledTagPath, tag);
+        }
+        catch { }
     }
 
     private async Task<(bool Success, string Output, string Error)> RunGitAsync(string command, string args)
