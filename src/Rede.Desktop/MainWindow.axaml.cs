@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AdjustStartupSize();
         Loaded += (_, _) =>
         {
             ShowLogin();
@@ -70,6 +71,28 @@ public partial class MainWindow : Window
     // mlock/VirtualLock handle for the active passphrase byte[]. Keeps the
     // buffer pinned and resident (no swap/hibernation leakage) until close.
     private Rede.Core.Crypto.SecureMemory.SecureHandle? _passphraseLock;
+
+    private void AdjustStartupSize()
+    {
+        const double idealW = 1100, idealH = 750;
+        const double minW = 700, minH = 500;
+        const double screenFraction = 0.80;
+
+        var screen = Screens.Primary ?? Screens.All.FirstOrDefault();
+        if (screen is null)
+        {
+            Width = idealW;
+            Height = idealH;
+            return;
+        }
+
+        var work = screen.WorkingArea;
+        double availW = work.Width / screen.Scaling;
+        double availH = work.Height / screen.Scaling;
+
+        Width = Math.Clamp(Math.Min(idealW, availW * screenFraction), minW, idealW);
+        Height = Math.Clamp(Math.Min(idealH, availH * screenFraction), minH, idealH);
+    }
 
     /// <summary>
     /// Triggers a real application shutdown (bypassing the minimize-to-tray interception).
