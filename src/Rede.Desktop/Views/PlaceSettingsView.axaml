@@ -1,0 +1,355 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Rede.Desktop.ViewModels"
+             x:Class="Rede.Desktop.Views.PlaceSettingsView"
+             x:DataType="vm:PlaceSettingsViewModel">
+
+    <UserControl.Styles>
+        <Style Selector="ListBox.settings-nav">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem">
+            <Setter Property="Padding" Value="14,10" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource RedeTextSecondaryBrush}" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource RedeSurfaceBrush}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource RedeAccentVioletBrush}" />
+            <Setter Property="TextElement.Foreground" Value="White" />
+        </Style>
+        <Style Selector="ListBox.settings-nav ListBoxItem:selected:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource RedeAccentVioletBrush}" />
+            <Setter Property="TextElement.Foreground" Value="White" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Background="{DynamicResource RedeSurfaceBrush}">
+    <Grid RowDefinitions="Auto,*" Margin="0,36,0,0">
+
+        <!-- Header -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="24,0,24,16">
+            <Button Grid.Column="0" Classes="ghost"
+                    Content="← Back"
+                    Command="{Binding BackCommand}"
+                    Padding="8,4" />
+            <StackPanel Grid.Column="1" HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                <Border Width="28" Height="28" CornerRadius="6"
+                        Background="{Binding AccentBrush}" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding PlaceInitial}" FontSize="13" FontWeight="SemiBold"
+                               Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="{Binding PlaceName}" Classes="title" VerticalAlignment="Center" />
+                <TextBlock Text="— Settings" Classes="secondary" VerticalAlignment="Center" />
+            </StackPanel>
+            <Border Grid.Column="2" Width="60" />
+        </Grid>
+
+        <!-- Sidebar + Content -->
+        <Grid Grid.Row="1" ColumnDefinitions="200,*">
+
+            <!-- Category Sidebar -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource RedeBackgroundBrush}"
+                    Padding="12,8">
+                <ListBox Classes="settings-nav"
+                         SelectedIndex="{Binding SelectedCategoryIndex}">
+                    <ListBoxItem>
+                        <TextBlock Text="Overview" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Roles" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Members" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Channels" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Bans" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock Text="Emotes" FontSize="{StaticResource RedeBodySize}" />
+                    </ListBoxItem>
+                </ListBox>
+            </Border>
+
+            <!-- Content area -->
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="32,8,32,24">
+                <Grid MaxWidth="600" HorizontalAlignment="Center"
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+
+                    <!-- ============ OVERVIEW ============ -->
+                    <StackPanel Grid.Row="0" Spacing="20" IsVisible="{Binding IsOverviewCategory}">
+                        <TextBlock Text="Overview" Classes="header" />
+
+                        <!-- Stats -->
+                        <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto">
+                            <StackPanel Grid.Column="0" Spacing="2">
+                                <TextBlock Text="{Binding MemberCount}" FontSize="24" FontWeight="Bold" />
+                                <TextBlock Text="Members" Classes="secondary" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{Binding ChannelCount}" FontSize="24" FontWeight="Bold" />
+                                <TextBlock Text="Channels" Classes="secondary" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Spacing="2">
+                                <TextBlock Text="{Binding RoleCount}" FontSize="24" FontWeight="Bold" />
+                                <TextBlock Text="Roles" Classes="secondary" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Accent Color -->
+                        <StackPanel Spacing="8" IsVisible="{Binding IsAdmin}">
+                            <TextBlock Text="Accent Color" FontWeight="SemiBold" />
+                            <TextBlock Text="Choose the accent color for this place." Classes="secondary" FontSize="12" />
+                            <WrapPanel x:Name="AccentSwatches" Orientation="Horizontal" />
+                            <Button Content="Apply" Command="{Binding SaveProfileCommand}"
+                                    HorizontalAlignment="Left" Padding="16,6" Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <!-- Role Colors -->
+                        <StackPanel Spacing="8" IsVisible="{Binding IsAdmin}">
+                            <TextBlock Text="Role Colors" FontWeight="SemiBold" />
+                            <TextBlock Text="Colors shown on role badges and member names." Classes="secondary" FontSize="12" />
+                            <Grid ColumnDefinitions="60,*" RowDefinitions="Auto,Auto,Auto" Margin="0,4,0,0">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Owner" VerticalAlignment="Center" />
+                                <WrapPanel Grid.Row="0" Grid.Column="1" x:Name="OwnerColorSwatches" Orientation="Horizontal" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Admin" VerticalAlignment="Center" Margin="0,6,0,0" />
+                                <WrapPanel Grid.Row="1" Grid.Column="1" x:Name="AdminColorSwatches" Orientation="Horizontal" Margin="0,6,0,0" />
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Member" VerticalAlignment="Center" Margin="0,6,0,0" />
+                                <WrapPanel Grid.Row="2" Grid.Column="1" x:Name="MemberColorSwatches" Orientation="Horizontal" Margin="0,6,0,0" />
+                            </Grid>
+                            <Button Content="Apply" Command="{Binding SaveRoleColorsCommand}"
+                                    HorizontalAlignment="Left" Padding="16,6" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- ============ ROLES ============ -->
+                    <StackPanel Grid.Row="1" Spacing="20" IsVisible="{Binding IsRolesCategory}">
+                        <TextBlock Text="Roles" Classes="header" />
+                        <TextBlock Text="Manage custom roles and their permissions. Roles with higher position have more authority."
+                                   Classes="secondary" TextWrapping="Wrap" FontSize="12" />
+
+                        <!-- Create new role -->
+                        <StackPanel Spacing="8" IsVisible="{Binding IsAdmin}">
+                            <TextBlock Text="Create Role" FontWeight="SemiBold" />
+                            <Grid ColumnDefinitions="*,8,Auto">
+                                <TextBox Grid.Column="0" Text="{Binding NewRoleName}"
+                                         Watermark="Role name" MaxLength="32" />
+                                <Button Grid.Column="2" Content="Create"
+                                        Command="{Binding CreateRoleCommand}" Padding="16,6" />
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Initialize defaults (only if no custom roles) -->
+                        <Button Content="Initialize Default Roles (migrate from 3-tier)"
+                                Command="{Binding InitializeRolesCommand}"
+                                IsVisible="{Binding IsCreator}"
+                                HorizontalAlignment="Left" Padding="16,6" />
+
+                        <!-- Role list -->
+                        <ItemsControl ItemsSource="{Binding Roles}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RoleViewModel">
+                                    <Border Background="{DynamicResource RedeBackgroundBrush}"
+                                            CornerRadius="8" Padding="16,12" Margin="0,4">
+                                        <StackPanel Spacing="8">
+                                            <Grid ColumnDefinitions="Auto,8,*,Auto">
+                                                <Border Grid.Column="0" Width="14" Height="14"
+                                                        CornerRadius="7" Background="{Binding ColorBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{Binding Name}" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center" />
+                                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8">
+                                                    <TextBlock Text="{Binding PermissionsSummary}"
+                                                               Classes="secondary" FontSize="11" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Position, StringFormat=pos:{0}}"
+                                                               Classes="muted" FontSize="10" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <!-- Permission checkboxes -->
+                                            <WrapPanel Orientation="Horizontal">
+                                                <CheckBox Content="Send Messages" IsChecked="{Binding CanSendMessages}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Manage Messages" IsChecked="{Binding CanManageMessages}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Manage Channels" IsChecked="{Binding CanManageChannels}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Manage Roles" IsChecked="{Binding CanManageRoles}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Kick" IsChecked="{Binding CanKickMembers}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Ban" IsChecked="{Binding CanBanMembers}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Emotes" IsChecked="{Binding CanManageEmotes}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Manage Place" IsChecked="{Binding CanManagePlace}" Margin="0,0,12,0" FontSize="12" />
+                                                <CheckBox Content="Administrator" IsChecked="{Binding IsAdministrator}" Margin="0,0,12,0" FontSize="12"
+                                                          Foreground="#f87171" />
+                                            </WrapPanel>
+
+                                            <!-- Save/Delete buttons -->
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button Content="Save Permissions" Click="SaveRolePerms_Click"
+                                                        Tag="{Binding}" Padding="12,4" FontSize="12" />
+                                                <Button Content="Delete" Click="DeleteRole_Click"
+                                                        Tag="{Binding}" Padding="12,4" FontSize="12"
+                                                        Foreground="#f87171"
+                                                        IsVisible="{Binding !IsBuiltIn}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- ============ MEMBERS ============ -->
+                    <StackPanel Grid.Row="2" Spacing="20" IsVisible="{Binding IsMembersCategory}">
+                        <TextBlock Text="Members" Classes="header" />
+                        <TextBlock Text="Manage member roles. Click a member to assign or remove roles."
+                                   Classes="secondary" TextWrapping="Wrap" FontSize="12" />
+
+                        <ItemsControl ItemsSource="{Binding MemberRoles}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:MemberRoleViewModel">
+                                    <Border Background="{DynamicResource RedeBackgroundBrush}"
+                                            CornerRadius="8" Padding="16,10" Margin="0,3"
+                                            PointerReleased="MemberItem_PointerReleased" Tag="{Binding}">
+                                        <Grid ColumnDefinitions="*,Auto,Auto">
+                                            <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                                                <Run Text="{Binding DisplayId}" />
+                                            </TextBlock>
+                                            <Border Grid.Column="1" Background="{Binding RoleColorBrush}"
+                                                    CornerRadius="4" Padding="8,2" Margin="8,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding RoleName}" FontSize="11" Foreground="White" />
+                                            </Border>
+                                            <TextBlock Grid.Column="2" Text="👑" FontSize="14" VerticalAlignment="Center"
+                                                       IsVisible="{Binding IsOwner}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- ============ CHANNELS ============ -->
+                    <StackPanel Grid.Row="3" Spacing="20" IsVisible="{Binding IsChannelsCategory}">
+                        <TextBlock Text="Channels" Classes="header" />
+
+                        <!-- Create channel -->
+                        <StackPanel Spacing="8" IsVisible="{Binding IsAdmin}">
+                            <Grid ColumnDefinitions="*,8,Auto">
+                                <TextBox Grid.Column="0" x:Name="NewChannelNameInput"
+                                         Watermark="New channel name" MaxLength="64" />
+                                <Button Grid.Column="2" Content="Create Channel"
+                                        Click="CreateChannel_Click" Padding="16,6" />
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Create category -->
+                        <StackPanel Spacing="8" IsVisible="{Binding IsAdmin}">
+                            <Grid ColumnDefinitions="*,8,Auto">
+                                <TextBox Grid.Column="0" x:Name="NewCategoryNameInput"
+                                         Watermark="New category name" MaxLength="64" />
+                                <Button Grid.Column="2" Content="Create Category"
+                                        Click="CreateCategory_Click" Padding="16,6" />
+                            </Grid>
+                        </StackPanel>
+
+                        <ItemsControl ItemsSource="{Binding ChannelSettings}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ChannelSettingsViewModel">
+                                    <Border Background="{DynamicResource RedeBackgroundBrush}"
+                                            CornerRadius="8" Padding="16,10" Margin="0,3">
+                                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">
+                                                <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
+                                                <Run Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <Run Text="{Binding Category, StringFormat= [{0}]}"
+                                                     Foreground="{DynamicResource RedeTextMutedBrush}" FontSize="11" />
+                                            </TextBlock>
+                                            <Button Grid.Row="0" Grid.Column="1" Content="Delete"
+                                                    Click="DeleteChannel_Click" Tag="{Binding}"
+                                                    Padding="8,2" FontSize="11" Foreground="#f87171" />
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                                       Text="{Binding Topic}" Classes="secondary" FontSize="11"
+                                                       TextWrapping="Wrap" Margin="0,2,0,0" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- ============ BANS ============ -->
+                    <StackPanel Grid.Row="4" Spacing="20" IsVisible="{Binding IsBansCategory}">
+                        <TextBlock Text="Bans" Classes="header" />
+                        <TextBlock Classes="secondary" FontSize="12">
+                            <Run Text="{Binding BanCount}" />
+                            <Run Text=" banned user(s)" />
+                        </TextBlock>
+
+                        <ItemsControl ItemsSource="{Binding Bans}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:BanViewModel">
+                                    <Border Background="{DynamicResource RedeBackgroundBrush}"
+                                            CornerRadius="8" Padding="16,10" Margin="0,3">
+                                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">
+                                                <Run Text="{Binding DisplayId}" FontWeight="SemiBold" />
+                                                <Run Text=" banned by " Foreground="{DynamicResource RedeTextMutedBrush}" FontSize="11" />
+                                                <Run Text="{Binding BannedBy}" FontSize="11" />
+                                            </TextBlock>
+                                            <Button Grid.Row="0" Grid.Column="1" Content="Unban"
+                                                    Click="Unban_Click" Tag="{Binding}"
+                                                    Padding="8,2" FontSize="11" />
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                                       Classes="secondary" FontSize="11" Margin="0,2,0,0">
+                                                <Run Text="{Binding Reason}" />
+                                                <Run Text=" — " />
+                                                <Run Text="{Binding BannedAt}" />
+                                            </TextBlock>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- ============ EMOTES ============ -->
+                    <StackPanel Grid.Row="5" Spacing="20" IsVisible="{Binding IsEmotesCategory}">
+                        <TextBlock Text="Emotes" Classes="header" />
+                        <TextBlock Classes="secondary" FontSize="12">
+                            <Run Text="{Binding EmoteCount}" />
+                            <Run Text=" / 50 emotes" />
+                        </TextBlock>
+
+                        <ItemsControl ItemsSource="{Binding Emotes}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:EmoteViewModel">
+                                    <Border Background="{DynamicResource RedeBackgroundBrush}"
+                                            CornerRadius="8" Padding="16,10" Margin="0,3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                                                <Run Text=":" /><Run Text="{Binding Name}" FontWeight="SemiBold" /><Run Text=":" />
+                                                <Run Text=" uploaded by " Foreground="{DynamicResource RedeTextMutedBrush}" FontSize="11" />
+                                                <Run Text="{Binding UploadedBy}" FontSize="11" />
+                                            </TextBlock>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+
+    </Grid>
+    </Border>
+
+</UserControl>

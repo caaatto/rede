@@ -879,6 +879,21 @@ public partial class MainView : UserControl
             menu.Items.Add(roleColorsItem);
         }
 
+        // Place settings (admin/creator)
+        if (place.IsCreator || place.IsAdmin)
+        {
+            menu.Items.Add(new Separator());
+
+            var settingsItem = new MenuItem
+            {
+                Header = "Place settings",
+                Foreground = Brush.Parse("#2dd4bf"),
+                FontWeight = FontWeight.SemiBold,
+            };
+            settingsItem.Click += (_, _) => vm.ExecuteCommand("placesettings", new[] { place.PlaceId });
+            menu.Items.Add(settingsItem);
+        }
+
         // Creator-only actions
         if (place.IsCreator)
         {

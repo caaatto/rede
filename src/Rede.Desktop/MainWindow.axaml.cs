@@ -1605,6 +1605,10 @@ public partial class MainWindow : Window
                 ShowSettings();
                 break;
 
+            case "placesettings" when args.Length >= 1:
+                ShowPlaceSettings(args[0]);
+                break;
+
             case "discord" when args.Length >= 2:
                 _ = ImportDiscordAsync(args[0], args[1]);
                 break;
@@ -2354,6 +2358,129 @@ public partial class MainWindow : Window
 
         var settingsView = new SettingsView { DataContext = vm };
         RootContent.Content = settingsView;
+    }
+
+    private void ShowPlaceSettings(string placeId)
+    {
+        if (_auth?.Profile is null) return;
+        if (!_auth.Profile.Places.TryGetValue(placeId, out var place)) return;
+
+        var vm = new PlaceSettingsViewModel();
+        vm.LoadFromPlace(place, placeId, _auth.Profile.UserId);
+
+        vm.OnBackRequested += () =>
+        {
+            RootContent.Content = CreateMainView();
+        };
+
+        vm.OnProfileChanged += (pid, color) =>
+        {
+            _places?.UpdatePlaceProfile(pid, color, null, null, _chat);
+            _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+        };
+
+        vm.OnRoleColorsChanged += (pid, owner, admin, member) =>
+        {
+            _places?.UpdateRoleColors(pid, owner, admin, member, _chat);
+            _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+        };
+
+        vm.OnCreateRole += (pid, name, color, perms) =>
+        {
+            _places?.CreateCustomRole(pid, name, color, perms, _chat);
+            _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+            // Refresh the view
+            if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+        };
+
+        vm.OnDeleteRole += (pid, roleId) =>
+        {
+            _places?.DeleteCustomRole(pid, roleId, _chat);
+            _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+            if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+        };
+
+        vm.OnAssignRole += (pid, userId, roleId) =>
+        {
+            _places?.AssignRole(pid, userId, roleId, _chat);
+            _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+            if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+        };
+
+        vm.OnRemoveRole += (pid, userId, roleId) =>
+        {
+            _places?.RemoveRole(pid, userId, roleId, _chat);
+            _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+            if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+        };
+
+        vm.OnInitRoles += (pid) =>
+        {
+            if (_auth.Profile.Places.TryGetValue(pid, out var p))
+            {
+                _places?.InitializeDefaultRoles(p, p.CreatorId);
+                _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+                vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+            }
+        };
+
+        vm.OnKickMember += (pid, userId) =>
+        {
+            _mainVm.ExecuteCommand("pkick", new[] { pid, userId });
+        };
+
+        vm.OnBanMember += (pid, userId, reason) =>
+        {
+            var args = string.IsNullOrEmpty(reason)
+                ? new[] { pid, userId }
+                : new[] { pid, userId, reason };
+            _mainVm.ExecuteCommand("pban", args);
+        };
+
+        vm.OnUnbanMember += (pid, userId) =>
+        {
+            _mainVm.ExecuteCommand("punban", new[] { pid, userId });
+            // Refresh after unban
+            if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+        };
+
+        vm.OnCreateChannel += (pid, name) =>
+        {
+            _mainVm.ExecuteCommand("pchannel", new[] { pid, name });
+            // Refresh after short delay (metadata distribution is async)
+            Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(500);
+                if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                    vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+            });
+        };
+
+        vm.OnCreateCategory += (pid, name) =>
+        {
+            _mainVm.ExecuteCommand("pcategory", new[] { pid, name });
+            if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+        };
+
+        vm.OnDeleteChannel += (pid, chId) =>
+        {
+            _mainVm.ExecuteCommand("pchannelrm", new[] { pid, chId });
+            Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(500);
+                if (_auth.Profile.Places.TryGetValue(pid, out var p))
+                    vm.LoadFromPlace(p, pid, _auth.Profile.UserId);
+            });
+        };
+
+        var psView = new PlaceSettingsView { DataContext = vm };
+        RootContent.Content = psView;
     }
 
     private async void Window_KeyDown(object? sender, KeyEventArgs e)
