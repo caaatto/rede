@@ -196,6 +196,8 @@ public class PlaceService : IDisposable
 
     private readonly System.Collections.Concurrent.ConcurrentQueue<string> _pendingPlaceNames = new();
 
+    // M16: Any member can invite — intentional (Discord-like default, no InviteMembers permission).
+    // Server also allows any member to invite. Metadata key is sent via E2EE DM.
     public void InviteToPlace(string placeId, string userId, ChatService? chatService = null)
     {
         if (Profile is null || Passphrase is null) return;
@@ -232,6 +234,22 @@ public class PlaceService : IDisposable
 
     public void KickFromPlace(string placeId, string userId)
     {
+        if (Profile is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("You don't have permission to kick members.");
+            return;
+        }
+        if (userId == place.CreatorId)
+        {
+            OnSystemMessage?.Invoke("Cannot kick the place owner.");
+            return;
+        }
         _conn.Send(Msg.PlaceKick, ProtocolSerializer.Payload(
             ("placeId", JsonValue.Create(placeId)),
             ("targetUserId", JsonValue.Create(userId))
@@ -295,6 +313,12 @@ public class PlaceService : IDisposable
             return;
         }
 
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("You don't have permission to remove channels.");
+            return;
+        }
+
         _conn.Send(Msg.PlaceChannelRemove, ProtocolSerializer.Payload(
             ("placeId", JsonValue.Create(placeId)),
             ("channelId", JsonValue.Create(channelId))
@@ -308,6 +332,12 @@ public class PlaceService : IDisposable
         if (!Profile.Places.TryGetValue(placeId, out var place))
         {
             OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("You don't have permission to edit the place profile.");
             return;
         }
 
@@ -1422,9 +1452,9 @@ public class PlaceService : IDisposable
         {
             // Check if sender is admin/owner for this place
             var parts = chatKey.Split(':');
-            if (parts.Length >= 2)
+            if (parts.Length >= 3)
             {
-                var placeId = parts[0];
+                var placeId = parts[1];
                 if (Profile.Places.TryGetValue(placeId, out var place) &&
                     place.Roles.TryGetValue(from, out var role) && role >= PlaceRole.Admin)
                 {

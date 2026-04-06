@@ -34,8 +34,8 @@ public static class MessageEnvelope
                 attArr.Add(new JsonObject
                 {
                     ["bid"] = att.BlobId,
-                    ["key"] = att.Key,
-                    ["nonce"] = att.Nonce,
+                    ["key"] = Convert.ToBase64String(att.Key),
+                    ["nonce"] = Convert.ToBase64String(att.Nonce),
                     ["name"] = att.Name,
                     ["mime"] = att.MimeType,
                     ["size"] = att.Size,
@@ -78,11 +78,13 @@ public static class MessageEnvelope
                     foreach (var node in attArr)
                     {
                         if (node is not JsonObject attObj) continue;
+                        var keyStr = attObj["key"]?.GetValue<string>() ?? "";
+                        var nonceStr = attObj["nonce"]?.GetValue<string>() ?? "";
                         attachments.Add(new AttachmentInfo
                         {
                             BlobId = attObj["bid"]?.GetValue<string>() ?? "",
-                            Key = attObj["key"]?.GetValue<string>() ?? "",
-                            Nonce = attObj["nonce"]?.GetValue<string>() ?? "",
+                            Key = string.IsNullOrEmpty(keyStr) ? Array.Empty<byte>() : Convert.FromBase64String(keyStr),
+                            Nonce = string.IsNullOrEmpty(nonceStr) ? Array.Empty<byte>() : Convert.FromBase64String(nonceStr),
                             Name = attObj["name"]?.GetValue<string>() ?? "",
                             MimeType = attObj["mime"]?.GetValue<string>(),
                             Size = attObj["size"]?.GetValue<long>() ?? 0,

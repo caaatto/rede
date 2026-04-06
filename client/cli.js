@@ -8,6 +8,15 @@ const { cliBoot } = require('./boot');
 const cryptoMod = require('./crypto');
 const store = require('./store');
 
+function escapeContent(text) {
+  return String(text)
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')   // CSI sequences
+    .replace(/\x1b\][^\x07]*\x07/g, '')       // OSC sequences (BEL terminated)
+    .replace(/\x1b\][^\x1b]*\x1b\\/g, '')     // OSC sequences (ST terminated)
+    .replace(/\x1b[^[\]]/g, '')                // Other escape sequences
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ''); // Control chars (keep \n \r \t)
+}
+
 // --- Parse CLI args ---
 const args = process.argv.slice(2);
 const crypto = require('crypto');
@@ -532,6 +541,7 @@ async function cmdSend() {
               identityKey: profile.publicKey,
               ephemeralKey: x3dhResult.ephemeralPublic,
               usedOTPKPub: bundle.oneTimePreKey || null,
+              usedOTPKId: x3dhResult.usedOTPKId,
             },
             ttl: opts.ttl || 0,
           });
@@ -636,7 +646,7 @@ async function cmdRead() {
     const date = new Date(msg.ts).toLocaleDateString();
     const sender = msg.from === profile.userId ? 'You' : (profile.contacts[msg.from]?.alias || msg.from);
     const ttl = msg.ttl > 0 ? ` [${msg.ttl}s]` : '';
-    console.log(`[${date} ${time}] ${sender}: ${msg.text}${ttl}`);
+    console.log(`[${date} ${time}] ${escapeContent(sender)}: ${escapeContent(msg.text)}${ttl}`);
   }
 }
 
@@ -814,7 +824,7 @@ async function cmdGinvite() {
           store.saveRatchetState(profile, opts.to, newState, passphrase, devId);
           conn.send(MSG.MESSAGE, {
             to: opts.to, toDeviceId: devId, encrypted: enc.ciphertext, nonce: enc.nonce, header: enc.header,
-            x3dh: { identityKey: profile.publicKey, ephemeralKey: x3dhResult.ephemeralPublic, usedOTPKPub: bundle.oneTimePreKey || null },
+            x3dh: { identityKey: profile.publicKey, ephemeralKey: x3dhResult.ephemeralPublic, usedOTPKPub: bundle.oneTimePreKey || null, usedOTPKId: x3dhResult.usedOTPKId },
             ttl: 60,
           });
         }
@@ -861,7 +871,7 @@ async function cmdListen() {
 
     const contact = profile.contacts[msg.from];
     if (!contact) {
-      console.log(`[${new Date().toLocaleTimeString()}] <unknown:${msg.from}> (use: add -t ${msg.from})`);
+      console.log(`[${new Date().toLocaleTimeString()}] <unknown:${escapeContent(msg.from)}> (use: add -t ${escapeContent(msg.from)})`);
       return;
     }
 
@@ -1019,7 +1029,7 @@ async function cmdListen() {
           return;
         }
         store.addGroup(profile, ctrl.groupId, ctrl.name, ctrl.key, [], passphrase);
-        console.log(`[System] Joined group "${ctrl.name}" (verified key)`);
+        console.log(`[System] Joined group "${escapeContent(ctrl.name)}" (verified key)`);
       }
       return;
     }
@@ -1028,7 +1038,7 @@ async function cmdListen() {
       return; // Reject legacy format for security
     }
     const ttl = msg.ttl > 0 ? ` [${msg.ttl}s]` : '';
-    console.log(`[${new Date().toLocaleTimeString()}] ${contact.alias || msg.from}: ${plaintext}${ttl}`);
+    console.log(`[${new Date().toLocaleTimeString()}] ${escapeContent(contact.alias || msg.from)}: ${escapeContent(plaintext)}${ttl}`);
     store.addChatMessage(profile, msg.from, {
       from: msg.from, text: plaintext, ts: Date.now(), ttl: msg.ttl || 0,
     }, passphrase);
@@ -1065,7 +1075,7 @@ async function cmdListen() {
     if (!plaintext) return;
     const sender = profile.contacts[msg.from]?.alias || msg.from;
     const ttl = msg.ttl > 0 ? ` [${msg.ttl}s]` : '';
-    console.log(`[${new Date().toLocaleTimeString()}] #${group.name} ${sender}: ${plaintext}${ttl}`);
+    console.log(`[${new Date().toLocaleTimeString()}] #${escapeContent(group.name)} ${escapeContent(sender)}: ${escapeContent(plaintext)}${ttl}`);
     store.addChatMessage(profile, msg.groupId, {
       from: msg.from, text: plaintext, ts: Date.now(), ttl: msg.ttl || 0,
     }, passphrase);
@@ -1102,7 +1112,8 @@ async function cmdListen() {
   if (conn._pendingBuffer && conn._pendingBuffer.length > 0) {
     console.log(`[${conn._pendingBuffer.length} pending message(s)]`);
     for (const pm of conn._pendingBuffer) {
-      if (pm.type === MSG.GROUP_MESSAGE) handleGM(pm);
+      if (pm.type === MSG.SEALED_MESSAGE || pm.sealed) handleSealed(pm);
+      else if (pm.type === MSG.GROUP_MESSAGE) handleGM(pm);
       else handleDM(pm);
     }
     conn._pendingBuffer = [];

@@ -494,10 +494,12 @@ public class AttachmentInfo
     public string BlobId { get; set; } = "";
 
     [JsonPropertyName("key")]
-    public string Key { get; set; } = ""; // base64 symmetric key for decryption
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] Key { get; set; } = Array.Empty<byte>(); // symmetric key for decryption
 
     [JsonPropertyName("nonce")]
-    public string Nonce { get; set; } = ""; // base64 nonce
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[] Nonce { get; set; } = Array.Empty<byte>(); // nonce
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";

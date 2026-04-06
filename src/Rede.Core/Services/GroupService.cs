@@ -116,6 +116,13 @@ public class GroupService : IDisposable
             return;
         }
 
+        // Only group creator can rekey
+        if (group.Members is not null && group.Members.Count > 0 && group.Members[0] != Profile.UserId)
+        {
+            OnSystemMessage?.Invoke("Only the group creator can rotate the group key.");
+            return;
+        }
+
         var newKey = CryptoService.GenerateSymmetricKey();
         group.Key = newKey;
         _store.SaveProfileDebounced(Profile, Passphrase);

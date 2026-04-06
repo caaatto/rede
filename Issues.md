@@ -239,7 +239,7 @@
 - ~~Skipped Message Keys (bis zu 1000) als base64 Strings im Heap~~ — GEFIXT im gleichen Refactor: `DoubleRatchet.RatchetState.MKSKIPPED` ist jetzt `Dictionary<string, byte[]>` mit Custom-Converter, Keys sind auf dem Heap zeroable.
 - ~~NonceTracker ist in-memory~~ — GEFIXT in Runde 8 (H1): Persistiert als `Profile.SeenNonces`, beim Login in alle Tracker importiert, bei Flush exportiert. Replay-Fenster überlebt Neustarts.
 - SecureOverwrite ist auf SSDs mit Wear-Leveling nicht effektiv - Full-Disk-Encryption empfohlen (User-Guidance / Release-Notes, kein Code-Fix möglich).
-- Auto-Update-Binaries: Ed25519-Verifikations-Infrastruktur in Runde 8 (H3) hinzugefügt. Noch nicht aktiv, da `ReleaseSigningPublicKeyB64` Konstante leer ist — Release-Manager muss Keypair generieren, Public Key eintragen und `.sig` Asset pro Release bauen. SHA256SUMS ist ab v2.17.2-beta **Pflicht** — fehlendes `SHA256SUMS`-Asset führt zu hartem Abbruch des Auto-Updates (vorher: stille Warnung + Install). Jedes Release muss `SHA256SUMS` mitliefern (Step 4 im Release-Prozess).
+- ~~Auto-Update-Binaries ohne echte Signatur~~ — GEFIXT: Ed25519-Keypair generiert, Public Key in `ReleaseSigningPublicKeyB64` eingetragen (`SPON95u43RxzipArSW1Ntyk9eQ6hHCaf8UJlzOR+vas=`). Secret Key in `/home/amke/Rede/.release-signing-key.secret` (chmod 600). Signing-Script `scripts/sign-release.sh` erzeugt `.sig` Assets. Release-Prozess muss jetzt `REDE.sig` + `REDE.exe.sig` mitliefern — fehlende Signatur = harter Update-Abbruch.
 - ~~Sender Key Signatur bindet nicht an Group ID~~ — GEFIXT in v2.17.4-beta: Signatur-Payload jetzt `ciphertext || uint32(messageNumber) || utf8(contextId)` wobei contextId = groupId (Groups) bzw. `place:{placeId}:{channelId}` (Places). Geändert über alle 4 Codebases: `SenderKeys.cs`, `crypto.js`, `index.js` (client), `index.js` (server). Rückwärtskompatibel: Verifikation probiert neues Format zuerst, fällt auf Legacy (ohne contextId) zurück für Nachrichten von älteren Clients.
 - ~~ProfileEncryption HMAC ist optional für Legacy-Profile~~ — GEFIXT in Runde 8 (H2): Leerer HMAC = hartes Decrypt-Fail.
 - ~~Passphrase wird als string an 5+ Service-Objekte propagiert~~ — GEFIXT in Runde 10: `byte[]` durch alle Services + `ProfileStore` + `ProfileEncryption`, `SecureMemory.Lock` (mlock/VirtualLock) gegen Swap/Hibernation, `SecureTextBox` Custom Control vermeidet managed-string-Materialisierung bei der Eingabe.
@@ -247,3 +247,57 @@
 - ~~Double scrypt bei jedem Profile-Save~~ — GEFIXT in Runde 6 (L7): Single 64-Byte Derivation mit Legacy-Fallback.
 - ~~Profile wird bei jeder einzelnen Nachricht komplett neu verschlüsselt und geschrieben~~ — GEFIXT in v2.17.3-beta: Chat-History in separater `{hash}.history.enc` Datei. `AddChatMessage` triggert nur noch `SaveChatHistoryDebounced` (nur History-Dict wird verschlüsselt+geschrieben), nicht mehr `SaveProfileDebounced` (gesamtes Profil mit Keys, Contacts, Ratchet States). Migration von eingebetteter History beim ersten Login automatisch. `SaveProfileAsync` schließt ChatHistory per Swap-and-Restore vom Serialisieren aus.
 - ~~Fire-and-forget Task.Run Saves ohne Fehlerbehandlung~~ — GEFIXT in Runde 7: Debounced Saves mit OnSaveError Event + FlushAsync bei App-Exit.
+
+## Security Audit (2026-04-06, Runde 11) — Gefixte Findings
+
+### Critical (Server)
+[x] C1: pg-store.js fehlende Blob-Funktionen — `blobs` Tabelle im PG-Schema + `addBlob()`, `getBlob()`, `cleanupBlobs()` async Functions + Export. Server crashte bei `BLOB_UPLOAD`/`BLOB_FETCH` mit PostgreSQL-Backend.
+[x] C2: TOCTOU Race in PG `addGroupMember`/`addPlaceMember` — Count-Check + Insert jetzt in `withTransaction()` mit `SELECT ... FOR UPDATE`. Verhindert concurrent Bypass der Gruppen-/Place-Größenlimits.
+
+### High (Server)
+[x] H1: `isScopeMember()`/`sendToScopeMembers()` sync/async Mismatch — Beide Funktionen `async`, alle `store.getPlace()`/`store.getGroup()` mit `await`. Alle 5 Call-Sites (handleGCallRequestToken, handleGCallAnnounce, handleGCallEnd) awaited. Auf PG-Backend war Membership-Check für Group Calls komplett umgangen (Promise ist truthy).
+[x] H4: Redis pub/sub ohne Nachrichtenvalidierung — `KNOWN_ACTIONS` Set, `data.action`/`data.wsId`/`data.message` Type-Checks vor Dispatch. Verhindert Message-Injection über kompromittierte Redis-Instanz.
+
+### High (Client v1)
+[x] H5: Fehlende `usedOTPKId` in cli.js X3DH-Payloads — `usedOTPKId: x3dhResult.usedOTPKId` in beiden X3DH-Payloads (cmdSend + ginvite). Ohne dieses Feld wurde der 4. DH-Schritt (One-Time Pre-Key) beim Empfänger übersprungen → reduzierte Forward Secrecy bei CLI-initiierten Sessions.
+[x] H6: Server Signing Key nicht validiert in index.js — `AUTH_OK` und `DEVICE_LINK_OK` Handler prüfen jetzt `decodeBase64().length === 32` (Pattern aus cli.js übernommen). Verhindert Pinning eines malformierten Keys.
+
+### High (Client v2)
+[x] H7: SRTP ohne Replay-Schutz — RFC 3711 64-Bit Sliding Replay Window in `SrtpSession.Unprotect()`. Duplikate, zu alte Pakete (>63 Positionen) und bereits gesehene Pakete werden rejected. `Array.Clear` → `CryptographicOperations.ZeroMemory` in `Dispose()`.
+[x] H8: Attachment-Keys als immutable Strings — `AttachmentInfo.Key`/`Nonce` von `string` auf `byte[]` mit `Base64BytesJsonConverter` umgestellt. `BlobService.UploadAsync()` zeroot lokale Key-Kopie nach Erstellung. `MessageEnvelope.Encode/Decode` konvertiert an der Wire-Boundary. Wire-Format (JSON) bleibt base64.
+[x] H9: `ApplyDelete` chatKey-Parsing Bug — `parts[0]` war `"place"` (Prefix), nicht die placeId. Fix: `parts[1]` + `parts.Length >= 3`. Admin-Deletes für Place-Nachrichten funktionierten vorher nie (fail-closed).
+
+### Medium (Server)
+[x] M1: PG Nonce-Check TOCTOU — `INSERT ... ON CONFLICT DO NOTHING RETURNING nonce_key` statt SELECT+INSERT. Atomisch: wenn RETURNING leer, ist der Nonce bereits gesehen.
+[x] M3: Kein Rate-Limit auf `BLOB_FETCH` — `blobFetchLimits` Map (30/min pro User), Cleanup im Periodic Interval.
+[x] M5: Owner kann Place verlassen — `handlePlaceLeave` prüft jetzt `senderId === place.creatorId` und sendet Error. Owner muss Ownership transferieren (noch nicht implementiert — Follow-up).
+[x] M6: `activeCount`-Berechnung fehlerhaft — `activeConnectionCount` Counter statt `wss.clients.size - queue.filter(...)`. Inkrement in `setupConnection`, Dekrement im Close-Handler. Queue-Admission-Entscheidung nutzt den Counter.
+
+### Medium (Client v1)
+[x] M8: cli.js `_pendingBuffer` überspringt Sealed Messages — `handleSealed(pm)` Route für `SEALED_MESSAGE`/`pm.sealed` vor `handleGM`/`handleDM` in der Buffer-Drain-Loop.
+[x] M9: Kein ANSI-Escaping in cli.js — `escapeContent()` Funktion (CSI/OSC/Control-Char-Filter, identisch zu index.js) + Anwendung auf alle untrusted Ausgaben (Sender-Names, Nachrichtentext, Gruppen-Names).
+
+### Medium (Client v2)
+[x] M12: DoubleRatchet Backup nicht gezeroed bei Erfolg — `ZeroBackup()` Hilfsfunktion zeroot RK, CKs, CKr, DHs.SecretKey und alle MKSKIPPED-Values. Aufgerufen im Success-Pfad von `Decrypt()`.
+[x] M13: `BlobService` unbounded Cache — `MaxCacheEntries = 100`, `_cacheOrder` Queue für LRU-Eviction, evicted Entries werden mit `CryptographicOperations.ZeroMemory` gezeroed.
+[x] M14: `SecureTextBox` kein Dispose — `OnDetachedFromVisualTree` Override zeroot `_buffer` via `CryptographicOperations.ZeroMemory`, disposed `_bufferLock`.
+[x] M18: Reconnect TOCTOU — `volatile bool _isReconnecting` → `int _isReconnecting` mit `Interlocked.CompareExchange(ref _isReconnecting, 1, 0)` für atomisches Test-and-Set.
+
+### Medium (Services)
+[x] M4: `PlaceService.KickFromPlace` ohne lokalen Permission-Check — `HasPermission(place, Profile.UserId, PlaceRole.Admin)` Guard + Self-Kick- und Owner-Kick-Schutz.
+[x] M5: `PlaceService.RemoveChannel` ohne lokalen Permission-Check — `HasPermission(place, Profile.UserId, PlaceRole.Admin)` Guard.
+[x] M7: `PlaceService.UpdatePlaceProfile` ohne Permission-Check — `HasPermission(place, Profile.UserId, PlaceRole.Admin)` Guard (konsistent mit `UpdateRoleColors`).
+[x] M16: `PlaceService.InviteToPlace` — Dokumentiert als intentional (Discord-like Default: jedes Mitglied kann einladen). Server erlaubt es ebenfalls. Kein PlacePermission-Flag vorhanden.
+[x] M17: `GroupService.RekeyGroup` ohne Creator-Check — `group.Members[0] != Profile.UserId` Guard (Legacy-Convention: Members[0] = Creator).
+
+### Low (Server)
+[x] L2: `gcallTokenLimits` nicht im Periodic Cleanup — Hinzugefügt zum 60s-Cleanup-Interval.
+[x] L3: `activeGroupCalls` Stale-Cleanup — Phantom-Participants (disconnected Users) werden entfernt, leere Calls gelöscht, 4h-Timeout. Im selben Cleanup-Interval.
+[x] L4: `blobFetchLimits` Cleanup — Hinzugefügt zum 60s-Cleanup-Interval.
+[x] L5: `store.cleanupBlobs()` fehlender `await` — Hinzugefügt im Cleanup-Interval.
+
+### Bekannte Einschränkungen (nicht gefixt)
+- Status-Broadcast O(N²) — Architekturelles Trade-off für Privacy (Server kennt keine Contact-Listen). Rate-Limited 5/min pro User (Runde 6 H5). Kein Fix ohne Subscription-Modell, das den Social Graph leaken würde.
+- ~~Sender Keys Legacy-Signatur-Fallback (ohne contextId)~~ — GEFIXT: Legacy-Fallback in `SenderKeys.cs` (C#) und `crypto.js` (JS) entfernt. Alle Clients seit v2.17.3 signieren mit contextId. Pre-v2.17.3 Nachrichten werden nicht mehr akzeptiert.
+- ~~Ed25519 Release-Signatur~~ — GEFIXT: Keypair generiert, Public Key eingetragen, Signing-Script erstellt. Siehe oben.
+- OTP-Verbrauch vor Decrypt-Verifizierung (v1) — Server-seitig konsumiert, kann nicht client-seitig rückgängig gemacht werden. Rate-Limited 20/hr.

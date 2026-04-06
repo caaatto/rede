@@ -1,8 +1,10 @@
+using System.Security.Cryptography;
+
 namespace Rede.Core.Audio;
 
 /// <summary>
 /// Manages SRTP state for a single call direction (send or receive).
-/// Wraps SrtpCrypto with ROC (rollover counter) tracking.
+/// Wraps SrtpCrypto with ROC (rollover counter) tracking and RFC 3711 replay protection.
 /// </summary>
 public class SrtpSession : IDisposable
 {
@@ -15,6 +17,10 @@ public class SrtpSession : IDisposable
     private ushort _lastRecvSeq;
     private bool _firstSend = true;
     private bool _firstRecv = true;
+
+    // RFC 3711 replay protection — 64-bit sliding window
+    private ulong _replayWindow;
+    private uint _lastRecvIndex; // full 32-bit index = (ROC << 16) | SEQ
 
     public SrtpSession(byte[] masterKey, byte[] masterSalt)
     {
@@ -47,7 +53,7 @@ public class SrtpSession : IDisposable
 
     /// <summary>
     /// Decrypt an incoming SRTP packet. Manages ROC estimation for receiver.
-    /// Returns null if authentication fails.
+    /// Returns null if authentication fails or packet is a replay.
     /// </summary>
     public byte[]? Unprotect(byte[] srtpPacket)
     {
@@ -68,17 +74,50 @@ public class SrtpSession : IDisposable
         var result = SrtpCrypto.Unprotect(srtpPacket, _cipherKey, _authKey, _sessionSalt, estimatedRoc);
         if (result is null) return null;
 
-        // Update ROC on successful decrypt
+        // Compute full 32-bit packet index for replay check
+        uint packetIndex = (estimatedRoc << 16) | seq;
+
+        // RFC 3711 replay protection
         if (_firstRecv)
         {
             _lastRecvSeq = seq;
             _recvRoc = estimatedRoc;
+            _lastRecvIndex = packetIndex;
+            _replayWindow = 0;
             _firstRecv = false;
         }
-        else if (estimatedRoc > _recvRoc || (estimatedRoc == _recvRoc && seq > _lastRecvSeq))
+        else
         {
-            _recvRoc = estimatedRoc;
-            _lastRecvSeq = seq;
+            if (packetIndex == _lastRecvIndex)
+                return null; // Duplicate
+
+            if (packetIndex > _lastRecvIndex)
+            {
+                uint delta = packetIndex - _lastRecvIndex;
+                if (delta < 64)
+                    _replayWindow <<= (int)delta;
+                else
+                    _replayWindow = 0;
+                _replayWindow |= 1; // Mark previous highest as seen
+                _lastRecvIndex = packetIndex;
+            }
+            else
+            {
+                uint delta = _lastRecvIndex - packetIndex;
+                if (delta > 63)
+                    return null; // Too old
+                ulong bit = 1UL << (int)(delta - 1);
+                if ((_replayWindow & bit) != 0)
+                    return null; // Already seen
+                _replayWindow |= bit;
+            }
+
+            // Update ROC tracking
+            if (estimatedRoc > _recvRoc || (estimatedRoc == _recvRoc && seq > _lastRecvSeq))
+            {
+                _recvRoc = estimatedRoc;
+                _lastRecvSeq = seq;
+            }
         }
 
         return result;
@@ -86,8 +125,8 @@ public class SrtpSession : IDisposable
 
     public void Dispose()
     {
-        Array.Clear(_cipherKey);
-        Array.Clear(_authKey);
-        Array.Clear(_sessionSalt);
+        CryptographicOperations.ZeroMemory(_cipherKey);
+        CryptographicOperations.ZeroMemory(_authKey);
+        CryptographicOperations.ZeroMemory(_sessionSalt);
     }
 }

@@ -21,8 +21,10 @@ public class BlobService : IDisposable
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _uploadPending = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<byte[]?>> _fetchPending = new();
 
-    // Local blob cache (blobId → decrypted bytes) to avoid re-fetching
+    // Local blob cache (blobId → decrypted bytes) — bounded LRU
+    private const int MaxCacheEntries = 100;
     private readonly ConcurrentDictionary<string, byte[]> _cache = new();
+    private readonly Queue<string> _cacheOrder = new();
 
     public event Action<string>? OnSystemMessage;
 
@@ -83,17 +85,22 @@ public class BlobService : IDisposable
         }
 
         // Cache the plaintext locally
-        _cache[blobId] = plainData;
+        CacheBlob(blobId, plainData);
 
-        return new AttachmentInfo
+        var att = new AttachmentInfo
         {
             BlobId = blobId,
-            Key = Convert.ToBase64String(key),
-            Nonce = Convert.ToBase64String(nonce),
+            Key = key,
+            Nonce = nonce,
             Name = fileName,
             MimeType = mimeType,
             Size = plainData.Length,
         };
+
+        // Zero the local key copy (AttachmentInfo now owns its own copy)
+        CryptographicOperations.ZeroMemory(key);
+
+        return att;
     }
 
     /// <summary>
@@ -122,16 +129,25 @@ public class BlobService : IDisposable
 
         try
         {
-            var key = Convert.FromBase64String(att.Key);
-            var nonce = Convert.FromBase64String(att.Nonce);
-            var plain = SecretBox.Open(cipherData, nonce, key);
-            _cache[att.BlobId] = plain;
+            var plain = SecretBox.Open(cipherData, att.Nonce, att.Key);
+            CacheBlob(att.BlobId, plain);
             return plain;
         }
         catch
         {
             OnSystemMessage?.Invoke("Failed to decrypt attachment.");
             return null;
+        }
+    }
+
+    private void CacheBlob(string blobId, byte[] data)
+    {
+        _cache[blobId] = data;
+        _cacheOrder.Enqueue(blobId);
+        while (_cacheOrder.Count > MaxCacheEntries && _cacheOrder.TryDequeue(out var evictId))
+        {
+            if (_cache.TryRemove(evictId, out var evicted))
+                CryptographicOperations.ZeroMemory(evicted);
         }
     }
 

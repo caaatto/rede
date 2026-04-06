@@ -502,14 +502,23 @@ async function main() {
 
     // TOFU pin server signing key
     if (msg.serverSigningKey) {
-      if (!profile.serverSigningKey) {
-        profile.serverSigningKey = msg.serverSigningKey;
-        conn.serverSigningKey = msg.serverSigningKey;
-        store.saveProfile(profile, passphrase);
-      } else if (profile.serverSigningKey !== msg.serverSigningKey) {
-        ui.showSystemMessage('WARNING: Server signing key has CHANGED! Possible MITM attack.');
+      let validKey = false;
+      try {
+        const skBytes = cryptoMod.decodeBase64(msg.serverSigningKey);
+        if (skBytes.length === 32) validKey = true;
+      } catch {}
+      if (validKey) {
+        if (!profile.serverSigningKey) {
+          profile.serverSigningKey = msg.serverSigningKey;
+          conn.serverSigningKey = msg.serverSigningKey;
+          store.saveProfile(profile, passphrase);
+        } else if (profile.serverSigningKey !== msg.serverSigningKey) {
+          ui.showSystemMessage('WARNING: Server signing key has CHANGED! Possible MITM attack.');
+        } else {
+          conn.serverSigningKey = msg.serverSigningKey;
+        }
       } else {
-        conn.serverSigningKey = msg.serverSigningKey;
+        ui.showSystemMessage('[Security] Invalid serverSigningKey format — ignoring');
       }
     }
 
@@ -930,8 +939,17 @@ async function main() {
     profile.displayName = msg.displayName;
     if (msg.deviceId) profile.deviceId = msg.deviceId;
     if (msg.serverSigningKey) {
-      profile.serverSigningKey = msg.serverSigningKey;
-      conn.serverSigningKey = msg.serverSigningKey;
+      let validKey = false;
+      try {
+        const skBytes = cryptoMod.decodeBase64(msg.serverSigningKey);
+        if (skBytes.length === 32) validKey = true;
+      } catch {}
+      if (validKey) {
+        profile.serverSigningKey = msg.serverSigningKey;
+        conn.serverSigningKey = msg.serverSigningKey;
+      } else {
+        ui.showSystemMessage('[Security] Invalid serverSigningKey format from device link — ignoring');
+      }
     }
     store.saveProfile(profile, passphrase);
     ui.setStatus(`${msg.displayName} (${msg.userId}) [${msg.deviceId}] | E2EE + PFS`);

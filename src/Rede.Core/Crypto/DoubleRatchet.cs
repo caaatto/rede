@@ -268,6 +268,7 @@ public class DoubleRatchet
             CryptoService.ZeroOut(msgKey);
 
             var text = MessagePadding.Unpad(decrypted);
+            ZeroBackup(backup);
             return text ?? System.Text.Encoding.UTF8.GetString(decrypted);
         }
         catch
@@ -275,6 +276,17 @@ public class DoubleRatchet
             RestoreState(state, backup);
             return null;
         }
+    }
+
+    private static void ZeroBackup(RatchetState backup)
+    {
+        if (backup.RK is not null) CryptoService.ZeroOut(backup.RK);
+        if (backup.CKs is not null) CryptoService.ZeroOut(backup.CKs);
+        if (backup.CKr is not null) CryptoService.ZeroOut(backup.CKr);
+        if (backup.DHs?.SecretKey is not null) CryptoService.ZeroOut(backup.DHs.SecretKey);
+        foreach (var mk in backup.MKSKIPPED.Values)
+            CryptoService.ZeroOut(mk);
+        backup.MKSKIPPED.Clear();
     }
 
     private static void RestoreState(RatchetState target, RatchetState source)

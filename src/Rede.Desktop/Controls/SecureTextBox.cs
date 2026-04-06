@@ -1,4 +1,5 @@
 using System;
+using System.Security.Cryptography;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -212,5 +213,15 @@ public class SecureTextBox : Border
             _displayText.Text = new string('\u25CF', _charCount);
             _displayText.Foreground = TextBrush;
         }
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        CryptographicOperations.ZeroMemory(_buffer);
+        _length = 0;
+        _charCount = 0;
+        _bufferLock?.Dispose();
+        _bufferLock = null;
     }
 }

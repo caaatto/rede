@@ -110,15 +110,11 @@ public static class SenderKeys
             if (nonce.Length != 24) return null;
             if (ciphertext.Length < 16) return null;
 
-            // Verify signature with contextId binding (new format).
-            // Fall back to legacy (no contextId) for messages from pre-v2.17.3 clients.
+            // Verify signature with contextId binding — legacy fallback (no contextId) removed.
+            // All clients since v2.17.3 sign with contextId.
             var sigData = BuildSigData(ciphertext, messageNumber, contextId);
             if (!CryptoService.VerifyBytes(sigData, signatureB64, signingKey))
-            {
-                var legacySigData = BuildSigData(ciphertext, messageNumber, null);
-                if (!CryptoService.VerifyBytes(legacySigData, signatureB64, signingKey))
-                    return null;
-            }
+                return null;
 
             if (messageNumber < state.MessageNumber)
                 return null;

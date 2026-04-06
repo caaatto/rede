@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.18.3-beta";
+    private const string CurrentVersion = "2.18.4-beta";
 
     /// <summary>
     /// Ed25519 public key (base64, 32 bytes) of the release signing key. When set,
@@ -25,7 +25,7 @@ public class UpdateService
     /// private key offline, and sign each release binary so that
     /// "sodium_sign_detached(sig, binary_bytes, sk)" produces the .sig asset.
     /// </summary>
-    private const string ReleaseSigningPublicKeyB64 = "";
+    private const string ReleaseSigningPublicKeyB64 = "SPON95u43RxzipArSW1Ntyk9eQ6hHCaf8UJlzOR+vas=";
 
     public event Action<string>? OnStatusUpdate;
     public event Action<string>? OnError;

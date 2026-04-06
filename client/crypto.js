@@ -667,14 +667,11 @@ function senderKeyDecrypt(state, ciphertextB64, nonceB64, messageNumber, signatu
     const ciphertext = naclUtil.decodeBase64(ciphertextB64);
     const nonce = naclUtil.decodeBase64(nonceB64);
 
-    // Verify signature with contextId binding (new format).
-    // Fall back to legacy (no contextId) for messages from pre-v2.17.3 clients.
+    // Verify signature with contextId binding — legacy fallback (no contextId) removed.
+    // All clients since v2.17.3 sign with contextId.
     const sigData = buildSigData(ciphertext, messageNumber, contextId || '');
     if (!verifyBytes(sigData, signature, signingKeyB64)) {
-      const legacySigData = buildSigData(ciphertext, messageNumber, null);
-      if (!verifyBytes(legacySigData, signature, signingKeyB64)) {
-        return null; // Signature verification failed
-      }
+      return null; // Signature verification failed
     }
 
     // Advance chain to the correct message number
