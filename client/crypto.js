@@ -623,7 +623,18 @@ function generateSenderKey() {
   return result;
 }
 
-function senderKeyEncrypt(state, plaintext, signingSecretKeyB64) {
+// Build signature payload: ciphertext || uint32(messageNumber) || utf8(contextId).
+// contextId binds the signature to a specific group/channel, preventing cross-group replay.
+function buildSigData(ciphertext, messageNumber, contextId) {
+  const ctxBytes = contextId ? naclUtil.decodeUTF8(contextId) : new Uint8Array(0);
+  const sigData = new Uint8Array(ciphertext.length + 4 + ctxBytes.length);
+  sigData.set(ciphertext, 0);
+  new DataView(sigData.buffer, sigData.byteOffset).setUint32(ciphertext.length, messageNumber, false);
+  if (ctxBytes.length > 0) sigData.set(ctxBytes, ciphertext.length + 4);
+  return sigData;
+}
+
+function senderKeyEncrypt(state, plaintext, signingSecretKeyB64, contextId) {
   const ck = naclUtil.decodeBase64(state.chainKey);
   const [newCK, msgKey] = kdfCK(ck);
   zeroOut(ck);
@@ -636,10 +647,8 @@ function senderKeyEncrypt(state, plaintext, signingSecretKeyB64) {
   zeroOut(msgKey);
   zeroOut(paddedBytes);
 
-  // Sign ciphertext + messageNumber for authentication
-  const sigData = new Uint8Array(ciphertext.length + 4);
-  sigData.set(ciphertext, 0);
-  new DataView(sigData.buffer).setUint32(ciphertext.length, state.messageNumber, false);
+  // Sign ciphertext + messageNumber + contextId for authentication
+  const sigData = buildSigData(ciphertext, state.messageNumber, contextId || '');
   const signature = signBytes(sigData, signingSecretKeyB64);
 
   const messageNumber = state.messageNumber;
@@ -653,17 +662,19 @@ function senderKeyEncrypt(state, plaintext, signingSecretKeyB64) {
   };
 }
 
-function senderKeyDecrypt(state, ciphertextB64, nonceB64, messageNumber, signature, signingKeyB64) {
+function senderKeyDecrypt(state, ciphertextB64, nonceB64, messageNumber, signature, signingKeyB64, contextId) {
   try {
     const ciphertext = naclUtil.decodeBase64(ciphertextB64);
     const nonce = naclUtil.decodeBase64(nonceB64);
 
-    // Verify signature
-    const sigData = new Uint8Array(ciphertext.length + 4);
-    sigData.set(ciphertext, 0);
-    new DataView(sigData.buffer).setUint32(ciphertext.length, messageNumber, false);
+    // Verify signature with contextId binding (new format).
+    // Fall back to legacy (no contextId) for messages from pre-v2.17.3 clients.
+    const sigData = buildSigData(ciphertext, messageNumber, contextId || '');
     if (!verifyBytes(sigData, signature, signingKeyB64)) {
-      return null; // Signature verification failed
+      const legacySigData = buildSigData(ciphertext, messageNumber, null);
+      if (!verifyBytes(legacySigData, signature, signingKeyB64)) {
+        return null; // Signature verification failed
+      }
     }
 
     // Advance chain to the correct message number

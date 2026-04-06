@@ -791,7 +791,7 @@ public class PlaceService : IDisposable
             skState = SenderKeys.Generate();
         }
 
-        var result = SenderKeys.Encrypt(skState, text, Profile.SigningSecretKey);
+        var result = SenderKeys.Encrypt(skState, text, Profile.SigningSecretKey, skKey);
 
         var stateObj = new JsonObject
         {
@@ -1025,7 +1025,7 @@ public class PlaceService : IDisposable
         }
         else return;
 
-        var plaintext = SenderKeys.Decrypt(memberState, encrypted, nonce, messageNumber, signature, signingKey);
+        var plaintext = SenderKeys.Decrypt(memberState, encrypted, nonce, messageNumber, signature, signingKey, skKey);
         if (plaintext is null) return;
 
         // Save updated sender key state

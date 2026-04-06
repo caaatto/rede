@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 using System.Text.Json.Serialization;
 using Sodium;
 
@@ -41,8 +42,24 @@ public static class SenderKeys
         };
     }
 
-    /// <summary>Encrypt with sender key.</summary>
-    public static EncryptResult Encrypt(SenderKeyState state, string plaintext, byte[] signingSecretKey)
+    /// <summary>
+    /// Build the signature payload: ciphertext || uint32(messageNumber) || utf8(contextId).
+    /// The contextId binds the signature to a specific group or place channel, preventing
+    /// cross-group replay attacks.
+    /// </summary>
+    private static byte[] BuildSigData(byte[] ciphertext, int messageNumber, string? contextId)
+    {
+        var ctxBytes = contextId is not null ? Encoding.UTF8.GetBytes(contextId) : Array.Empty<byte>();
+        var sigData = new byte[ciphertext.Length + 4 + ctxBytes.Length];
+        Buffer.BlockCopy(ciphertext, 0, sigData, 0, ciphertext.Length);
+        BinaryPrimitives.WriteUInt32BigEndian(sigData.AsSpan(ciphertext.Length), (uint)messageNumber);
+        if (ctxBytes.Length > 0)
+            Buffer.BlockCopy(ctxBytes, 0, sigData, ciphertext.Length + 4, ctxBytes.Length);
+        return sigData;
+    }
+
+    /// <summary>Encrypt with sender key. contextId binds the signature to a group/channel.</summary>
+    public static EncryptResult Encrypt(SenderKeyState state, string plaintext, byte[] signingSecretKey, string contextId)
     {
         if (state.MessageNumber >= MaxMessageNumber)
             throw new InvalidOperationException("Sender key message limit reached — rekey required.");
@@ -57,10 +74,7 @@ public static class SenderKeys
         CryptoService.ZeroOut(msgKey);
         CryptoService.ZeroOut(paddedBytes);
 
-        // Sign ciphertext + messageNumber
-        var sigData = new byte[ciphertext.Length + 4];
-        Buffer.BlockCopy(ciphertext, 0, sigData, 0, ciphertext.Length);
-        BinaryPrimitives.WriteUInt32BigEndian(sigData.AsSpan(ciphertext.Length), (uint)state.MessageNumber);
+        var sigData = BuildSigData(ciphertext, state.MessageNumber, contextId);
         var signature = CryptoService.SignBytesB64(sigData, signingSecretKey);
 
         var messageNumber = state.MessageNumber;
@@ -74,14 +88,15 @@ public static class SenderKeys
         );
     }
 
-    /// <summary>Decrypt with sender key.</summary>
+    /// <summary>Decrypt with sender key. contextId must match what was used during encryption.</summary>
     public static string? Decrypt(
         SenderKeyState state,
         string ciphertextB64,
         string nonceB64,
         int messageNumber,
         string signatureB64,
-        byte[] signingKey)
+        byte[] signingKey,
+        string contextId)
     {
         var backup = state.DeepClone();
         try
@@ -95,12 +110,15 @@ public static class SenderKeys
             if (nonce.Length != 24) return null;
             if (ciphertext.Length < 16) return null;
 
-            // Verify signature
-            var sigData = new byte[ciphertext.Length + 4];
-            Buffer.BlockCopy(ciphertext, 0, sigData, 0, ciphertext.Length);
-            BinaryPrimitives.WriteUInt32BigEndian(sigData.AsSpan(ciphertext.Length), (uint)messageNumber);
+            // Verify signature with contextId binding (new format).
+            // Fall back to legacy (no contextId) for messages from pre-v2.17.3 clients.
+            var sigData = BuildSigData(ciphertext, messageNumber, contextId);
             if (!CryptoService.VerifyBytes(sigData, signatureB64, signingKey))
-                return null;
+            {
+                var legacySigData = BuildSigData(ciphertext, messageNumber, null);
+                if (!CryptoService.VerifyBytes(legacySigData, signatureB64, signingKey))
+                    return null;
+            }
 
             if (messageNumber < state.MessageNumber)
                 return null;

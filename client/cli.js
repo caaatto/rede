@@ -585,7 +585,7 @@ async function cmdSend() {
       }
     }
 
-    const result = cryptoMod.senderKeyEncrypt(skState.own, opts.message, profile.signingSecretKey);
+    const result = cryptoMod.senderKeyEncrypt(skState.own, opts.message, profile.signingSecretKey, opts.group);
     store.saveSenderKeyState(profile, opts.group, skState, passphrase);
 
     conn.send(MSG.GROUP_MESSAGE, {
@@ -1052,7 +1052,7 @@ async function cmdListen() {
         plaintext = cryptoMod.senderKeyDecrypt(
           senderState, msg.encrypted, msg.nonce,
           msg.senderKeyHeader.messageNumber, msg.senderKeyHeader.signature,
-          contact.signingKey
+          contact.signingKey, msg.groupId
         );
         if (plaintext) {
           store.saveSenderKeyState(profile, msg.groupId, skState, passphrase);

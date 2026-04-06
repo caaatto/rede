@@ -653,7 +653,7 @@ async function main() {
         plaintext = cryptoMod.senderKeyDecrypt(
           senderState, msg.encrypted, msg.nonce,
           msg.senderKeyHeader.messageNumber, msg.senderKeyHeader.signature,
-          contact.signingKey
+          contact.signingKey, msg.groupId
         );
         if (plaintext) {
           store.saveSenderKeyState(profile, msg.groupId, skState, passphrase);
@@ -1211,7 +1211,7 @@ async function main() {
       // Try Sender Keys (v3) first
       let skState = store.loadSenderKeyState(profile, currentChatTarget);
       if (skState && skState.own) {
-        const result = cryptoMod.senderKeyEncrypt(skState.own, text, profile.signingSecretKey);
+        const result = cryptoMod.senderKeyEncrypt(skState.own, text, profile.signingSecretKey, currentChatTarget);
         store.saveSenderKeyState(profile, currentChatTarget, skState, passphrase);
 
         conn.send(MSG.GROUP_MESSAGE, {
@@ -1239,7 +1239,7 @@ async function main() {
         }
 
         // Now encrypt with the sender key
-        const result = cryptoMod.senderKeyEncrypt(skState.own, text, profile.signingSecretKey);
+        const result = cryptoMod.senderKeyEncrypt(skState.own, text, profile.signingSecretKey, currentChatTarget);
         store.saveSenderKeyState(profile, currentChatTarget, skState, passphrase);
 
         conn.send(MSG.GROUP_MESSAGE, {
