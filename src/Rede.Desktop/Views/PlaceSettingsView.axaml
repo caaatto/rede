@@ -219,9 +219,8 @@
                                             CornerRadius="8" Padding="16,10" Margin="0,3"
                                             PointerReleased="MemberItem_PointerReleased" Tag="{Binding}">
                                         <Grid ColumnDefinitions="*,Auto,Auto">
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center">
-                                                <Run Text="{Binding DisplayId}" />
-                                            </TextBlock>
+                                            <TextBlock Grid.Column="0" Text="{Binding DisplayId}"
+                                                       VerticalAlignment="Center" />
                                             <Border Grid.Column="1" Background="{Binding RoleColorBrush}"
                                                     CornerRadius="4" Padding="8,2" Margin="8,0" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding RoleName}" FontSize="11" Foreground="White" />
@@ -265,12 +264,13 @@
                                     <Border Background="{DynamicResource RedeBackgroundBrush}"
                                             CornerRadius="8" Padding="16,10" Margin="0,3">
                                         <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
-                                            <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">
-                                                <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
-                                                <Run Text="{Binding Name}" FontWeight="SemiBold" />
-                                                <Run Text="{Binding Category, StringFormat= [{0}]}"
-                                                     Foreground="{DynamicResource RedeTextMutedBrush}" FontSize="11" />
-                                            </TextBlock>
+                                            <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal"
+                                                        Spacing="4" VerticalAlignment="Center">
+                                                <TextBlock Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding CategoryDisplay}"
+                                                           Foreground="{DynamicResource RedeTextMutedBrush}" FontSize="11" />
+                                            </StackPanel>
                                             <Button Grid.Row="0" Grid.Column="1" Content="Delete"
                                                     Click="DeleteChannel_Click" Tag="{Binding}"
                                                     Padding="8,2" FontSize="11" Foreground="#f87171" />
@@ -287,10 +287,7 @@
                     <!-- ============ BANS ============ -->
                     <StackPanel Grid.Row="4" Spacing="20" IsVisible="{Binding IsBansCategory}">
                         <TextBlock Text="Bans" Classes="header" />
-                        <TextBlock Classes="secondary" FontSize="12">
-                            <Run Text="{Binding BanCount}" />
-                            <Run Text=" banned user(s)" />
-                        </TextBlock>
+                        <TextBlock Text="{Binding BanCountDisplay}" Classes="secondary" FontSize="12" />
 
                         <ItemsControl ItemsSource="{Binding Bans}">
                             <ItemsControl.ItemTemplate>
@@ -298,20 +295,14 @@
                                     <Border Background="{DynamicResource RedeBackgroundBrush}"
                                             CornerRadius="8" Padding="16,10" Margin="0,3">
                                         <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
-                                            <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">
-                                                <Run Text="{Binding DisplayId}" FontWeight="SemiBold" />
-                                                <Run Text=" banned by " Foreground="{DynamicResource RedeTextMutedBrush}" FontSize="11" />
-                                                <Run Text="{Binding BannedBy}" FontSize="11" />
-                                            </TextBlock>
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Summary}"
+                                                       VerticalAlignment="Center" />
                                             <Button Grid.Row="0" Grid.Column="1" Content="Unban"
                                                     Click="Unban_Click" Tag="{Binding}"
                                                     Padding="8,2" FontSize="11" />
                                             <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                                                       Classes="secondary" FontSize="11" Margin="0,2,0,0">
-                                                <Run Text="{Binding Reason}" />
-                                                <Run Text=" — " />
-                                                <Run Text="{Binding BannedAt}" />
-                                            </TextBlock>
+                                                       Text="{Binding DetailLine}" Classes="secondary" FontSize="11"
+                                                       Margin="0,2,0,0" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
@@ -322,23 +313,14 @@
                     <!-- ============ EMOTES ============ -->
                     <StackPanel Grid.Row="5" Spacing="20" IsVisible="{Binding IsEmotesCategory}">
                         <TextBlock Text="Emotes" Classes="header" />
-                        <TextBlock Classes="secondary" FontSize="12">
-                            <Run Text="{Binding EmoteCount}" />
-                            <Run Text=" / 50 emotes" />
-                        </TextBlock>
+                        <TextBlock Text="{Binding EmoteCountDisplay}" Classes="secondary" FontSize="12" />
 
                         <ItemsControl ItemsSource="{Binding Emotes}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:EmoteViewModel">
                                     <Border Background="{DynamicResource RedeBackgroundBrush}"
                                             CornerRadius="8" Padding="16,10" Margin="0,3">
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center">
-                                                <Run Text=":" /><Run Text="{Binding Name}" FontWeight="SemiBold" /><Run Text=":" />
-                                                <Run Text=" uploaded by " Foreground="{DynamicResource RedeTextMutedBrush}" FontSize="11" />
-                                                <Run Text="{Binding UploadedBy}" FontSize="11" />
-                                            </TextBlock>
-                                        </Grid>
+                                        <TextBlock Text="{Binding DisplayText}" VerticalAlignment="Center" />
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

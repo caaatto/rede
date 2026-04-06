@@ -68,6 +68,8 @@ public partial class PlaceSettingsViewModel : ViewModelBase
 
     public string PlaceInitial => string.IsNullOrEmpty(PlaceName) ? "?" : PlaceName[..1].ToUpperInvariant();
     public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
+    public string BanCountDisplay => $"{BanCount} banned user(s)";
+    public string EmoteCountDisplay => $"{EmoteCount} / 50 emotes";
 
     public event Action? OnBackRequested;
     public event Action<string, string, string, string>? OnRoleColorsChanged; // placeId, owner, admin, member
@@ -311,6 +313,8 @@ public partial class ChannelSettingsViewModel : ViewModelBase
     [ObservableProperty] private string _category = "";
     [ObservableProperty] private int _position;
     [ObservableProperty] private int _permOverrideCount;
+
+    public string CategoryDisplay => string.IsNullOrEmpty(Category) ? "" : $"[{Category}]";
 }
 
 public partial class BanViewModel : ViewModelBase
@@ -321,6 +325,8 @@ public partial class BanViewModel : ViewModelBase
     [ObservableProperty] private string _bannedAt = "";
 
     public string DisplayId => UserId.Length > 16 ? UserId[..16] + "..." : UserId;
+    public string Summary => $"{DisplayId} banned by {BannedBy}";
+    public string DetailLine => string.IsNullOrEmpty(Reason) ? BannedAt : $"{Reason} — {BannedAt}";
 }
 
 public partial class EmoteViewModel : ViewModelBase
@@ -328,4 +334,6 @@ public partial class EmoteViewModel : ViewModelBase
     [ObservableProperty] private string _emoteId = "";
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private string _uploadedBy = "";
+
+    public string DisplayText => $":{Name}: — uploaded by {UploadedBy}";
 }
