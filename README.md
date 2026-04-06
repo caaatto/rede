@@ -85,6 +85,7 @@ Type these in the message input box.
 
 ```
 /add <user#id>              add a contact
+/remove <user#id>           delete a contact
 /confirm <user#id>          accept a key change
 /fingerprint [user]         show identity fingerprint
 /group <name>               create a group
@@ -115,7 +116,7 @@ Escape ........ toggle sidebar
 Ctrl+Q ........ quit
 ```
 
-Right-click contacts to invite them to groups/places or view fingerprints.
+Right-click contacts to invite them to groups/places, view fingerprints, or delete.
 Right-click groups and places for management options (invite, kick, rotate key).
 
 
