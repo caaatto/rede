@@ -23,6 +23,7 @@ public class ProfileStore
     };
 
     private readonly SemaphoreSlim _saveLock = new(1, 1);
+    private readonly SemaphoreSlim _historySaveLock = new(1, 1);
     // H2: Lock to prevent concurrent Profile dictionary mutation during serialization
     private readonly object _profileMutationLock = new();
 
@@ -33,6 +34,8 @@ public class ProfileStore
 
     private CancellationTokenSource? _debounceCts;
     private volatile bool _savePending;
+    private CancellationTokenSource? _historyDebounceCts;
+    private volatile bool _historySavePending;
     private const int DebounceMs = 500; // coalesce saves within 500ms
 
     private void EnsureDir()
@@ -59,6 +62,12 @@ public class ProfileStore
     {
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(userId))).ToLowerInvariant();
         return Path.Combine(DataDir, $"{hash}.enc");
+    }
+
+    private static string GetHistoryPath(string userId)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(userId))).ToLowerInvariant();
+        return Path.Combine(DataDir, $"{hash}.history.enc");
     }
 
     private static string GetLegacyProfilePath(string userId)
@@ -98,11 +107,9 @@ public class ProfileStore
         try
         {
             var p = GetProfilePath(userId);
-            if (File.Exists(p))
-            {
-                SecureOverwrite(p);
-                File.Delete(p);
-            }
+            if (File.Exists(p)) { SecureOverwrite(p); File.Delete(p); }
+            var h = GetHistoryPath(userId);
+            if (File.Exists(h)) { SecureOverwrite(h); File.Delete(h); }
         }
         catch { }
     }
@@ -157,7 +164,25 @@ public class ProfileStore
         if (profile is not null)
         {
             CacheKey(passphrase);
-            if (MigrateProfile(profile))
+            var migrated = MigrateProfile(profile);
+
+            // Migration: move embedded ChatHistory to separate history file.
+            // Old profiles (pre-v2.17.2) stored history inside profile.enc.
+            // Extract it, save to {hash}.history.enc, then re-save profile without it.
+            var historyPath = GetHistoryPath(profile.UserId);
+            if (profile.ChatHistory.Count > 0 && !File.Exists(historyPath))
+            {
+                await SaveChatHistoryAsync(profile, passphrase);
+                migrated = true; // re-save profile.enc (now without ChatHistory)
+            }
+            else if (File.Exists(historyPath))
+            {
+                // Load history from separate file and merge into in-memory profile
+                var history = await LoadChatHistoryAsync(profile.UserId, passphrase);
+                profile.ChatHistory = history;
+            }
+
+            if (migrated)
                 await SaveProfileAsync(profile, passphrase);
         }
         return profile;
@@ -242,35 +267,95 @@ public class ProfileStore
         await _saveLock.WaitAsync();
         try
         {
-            // H2: Hold mutation lock during serialization to prevent concurrent dict modification
+            // H2: Hold mutation lock during serialization to prevent concurrent dict modification.
+            // Temporarily swap ChatHistory out so it's excluded from profile.enc —
+            // history lives in a separate {hash}.history.enc file.
             byte[] bytes;
             lock (_profileMutationLock)
             {
-                var envelope = _cachedKey64 is not null
-                    ? ProfileEncryption.EncryptWithDerivedKey(profile, _cachedKey64, _cachedSalt)
-                    : ProfileEncryption.Encrypt(profile, passphrase);
-                bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOpts);
+                var chatHistory = profile.ChatHistory;
+                profile.ChatHistory = new();
+                try
+                {
+                    var envelope = _cachedKey64 is not null
+                        ? ProfileEncryption.EncryptWithDerivedKey(profile, _cachedKey64, _cachedSalt)
+                        : ProfileEncryption.Encrypt(profile, passphrase);
+                    bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOpts);
+                }
+                finally { profile.ChatHistory = chatHistory; }
             }
 
-            // Atomic write: temp file, fsync, then rename
-            var tmpFile = p + ".tmp";
-            await using (var fs = new FileStream(tmpFile, FileMode.Create, FileAccess.Write, FileShare.None))
-            {
-                await fs.WriteAsync(bytes);
-                fs.Flush(flushToDisk: true);
-            }
-            // M5: Rename first (atomic), then securely overwrite old data
-            File.Move(tmpFile, p, overwrite: true);
-            // M3: Set proper file permissions on Unix
-            if (!OperatingSystem.IsWindows())
-            {
-                try { File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
-                catch { }
-            }
+            await AtomicWriteAsync(p, bytes);
         }
         finally
         {
             _saveLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Save only the chat history dictionary to a separate encrypted file.
+    /// Much faster than SaveProfileAsync because it doesn't re-encrypt the
+    /// entire profile (keys, contacts, ratchet states, sender keys, etc.).
+    /// </summary>
+    public async Task SaveChatHistoryAsync(Profile profile, byte[] passphrase)
+    {
+        EnsureDir();
+        var p = GetHistoryPath(profile.UserId);
+        CacheKey(passphrase);
+
+        await _historySaveLock.WaitAsync();
+        try
+        {
+            byte[] bytes;
+            lock (_profileMutationLock)
+            {
+                var envelope = _cachedKey64 is not null
+                    ? ProfileEncryption.EncryptWithDerivedKey(profile.ChatHistory, _cachedKey64, _cachedSalt)
+                    : ProfileEncryption.Encrypt(profile.ChatHistory, passphrase);
+                bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOpts);
+            }
+            await AtomicWriteAsync(p, bytes);
+        }
+        finally
+        {
+            _historySaveLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Load chat history from the separate history file. Returns empty dict if
+    /// no history file exists (new profile or pre-migration).
+    /// </summary>
+    public async Task<Dictionary<string, List<ChatMessage>>> LoadChatHistoryAsync(string userId, byte[] passphrase)
+    {
+        EnsureDir();
+        var p = GetHistoryPath(userId);
+        if (!File.Exists(p)) return new();
+        try
+        {
+            var json = await File.ReadAllTextAsync(p);
+            var envelope = JsonSerializer.Deserialize<ProfileEncryption.EncryptedEnvelope>(json, JsonOpts);
+            if (envelope is null) return new();
+            var history = ProfileEncryption.Decrypt<Dictionary<string, List<ChatMessage>>>(envelope, passphrase);
+            return history ?? new();
+        }
+        catch { return new(); }
+    }
+
+    private static async Task AtomicWriteAsync(string path, byte[] bytes)
+    {
+        var tmpFile = path + ".tmp";
+        await using (var fs = new FileStream(tmpFile, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await fs.WriteAsync(bytes);
+            fs.Flush(flushToDisk: true);
+        }
+        File.Move(tmpFile, path, overwrite: true);
+        if (!OperatingSystem.IsWindows())
+        {
+            try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+            catch { }
         }
     }
 
@@ -310,6 +395,35 @@ public class ProfileStore
     }
 
     /// <summary>
+    /// Debounced save for chat history only — does NOT re-encrypt the profile.
+    /// </summary>
+    public void SaveChatHistoryDebounced(Profile profile, byte[] passphrase)
+    {
+        _historySavePending = true;
+        _historyDebounceCts?.Cancel();
+        _historyDebounceCts?.Dispose();
+        _historyDebounceCts = new CancellationTokenSource();
+        var token = _historyDebounceCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(DebounceMs, token);
+                if (token.IsCancellationRequested) return;
+                _historySavePending = false;
+                await SaveChatHistoryAsync(profile, passphrase);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _historySavePending = true;
+                OnSaveError?.Invoke($"Chat history save failed: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
     /// Flush any pending debounced save immediately. Call on app exit or logout.
     /// </summary>
     public async Task FlushAsync(Profile? profile, byte[]? passphrase)
@@ -317,10 +431,21 @@ public class ProfileStore
         _debounceCts?.Cancel();
         _debounceCts?.Dispose();
         _debounceCts = null;
-        if (_savePending && profile is not null && passphrase is not null)
+        _historyDebounceCts?.Cancel();
+        _historyDebounceCts?.Dispose();
+        _historyDebounceCts = null;
+        if (profile is not null && passphrase is not null)
         {
-            _savePending = false;
-            await SaveProfileAsync(profile, passphrase);
+            if (_savePending)
+            {
+                _savePending = false;
+                await SaveProfileAsync(profile, passphrase);
+            }
+            if (_historySavePending)
+            {
+                _historySavePending = false;
+                await SaveChatHistoryAsync(profile, passphrase);
+            }
         }
         // H3: Zero cached key material on flush/logout
         ClearCachedKey();
@@ -518,7 +643,7 @@ public class ProfileStore
             if (profile.ChatHistory[chatId].Count > 1000)
                 profile.ChatHistory[chatId] = profile.ChatHistory[chatId].TakeLast(1000).ToList();
         }
-        SaveProfileDebounced(profile, passphrase);
+        SaveChatHistoryDebounced(profile, passphrase);
     }
 
     // Keep async overload for backward compat (redirects to debounced)
@@ -542,7 +667,7 @@ public class ProfileStore
             if (profile.ChatHistory[chatId].Count != before) changed = true;
         }
 
-        if (changed) await SaveProfileAsync(profile, passphrase);
+        if (changed) await SaveChatHistoryAsync(profile, passphrase);
     }
 
     // --- Ratchet state ---
