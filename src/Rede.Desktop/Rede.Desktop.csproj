@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/icon.png" />
+    <EmbeddedResource Include="Assets/notification.wav" LogicalName="notification.wav" />
   </ItemGroup>
 
   <!-- Bundled LiveKit WebView assets for group calls -->

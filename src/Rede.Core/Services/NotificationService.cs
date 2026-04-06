@@ -12,7 +12,9 @@ public class NotificationService
 {
     private bool _enabled = true;
     private bool _showContent; // false = privacy mode (default)
+    private bool _soundEnabled = true;
     private string _ownStatus = "online";
+    private string? _soundPath;
 
     public bool Enabled
     {
@@ -30,6 +32,13 @@ public class NotificationService
         set => _showContent = value;
     }
 
+    /// <summary>When true (default), play a notification sound on incoming messages.</summary>
+    public bool SoundEnabled
+    {
+        get => _soundEnabled;
+        set => _soundEnabled = value;
+    }
+
     /// <summary>
     /// Set the user's current status. Notifications are suppressed when DND.
     /// </summary>
@@ -37,6 +46,15 @@ public class NotificationService
     {
         get => _ownStatus;
         set => _ownStatus = value ?? "online";
+    }
+
+    /// <summary>
+    /// Set the path to the notification sound file (WAV).
+    /// Call once at startup with the resolved Assets path.
+    /// </summary>
+    public void SetSoundPath(string path)
+    {
+        _soundPath = File.Exists(path) ? path : null;
     }
 
     /// <summary>
@@ -49,6 +67,7 @@ public class NotificationService
         // Don't notify for control messages
         if (messageText.Contains("\"__rede_ctrl\"")) return;
 
+        PlaySound();
         if (_showContent)
         {
             var preview = messageText.Length > 200 ? messageText[..200] + "..." : messageText;
@@ -69,6 +88,7 @@ public class NotificationService
         if (_ownStatus == "dnd") return;
         if (messageText.Contains("\"__rede_ctrl\"")) return;
 
+        PlaySound();
         if (_showContent)
         {
             var preview = messageText.Length > 200 ? messageText[..200] + "..." : messageText;
@@ -168,5 +188,65 @@ $xml.LoadXml('<toast><visual><binding template=""ToastGeneric""><text>{EscapeXml
         // H1: Strip control chars and newlines to prevent AppleScript injection
         var s = System.Text.RegularExpressions.Regex.Replace(text, @"[\x00-\x1f\x7f]", " ");
         return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    private void PlaySound()
+    {
+        if (!_soundEnabled || _soundPath is null) return;
+        try
+        {
+            ProcessStartInfo psi;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                // Try paplay (PulseAudio/PipeWire) first, fall back to aplay (ALSA)
+                psi = new ProcessStartInfo
+                {
+                    FileName = "paplay",
+                    ArgumentList = { _soundPath },
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                psi = new ProcessStartInfo
+                {
+                    FileName = "powershell",
+                    ArgumentList = { "-NoProfile", "-NonInteractive", "-Command",
+                        $"(New-Object System.Media.SoundPlayer '{_soundPath.Replace("'", "''")}').PlaySync()" },
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                psi = new ProcessStartInfo
+                {
+                    FileName = "afplay",
+                    ArgumentList = { _soundPath },
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+            }
+            else return;
+
+            // Fire-and-forget — don't block the message handler
+            Task.Run(() =>
+            {
+                try
+                {
+                    using var p = Process.Start(psi);
+                    p?.WaitForExit(5000);
+                }
+                catch { }
+            });
+        }
+        catch { }
     }
 }

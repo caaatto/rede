@@ -130,6 +130,25 @@ public partial class MainWindow : Window
         Environment.Exit(0);
     }
 
+    private static string? _notificationSoundPath;
+
+    private void ExtractNotificationSound()
+    {
+        if (_notificationSoundPath is not null) { _notifications.SetSoundPath(_notificationSoundPath); return; }
+        try
+        {
+            var asm = typeof(MainWindow).Assembly;
+            using var stream = asm.GetManifestResourceStream("notification.wav");
+            if (stream is null) return;
+            var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rede-notification.wav");
+            using (var fs = new System.IO.FileStream(tmp, System.IO.FileMode.Create, System.IO.FileAccess.Write))
+                stream.CopyTo(fs);
+            _notificationSoundPath = tmp;
+            _notifications.SetSoundPath(tmp);
+        }
+        catch { }
+    }
+
     private async void CheckForUpdatesAsync()
     {
         try
@@ -1001,7 +1020,11 @@ public partial class MainWindow : Window
         // Configure notifications from profile
         _notifications.Enabled = p.NotificationsEnabled;
         _notifications.ShowContent = p.NotificationShowContent;
+        _notifications.SoundEnabled = p.NotificationSoundEnabled;
         _notifications.OwnStatus = p.Status ?? "online";
+        // Extract embedded notification sound to a temp file (single-file publish
+        // doesn't include CopyToOutput content, so the wav must be embedded).
+        ExtractNotificationSound();
 
         // Apply saved theme variant + accent color (live-swap color resources)
         Themes.ThemeService.Apply(p.ThemeVariant);
@@ -1799,14 +1822,17 @@ public partial class MainWindow : Window
         // Notification settings
         vm.NotificationsEnabled = _auth.Profile.NotificationsEnabled;
         vm.NotificationShowContent = _auth.Profile.NotificationShowContent;
+        vm.NotificationSoundEnabled = _auth.Profile.NotificationSoundEnabled;
         vm.OnNotificationSettingsChanged += () =>
         {
             if (_auth?.Profile is not null && _auth.Passphrase is not null)
             {
                 _auth.Profile.NotificationsEnabled = vm.NotificationsEnabled;
                 _auth.Profile.NotificationShowContent = vm.NotificationShowContent;
+                _auth.Profile.NotificationSoundEnabled = vm.NotificationSoundEnabled;
                 _notifications.Enabled = vm.NotificationsEnabled;
                 _notifications.ShowContent = vm.NotificationShowContent;
+                _notifications.SoundEnabled = vm.NotificationSoundEnabled;
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
             }
         };

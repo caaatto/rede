@@ -237,7 +237,7 @@
                     <!-- =========================================================== -->
                     <StackPanel Grid.Row="3" Spacing="12" IsVisible="{Binding IsNotificationsCategory}">
                         <TextBlock Text="Notifications" Classes="header" />
-                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Desktop Notifications"
                                        VerticalAlignment="Center" />
                             <ToggleSwitch Grid.Row="0" Grid.Column="1"
@@ -247,6 +247,12 @@
                                        VerticalAlignment="Center" Margin="0,8,0,0" />
                             <ToggleSwitch Grid.Row="1" Grid.Column="1"
                                           IsChecked="{Binding NotificationShowContent}"
+                                          OnContent="On" OffContent="Off"
+                                          Margin="0,8,0,0" />
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Notification Sound"
+                                       VerticalAlignment="Center" Margin="0,8,0,0" />
+                            <ToggleSwitch Grid.Row="2" Grid.Column="1"
+                                          IsChecked="{Binding NotificationSoundEnabled}"
                                           OnContent="On" OffContent="Off"
                                           Margin="0,8,0,0" />
                         </Grid>

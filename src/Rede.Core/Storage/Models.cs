@@ -132,6 +132,9 @@ public class Profile
     [JsonPropertyName("notificationShowContent")]
     public bool NotificationShowContent { get; set; } // false = privacy mode (default)
 
+    [JsonPropertyName("notificationSoundEnabled")]
+    public bool NotificationSoundEnabled { get; set; } = true;
+
     // System integration
     [JsonPropertyName("minimizeToTray")]
     public bool MinimizeToTray { get; set; } = true; // true = pressing X hides window to tray instead of quitting

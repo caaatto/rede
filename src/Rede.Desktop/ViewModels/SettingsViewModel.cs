@@ -120,9 +120,11 @@ public partial class SettingsViewModel : ViewModelBase
     // Notifications
     [ObservableProperty] private bool _notificationsEnabled = true;
     [ObservableProperty] private bool _notificationShowContent; // false = privacy mode (default)
+    [ObservableProperty] private bool _notificationSoundEnabled = true;
 
     partial void OnNotificationsEnabledChanged(bool value) => OnNotificationSettingsChanged?.Invoke();
     partial void OnNotificationShowContentChanged(bool value) => OnNotificationSettingsChanged?.Invoke();
+    partial void OnNotificationSoundEnabledChanged(bool value) => OnNotificationSettingsChanged?.Invoke();
 
     public event Action? OnNotificationSettingsChanged;
 
