@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private ContactService? _contacts;
     private GroupService? _groups;
     private PlaceService? _places;
+    private BlobService? _blobs;
     private DeviceService? _devices;
 
     // Persistent handler reference so InitServices can unsubscribe before re-binding.
@@ -667,6 +668,7 @@ public partial class MainWindow : Window
         _contacts = new ContactService(_conn, _store);
         _groups = new GroupService(_conn, _store);
         _places = new PlaceService(_conn, _store);
+        _blobs = new BlobService(_conn);
         _devices = new DeviceService(_conn, _store);
         _call = new CallService(_conn, _store);
         _callVm.Init(_call);
@@ -898,6 +900,24 @@ public partial class MainWindow : Window
             }
         });
 
+        _groups.OnReactionUpdated += (chatKey, msgId, emoji, reactions) => Dispatcher.UIThread.Post(() =>
+        {
+            var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
+            msg?.UpdateReactions(reactions, _auth?.Profile?.UserId);
+        });
+
+        _groups.OnMessageEdited += (chatKey, msgId, newText) => Dispatcher.UIThread.Post(() =>
+        {
+            var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
+            if (msg is not null) { msg.Text = newText; msg.IsEdited = true; }
+        });
+
+        _groups.OnMessageDeleted += (chatKey, msgId) => Dispatcher.UIThread.Post(() =>
+        {
+            var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
+            if (msg is not null) { msg.Text = ""; msg.IsDeleted = true; }
+        });
+
         _groups.OnGroupsChanged += () => Dispatcher.UIThread.Post(RefreshGroups);
 
         _groups.OnSystemMessage += msg => Dispatcher.UIThread.Post(() =>
@@ -906,10 +926,15 @@ public partial class MainWindow : Window
         });
 
         // Place events
-        _places.OnChannelMessageReceived += (placeId, channelId, from, text, ts) => Dispatcher.UIThread.Post(() =>
+        _places.OnChannelMessageReceived += (placeId, channelId, from, text, ts, chatMsg) => Dispatcher.UIThread.Post(() =>
         {
             var (senderRole, roleColor) = GetSenderRoleInfo(placeId, from);
-            _mainVm.AddIncomingMessage(from, text, ts, senderRole: senderRole, roleBadgeColor: roleColor);
+            var displayFrom = _places?.GetNickname(placeId, from) ?? from;
+            _mainVm.AddIncomingMessage(displayFrom, text, ts, senderRole: senderRole, roleBadgeColor: roleColor,
+                msgId: chatMsg?.MsgId, replyToPreview: chatMsg?.ReplyToPreview, replyToAuthor: chatMsg?.ReplyToAuthor);
+            // Load attachments for incoming message
+            if (chatMsg?.Attachments is { Count: > 0 } && _mainVm.Messages.Count > 0)
+                LoadAttachmentsForMessage(_mainVm.Messages[^1], chatMsg.Attachments);
             MarkChannelUnread(placeId, channelId);
 
             // Desktop notification if not viewing this channel
@@ -920,6 +945,24 @@ public partial class MainWindow : Window
                     ? pl.Name : placeId;
                 _notifications.ShowGroupNotification(placeName, from, text);
             }
+        });
+
+        _places.OnReactionUpdated += (chatKey, msgId, emoji, reactions) => Dispatcher.UIThread.Post(() =>
+        {
+            var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
+            msg?.UpdateReactions(reactions, _auth?.Profile?.UserId);
+        });
+
+        _places.OnMessageEdited += (chatKey, msgId, newText) => Dispatcher.UIThread.Post(() =>
+        {
+            var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
+            if (msg is not null) { msg.Text = newText; msg.IsEdited = true; }
+        });
+
+        _places.OnMessageDeleted += (chatKey, msgId) => Dispatcher.UIThread.Post(() =>
+        {
+            var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
+            if (msg is not null) { msg.Text = ""; msg.IsDeleted = true; }
         });
 
         _places.OnPlacesChanged += () => Dispatcher.UIThread.Post(RefreshPlaces);
@@ -997,6 +1040,7 @@ public partial class MainWindow : Window
         if (_contacts is not null) { _contacts.Profile = p; _contacts.Passphrase = pp; }
         if (_groups is not null) { _groups.Profile = p; _groups.Passphrase = pp; }
         if (_places is not null) { _places.Profile = p; _places.Passphrase = pp; }
+        if (_blobs is not null) { _blobs.Profile = p; _blobs.Passphrase = pp; }
         if (_devices is not null) { _devices.Profile = p; _devices.Passphrase = pp; }
         if (_call is not null) { _call.Profile = p; _call.Passphrase = pp; }
 
@@ -1125,14 +1169,35 @@ public partial class MainWindow : Window
 
     private void WireMainViewModel()
     {
-        _mainVm.OnMessageSend += text =>
+        _mainVm.OnMessageSend += (text, replyMsgId, replyPreview, replyAuthor) =>
         {
             if (_mainVm.SelectedConversation is ContactItemViewModel contact)
                 _chat?.SendMessage(contact.UserId, text, _mainVm.TtlSeconds);
             else if (_mainVm.SelectedConversation is GroupItemViewModel group)
                 _groups?.SendGroupMessage(group.GroupId, text, _mainVm.TtlSeconds);
             else if (_mainVm.SelectedConversation is ChannelItemViewModel channel)
-                _places?.SendChannelMessage(channel.PlaceId, channel.ChannelId, text, _mainVm.TtlSeconds);
+                _places?.SendChannelMessage(channel.PlaceId, channel.ChannelId, text, _mainVm.TtlSeconds,
+                    replyMsgId, replyPreview, replyAuthor);
+        };
+
+        _mainVm.OnMessageEdit += (msgId, newText) =>
+        {
+            if (_mainVm.SelectedConversation is GroupItemViewModel group)
+            {
+                // Groups don't have SendEdit yet — would need similar SendControlMessage pattern
+            }
+            else if (_mainVm.SelectedConversation is ChannelItemViewModel channel)
+                _places?.SendEdit(channel.PlaceId, channel.ChannelId, msgId, newText);
+        };
+
+        _mainVm.OnMessageDelete += (msgId) =>
+        {
+            if (_mainVm.SelectedConversation is GroupItemViewModel group)
+            {
+                // Groups don't have SendDelete yet
+            }
+            else if (_mainVm.SelectedConversation is ChannelItemViewModel channel)
+                _places?.SendDelete(channel.PlaceId, channel.ChannelId, msgId);
         };
 
         _mainVm.OnCommandExecuted += (cmd, args) =>
@@ -1148,6 +1213,74 @@ public partial class MainWindow : Window
         _mainVm.OnMemberListRequested += placeId =>
         {
             LoadMemberList(placeId);
+        };
+
+        _mainVm.OnAttachFiles += (paths) =>
+        {
+            _ = HandleAttachFiles(paths);
+        };
+
+        _mainVm.OnPinMessage += (msgId, preview, author) =>
+        {
+            if (_mainVm.SelectedConversation is ChannelItemViewModel ch)
+                _places?.PinMessage(ch.PlaceId, ch.ChannelId, msgId, preview, author, _chat);
+        };
+    }
+
+    private async Task HandleAttachFiles(string[] paths)
+    {
+        if (_blobs is null || _places is null) return;
+        if (_mainVm.SelectedConversation is not ChannelItemViewModel channel) return;
+
+        var attachments = new List<Rede.Core.Storage.AttachmentInfo>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                var fileData = await System.IO.File.ReadAllBytesAsync(path);
+                var fileName = System.IO.Path.GetFileName(path);
+                var mimeType = GuessMimeType(path);
+
+                Dispatcher.UIThread.Post(() => _mainVm.AddSystemMessage($"Uploading {fileName}..."));
+
+                var att = await _blobs.UploadAsync(fileName, mimeType, fileData);
+                if (att is not null) attachments.Add(att);
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.UIThread.Post(() => _mainVm.AddSystemMessage($"Failed to upload {System.IO.Path.GetFileName(path)}: {ex.Message}"));
+            }
+        }
+
+        if (attachments.Count > 0)
+        {
+            var text = _mainVm.InputText?.Trim() ?? "";
+            if (string.IsNullOrEmpty(text)) text = $"{attachments.Count} file(s)";
+            Dispatcher.UIThread.Post(() => _mainVm.InputText = "");
+
+            _places.SendChannelMessage(channel.PlaceId, channel.ChannelId, text, _mainVm.TtlSeconds,
+                attachments: attachments);
+        }
+    }
+
+    private static string? GuessMimeType(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".svg" => "image/svg+xml",
+            ".pdf" => "application/pdf",
+            ".mp4" => "video/mp4",
+            ".mp3" => "audio/mpeg",
+            ".ogg" => "audio/ogg",
+            ".wav" => "audio/wav",
+            ".zip" => "application/zip",
+            ".txt" => "text/plain",
+            _ => "application/octet-stream",
         };
     }
 
@@ -1315,6 +1448,63 @@ public partial class MainWindow : Window
                     _mainVm.AddSystemMessage("Place not found.");
                 break;
 
+            // Custom role management
+            case "pcrole" when args.Length >= 2:
+            {
+                if (_mainVm.SelectedConversation is not ChannelItemViewModel crCh)
+                {
+                    _mainVm.AddSystemMessage("Select a place channel first.");
+                    break;
+                }
+                var sub = args[0].ToLowerInvariant();
+                switch (sub)
+                {
+                    case "create" when args.Length >= 3:
+                        // /pcrole create <name> [permissions-number]
+                        var perms = args.Length >= 3 && long.TryParse(args[^1], out var p) ? p : (long)Rede.Core.Storage.PlacePermission.SendMessages;
+                        var roleName = args.Length >= 4 ? string.Join(" ", args[1..^1]) : args[1];
+                        _places?.CreateCustomRole(crCh.PlaceId, roleName, "#6b7280", perms, _chat);
+                        break;
+                    case "delete" when args.Length >= 2:
+                        _places?.DeleteCustomRole(crCh.PlaceId, args[1], _chat);
+                        break;
+                    case "assign" when args.Length >= 3:
+                        _places?.AssignRole(crCh.PlaceId, args[1], args[2], _chat);
+                        break;
+                    case "remove" when args.Length >= 3:
+                        _places?.RemoveRole(crCh.PlaceId, args[1], args[2], _chat);
+                        break;
+                    case "list":
+                    {
+                        if (_auth?.Profile?.Places.TryGetValue(crCh.PlaceId, out var pl) == true)
+                        {
+                            if (pl.CustomRoles.Count == 0)
+                                _mainVm.AddSystemMessage("No custom roles. Use /pcrole create <name> to create one.");
+                            else
+                            {
+                                _mainVm.AddSystemMessage($"--- {pl.CustomRoles.Count} role(s) ---");
+                                foreach (var (id, role) in pl.CustomRoles.OrderByDescending(r => r.Value.Position))
+                                    _mainVm.AddSystemMessage($"  [{id}] {role.Name} (pos:{role.Position}, perms:{role.Permissions})");
+                            }
+                        }
+                        break;
+                    }
+                    case "init":
+                        // Initialize default roles (migration from 3-tier)
+                        if (_auth?.Profile?.Places.TryGetValue(crCh.PlaceId, out var initPl) == true)
+                        {
+                            _places?.InitializeDefaultRoles(initPl, initPl.CreatorId);
+                            _store?.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
+                            _mainVm.AddSystemMessage("Default roles initialized.");
+                        }
+                        break;
+                    default:
+                        _mainVm.AddSystemMessage("Usage: /pcrole create|delete|assign|remove|list|init ...");
+                        break;
+                }
+                break;
+            }
+
             case "prolecolors" when args.Length >= 4:
                 var prcPlaceId = FindPlaceId(args[0]);
                 if (prcPlaceId is not null)
@@ -1345,6 +1535,36 @@ public partial class MainWindow : Window
                     _places?.RemoveCategory(pcatrmPlaceId, string.Join(" ", args[1..]), _chat);
                 else
                     _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "pnick" when args.Length >= 1:
+                // /pnick <nickname> — set own nickname in current place
+                // /pnick <userId> <nickname> — admin sets someone's nickname
+                if (_mainVm.SelectedConversation is ChannelItemViewModel pnickCh)
+                {
+                    if (args.Length >= 2)
+                        _places?.SetNickname(pnickCh.PlaceId, args[0], string.Join(" ", args[1..]), _chat);
+                    else
+                        _places?.SetNickname(pnickCh.PlaceId, _auth?.Profile?.UserId ?? "", args[0], _chat);
+                }
+                else _mainVm.AddSystemMessage("Select a place channel first.");
+                break;
+
+            case "ppins":
+                // /ppins — show pinned messages in current channel
+                if (_mainVm.SelectedConversation is ChannelItemViewModel ppinsCh)
+                {
+                    var pins = _places?.GetPins(ppinsCh.PlaceId, ppinsCh.ChannelId);
+                    if (pins is null || pins.Count == 0)
+                        _mainVm.AddSystemMessage("No pinned messages.");
+                    else
+                    {
+                        _mainVm.AddSystemMessage($"--- {pins.Count} pinned message(s) ---");
+                        foreach (var pin in pins)
+                            _mainVm.AddSystemMessage($"[{pin.Author}]: {pin.Preview}");
+                    }
+                }
+                else _mainVm.AddSystemMessage("Select a place channel first.");
                 break;
 
             case "call" when args.Length >= 1:
@@ -1681,6 +1901,15 @@ public partial class MainWindow : Window
     {
         if (_auth?.Profile is null) return (null, "#6b7280");
         if (!_auth.Profile.Places.TryGetValue(placeId, out var place)) return (null, "#6b7280");
+
+        // Use custom roles if available
+        if (place.CustomRoles.Count > 0)
+        {
+            var (roleName, roleColor, _) = PlaceService.GetHighestRole(place, senderId);
+            return roleName == "Member" ? (null, roleColor) : (roleName, roleColor);
+        }
+
+        // Legacy 3-tier fallback
         if (senderId == place.CreatorId) return ("Owner", place.OwnerColor);
         if (place.Roles.TryGetValue(senderId, out var role) && role >= Rede.Core.Storage.PlaceRole.Admin)
             return ("Admin", place.AdminColor);
@@ -1743,9 +1972,25 @@ public partial class MainWindow : Window
                 var initial = contactVm?.Initial
                     ?? (string.IsNullOrEmpty(msg.From) ? "?" : msg.From[..1].ToUpperInvariant());
 
+                // Resolve sender role for place channels
+                string? senderRole = null;
+                string roleBadgeColor = "#8b5cf6";
+                if (_mainVm.SelectedConversation is ChannelItemViewModel selChan)
+                {
+                    (senderRole, roleBadgeColor) = GetSenderRoleInfo(selChan.PlaceId, msg.From);
+                }
+
+                // Resolve nickname for places
+                var displayFrom = msg.From;
+                if (_mainVm.SelectedConversation is ChannelItemViewModel nickChan)
+                {
+                    var nick = _places?.GetNickname(nickChan.PlaceId, msg.From);
+                    if (nick is not null) displayFrom = nick;
+                }
+
                 _mainVm.Messages.Add(new ChatMessageViewModel
                 {
-                    From = msg.From,
+                    From = displayFrom,
                     Text = msg.Text,
                     IsOwn = isOwn,
                     Timestamp = ts,
@@ -1754,7 +1999,20 @@ public partial class MainWindow : Window
                     SenderInitial = initial,
                     SenderAvatar = contactVm?.AvatarImage,
                     HasSenderAvatar = contactVm?.HasAvatar ?? false,
+                    SenderRole = senderRole,
+                    RoleBadgeColor = roleBadgeColor,
+                    MsgId = msg.MsgId,
+                    ReplyToPreview = msg.ReplyToPreview,
+                    ReplyToAuthor = msg.ReplyToAuthor,
+                    IsEdited = msg.EditedAt.HasValue,
+                    IsDeleted = msg.IsDeleted,
                 });
+                // Load reactions from stored message
+                if (msg.Reactions is { Count: > 0 })
+                    _mainVm.Messages[^1].UpdateReactions(msg.Reactions, _auth?.Profile?.UserId);
+                // Load attachments
+                if (msg.Attachments is { Count: > 0 })
+                    LoadAttachmentsForMessage(_mainVm.Messages[^1], msg.Attachments);
             }
         }
 
@@ -1765,6 +2023,51 @@ public partial class MainWindow : Window
             group.HasUnread = false;
         else if (_mainVm.SelectedConversation is ChannelItemViewModel ch)
             ch.HasUnread = false;
+    }
+
+    private void LoadAttachmentsForMessage(ChatMessageViewModel msgVm, List<Rede.Core.Storage.AttachmentInfo> attachments)
+    {
+        foreach (var att in attachments)
+        {
+            var attVm = new AttachmentViewModel
+            {
+                Name = att.Name,
+                BlobId = att.BlobId,
+                SizeDisplay = FormatFileSize(att.Size),
+                IsImage = BlobService.IsImage(att),
+            };
+            msgVm.Attachments.Add(attVm);
+
+            // Lazy-load image preview
+            if (attVm.IsImage && _blobs is not null)
+            {
+                var blobService = _blobs;
+                var attInfo = att;
+                _ = Task.Run(async () =>
+                {
+                    var data = await blobService.FetchAsync(attInfo);
+                    if (data is null) return;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        try
+                        {
+                            using var ms = new System.IO.MemoryStream(data);
+                            attVm.Preview = new Avalonia.Media.Imaging.Bitmap(ms);
+                            attVm.HasPreview = true;
+                        }
+                        catch { }
+                    });
+                });
+            }
+        }
+        msgVm.HasAttachments = msgVm.Attachments.Count > 0;
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
     }
 
     private void MarkContactUnread(string userId)
@@ -1928,6 +2231,8 @@ public partial class MainWindow : Window
             vm.InputVolume = p.InputVolume * 100;
             vm.OutputVolume = p.OutputVolume * 100;
             vm.NoiseGateThreshold = p.NoiseGateThreshold * 100 / 1.0; // 0.02 → 2
+            vm.NoiseSuppression = p.NoiseSuppression;
+            vm.IsNoiseSuppressionAvailable = Rede.Core.Audio.AudioEngine.IsNoiseSuppressionAvailable;
         }
         catch { /* PortAudio not available */ }
 
@@ -1950,6 +2255,7 @@ public partial class MainWindow : Window
                 _auth.Profile.InputVolume = (float)(vm.InputVolume / 100.0);
                 _auth.Profile.OutputVolume = (float)(vm.OutputVolume / 100.0);
                 _auth.Profile.NoiseGateThreshold = (float)(vm.NoiseGateThreshold / 100.0);
+                _auth.Profile.NoiseSuppression = vm.NoiseSuppression;
 
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
 
@@ -1959,6 +2265,7 @@ public partial class MainWindow : Window
                     _call.Audio.InputVolume = _auth.Profile.InputVolume;
                     _call.Audio.OutputVolume = _auth.Profile.OutputVolume;
                     _call.Audio.NoiseGateThreshold = _auth.Profile.NoiseGateThreshold;
+                    _call.Audio.NoiseSuppression = _auth.Profile.NoiseSuppression;
 
                     if (inIdx >= 0 && inIdx < cachedInputDevs.Count)
                         _call.Audio.SelectedInputDevice = cachedInputDevs[inIdx].Index;

@@ -29,8 +29,11 @@ public class AudioEngine : IDisposable
     private volatile float _inputVolume = 1.0f;   // 0.0 - 2.0
     private volatile float _outputVolume = 1.0f;   // 0.0 - 2.0
     private volatile float _noiseGateThreshold = 0.0f; // 0.0 = off, 0.01-0.1 typical
+    private volatile bool _noiseSuppression;
     private int _selectedInputDevice = -1;  // -1 = system default
     private int _selectedOutputDevice = -1; // -1 = system default
+
+    private RNNoise? _rnnoise;
 
     /// <summary>
     /// Fired when an encoded Opus frame is ready to send.
@@ -60,6 +63,32 @@ public class AudioEngine : IDisposable
         get => _noiseGateThreshold;
         set => _noiseGateThreshold = Math.Clamp(value, 0f, 1f);
     }
+
+    /// <summary>
+    /// Enable/disable RNNoise noise suppression. Only works if native library is available.
+    /// </summary>
+    public bool NoiseSuppression
+    {
+        get => _noiseSuppression;
+        set
+        {
+            _noiseSuppression = value;
+            if (value && _rnnoise is null && RNNoise.IsAvailable)
+            {
+                try { _rnnoise = new RNNoise(); } catch { _rnnoise = null; }
+            }
+            else if (!value)
+            {
+                _rnnoise?.Dispose();
+                _rnnoise = null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether RNNoise native library is available on this platform.
+    /// </summary>
+    public static bool IsNoiseSuppressionAvailable => RNNoise.IsAvailable;
 
     public int SelectedInputDevice
     {
@@ -133,6 +162,12 @@ public class AudioEngine : IDisposable
             suggestedLatency = PortAudioSharp.PortAudio.GetDeviceInfo(outputDev).defaultLowOutputLatency,
         };
 
+        // Initialize RNNoise if enabled
+        if (_noiseSuppression && _rnnoise is null && RNNoise.IsAvailable)
+        {
+            try { _rnnoise = new RNNoise(); } catch { _rnnoise = null; }
+        }
+
         _running = true;
 
         _inputStream = new PortAudioSharp.Stream(
@@ -164,6 +199,9 @@ public class AudioEngine : IDisposable
 
         _encoder = null;
         _decoder = null;
+
+        _rnnoise?.Dispose();
+        _rnnoise = null;
 
         try { PortAudioSharp.PortAudio.Terminate(); } catch { }
     }
@@ -210,6 +248,12 @@ public class AudioEngine : IDisposable
                 double rms = Math.Sqrt(sumSq / pcm.Length) / 32768.0;
                 if (rms < gate)
                     return PortAudioSharp.StreamCallbackResult.Continue; // Drop silent frame
+            }
+
+            // RNNoise: neural noise suppression (after volume + gate, before encode)
+            if (_noiseSuppression && _rnnoise is not null)
+            {
+                try { _rnnoise.ProcessFrame(pcm, pcm.Length); } catch { }
             }
 
             var encoded = new byte[4000]; // Max Opus frame

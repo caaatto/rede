@@ -103,6 +103,14 @@ const MSG = {
   GCALL_END: 'gcall_end',                        // client → server → members: { scope, endedBy }
   GCALL_ACTIVE: 'gcall_active',                  // server → client: { scope, participants[] } (poll / on join)
 
+  // Blob (Attachments)
+  BLOB_UPLOAD: 'blob_upload',         // client → server: { blobId, size, data (base64) }
+  BLOB_UPLOAD_OK: 'blob_upload_ok',   // server → client: { blobId }
+  BLOB_UPLOAD_FAIL: 'blob_upload_fail', // server → client: { blobId, reason }
+  BLOB_FETCH: 'blob_fetch',           // client → server: { blobId }
+  BLOB_DATA: 'blob_data',             // server → client: { blobId, data (base64) }
+  BLOB_DATA_FAIL: 'blob_data_fail',   // server → client: { blobId, reason }
+
   // Status / Presence
   STATUS_UPDATE: 'status_update',
   STATUS_SUBSCRIBE: 'status_subscribe',

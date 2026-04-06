@@ -65,7 +65,15 @@
   #e2ee-badge.on { color: var(--accent-2); background: rgba(45,212,191,0.1); border: 1px solid rgba(45,212,191,0.3); }
   #e2ee-badge.off { color: var(--danger); background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); }
 
-  #grid {
+  #content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  /* Normal grid mode (no screenshare) */
+  #content:not(.has-screenshare) #grid {
     flex: 1;
     display: grid;
     gap: 8px;
@@ -75,6 +83,85 @@
     overflow: auto;
     min-height: 0;
   }
+  #content:not(.has-screenshare) #focus-area { display: none; }
+
+  /* Screenshare focus mode */
+  #content.has-screenshare {
+    flex-direction: column;
+  }
+  #content.has-screenshare #focus-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    min-height: 0;
+    position: relative;
+    cursor: pointer;
+  }
+  #content.has-screenshare #focus-area video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  #content.has-screenshare #focus-area .focus-label {
+    position: absolute;
+    top: 16px; left: 16px;
+    padding: 4px 10px;
+    background: rgba(139,92,246,0.85);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  #content.has-screenshare #focus-area .focus-name {
+    position: absolute;
+    bottom: 16px; left: 16px;
+    padding: 4px 10px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 4px;
+    font-size: 13px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  #content.has-screenshare #grid {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-shrink: 0;
+    height: 120px;
+    min-height: 120px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  #content.has-screenshare #grid .tile {
+    width: 160px;
+    min-width: 160px;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+
+  /* Fullscreen focus */
+  #focus-area.fullscreen {
+    position: fixed !important;
+    inset: 0;
+    z-index: 100;
+    background: #000;
+    padding: 0 !important;
+    border-radius: 0;
+  }
+  #focus-area.fullscreen video {
+    border-radius: 0 !important;
+  }
+
   .tile {
     position: relative;
     background: var(--surface);
@@ -127,6 +214,16 @@
     border-color: var(--accent-2);
     box-shadow: 0 0 0 2px rgba(45,212,191,0.4);
   }
+  /* Small avatar for sidebar tiles in screenshare mode */
+  #content.has-screenshare #grid .tile .avatar {
+    width: 40px; height: 40px;
+    font-size: 16px;
+  }
+  #content.has-screenshare #grid .tile .name {
+    font-size: 10px;
+    left: 4px; bottom: 4px;
+    padding: 2px 6px;
+  }
 
   #controls {
     display: flex;
@@ -178,11 +275,15 @@
     <span id="status-text">Connecting to call…</span>
     <span id="e2ee-badge" class="off">E2EE OFF</span>
   </div>
-  <div id="grid"></div>
+  <div id="content">
+    <div id="focus-area"></div>
+    <div id="grid"></div>
+  </div>
   <div id="controls">
     <button class="ctrl" id="btn-mic" title="Toggle microphone">MIC</button>
+    <button class="ctrl" id="btn-deafen" title="Toggle deafen">DEF</button>
     <button class="ctrl" id="btn-cam" title="Toggle camera">CAM</button>
-    <button class="ctrl" id="btn-screen" title="Share screen" disabled>SHARE</button>
+    <button class="ctrl" id="btn-screen" title="Share screen">SHARE</button>
     <button class="ctrl leave" id="btn-leave" title="Leave call">END</button>
   </div>
 </div>
@@ -237,7 +338,11 @@
   const grid = document.getElementById('grid');
   const btnMic = document.getElementById('btn-mic');
   const btnCam = document.getElementById('btn-cam');
+  const btnDeafen = document.getElementById('btn-deafen');
+  const btnScreen = document.getElementById('btn-screen');
   const btnLeave = document.getElementById('btn-leave');
+  const content = document.getElementById('content');
+  const focusArea = document.getElementById('focus-area');
 
   // --- Host bridge ---
   // Post messages back to the C# WebView host so Avalonia UI can react.
@@ -362,11 +467,69 @@ function startCall() {
   function removeTile(identity) {
     const entry = tiles.get(identity);
     if (entry) { entry.el.remove(); tiles.delete(identity); }
+    // Exit focus mode if this participant was screen-sharing
+    if (focusScreenOwner === identity) exitFocusMode();
     displayNames.delete(identity);
   }
 
+  // Track which participant is currently screen-sharing in focus
+  let focusScreenOwner = null; // participant identity or null
+
+  function enterFocusMode(participant, publication) {
+    focusScreenOwner = participant.identity;
+    // Clear focus area
+    while (focusArea.firstChild) focusArea.firstChild.remove();
+    // Attach video
+    const el = publication.track.attach();
+    el.style.width = '100%';
+    el.style.height = '100%';
+    el.style.objectFit = 'contain';
+    focusArea.appendChild(el);
+    // Label
+    const label = document.createElement('div');
+    label.className = 'focus-label';
+    label.textContent = 'Screen';
+    focusArea.appendChild(label);
+    const nameEl = document.createElement('div');
+    nameEl.className = 'focus-name';
+    nameEl.textContent = labelFor(participant.identity) + ' is sharing';
+    focusArea.appendChild(nameEl);
+    content.classList.add('has-screenshare');
+  }
+
+  function exitFocusMode() {
+    focusScreenOwner = null;
+    while (focusArea.firstChild) focusArea.firstChild.remove();
+    focusArea.classList.remove('fullscreen');
+    content.classList.remove('has-screenshare');
+  }
+
+  // Double-click focus area to toggle fullscreen
+  focusArea.addEventListener('dblclick', () => {
+    focusArea.classList.toggle('fullscreen');
+  });
+  // Escape exits fullscreen
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && focusArea.classList.contains('fullscreen')) {
+      focusArea.classList.remove('fullscreen');
+    }
+  });
+
   function attachTrack(participant, publication) {
     if (!publication.track) return;
+    const isScreenShare = publication.source === LK.Track.Source.ScreenShare;
+    if (isScreenShare) {
+      enterFocusMode(participant, publication);
+      return;
+    }
+    if (publication.source === LK.Track.Source.ScreenShareAudio) {
+      // Screen share audio — attach hidden
+      const el = publication.track.attach();
+      el.style.display = 'none';
+      el.dataset.screenAudio = participant.identity;
+      document.body.appendChild(el);
+      return;
+    }
     ensureTile(participant);
     const entry = tiles.get(participant.identity);
     const tile = entry ? entry.el : null;
@@ -386,9 +549,14 @@ function startCall() {
     }
   }
 
-  function detachTrack(publication) {
-    if (publication.track) {
-      publication.track.detach().forEach(el => el.remove());
+  function detachTrack(publication, participant) {
+    if (!publication.track) return;
+    publication.track.detach().forEach(el => el.remove());
+    // Exit focus mode when screen share stops
+    if (publication.source === LK.Track.Source.ScreenShare && participant) {
+      if (focusScreenOwner === participant.identity) {
+        exitFocusMode();
+      }
     }
   }
 
@@ -483,10 +651,14 @@ function startCall() {
 
   room.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
     attachTrack(participant, publication);
+    // Respect deafen state for newly subscribed audio
+    if (deafened && track.kind === 'audio') {
+      try { track.setVolume(0); } catch(e) {}
+    }
   });
 
-  room.on(LK.RoomEvent.TrackUnsubscribed, (track, publication) => {
-    detachTrack(publication);
+  room.on(LK.RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+    detachTrack(publication, participant);
   });
 
   room.on(LK.RoomEvent.LocalTrackPublished, (publication, participant) => {
@@ -494,7 +666,7 @@ function startCall() {
   });
 
   room.on(LK.RoomEvent.LocalTrackUnpublished, (publication) => {
-    detachTrack(publication);
+    detachTrack(publication, room.localParticipant);
   });
 
   room.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
@@ -505,23 +677,74 @@ function startCall() {
   });
 
   // --- Controls ---
+  let deafened = false;
+  let preMuteState = true; // was mic on before deafen?
+
   function updateButtons() {
     const lp = room.localParticipant;
-    btnMic.classList.toggle('active', !lp.isMicrophoneEnabled);
-    btnMic.textContent = lp.isMicrophoneEnabled ? 'MIC' : 'MUTE';
+    // Mic
+    const micActive = lp.isMicrophoneEnabled && !deafened;
+    btnMic.classList.toggle('active', !micActive);
+    btnMic.textContent = micActive ? 'MIC' : 'MUTE';
+    if (deafened) btnMic.disabled = true; else btnMic.disabled = false;
+    // Deafen
+    btnDeafen.classList.toggle('active', deafened);
+    btnDeafen.textContent = deafened ? 'DEAF' : 'DEF';
+    // Cam
     btnCam.classList.toggle('active', !lp.isCameraEnabled);
     btnCam.textContent = lp.isCameraEnabled ? 'CAM' : 'OFF';
+    // Screen
+    btnScreen.classList.toggle('active', lp.isScreenShareEnabled);
+    btnScreen.textContent = lp.isScreenShareEnabled ? 'STOP' : 'SHARE';
   }
 
   btnMic.onclick = async () => {
+    if (deafened) return;
     const lp = room.localParticipant;
     await lp.setMicrophoneEnabled(!lp.isMicrophoneEnabled);
     updateButtons();
+  };
+  btnDeafen.onclick = async () => {
+    const lp = room.localParticipant;
+    if (!deafened) {
+      // Deafen: mute all remote audio + mute own mic
+      preMuteState = lp.isMicrophoneEnabled;
+      deafened = true;
+      await lp.setMicrophoneEnabled(false);
+      // Mute all subscribed audio tracks
+      for (const p of room.remoteParticipants.values()) {
+        for (const pub of p.audioTrackPublications.values()) {
+          if (pub.track) pub.track.setVolume(0);
+        }
+      }
+    } else {
+      // Undeafen: restore audio + restore mic state
+      deafened = false;
+      await lp.setMicrophoneEnabled(preMuteState);
+      for (const p of room.remoteParticipants.values()) {
+        for (const pub of p.audioTrackPublications.values()) {
+          if (pub.track) pub.track.setVolume(1);
+        }
+      }
+    }
+    updateButtons();
+    postHost('deafen', { deafened });
   };
   btnCam.onclick = async () => {
     const lp = room.localParticipant;
     await lp.setCameraEnabled(!lp.isCameraEnabled);
     updateButtons();
+  };
+  btnScreen.onclick = async () => {
+    const lp = room.localParticipant;
+    try {
+      await lp.setScreenShareEnabled(!lp.isScreenShareEnabled, { audio: true });
+      updateButtons();
+    } catch (e) {
+      // User cancelled the screen picker — not an error
+      console.log('Screen share toggle failed', e);
+      updateButtons();
+    }
   };
   btnLeave.onclick = async () => {
     await room.disconnect();
@@ -550,6 +773,8 @@ function startCall() {
   // Expose for C# to call
   window.redeLeave = () => btnLeave.click();
   window.redeToggleMute = () => btnMic.click();
+  window.redeToggleDeafen = () => btnDeafen.click();
+  window.redeToggleScreen = () => btnScreen.click();
 } // end startCall
 })();
 </script>

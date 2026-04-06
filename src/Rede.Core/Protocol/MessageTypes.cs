@@ -103,6 +103,14 @@ public static class Msg
     public const string GCallEnd = "gcall_end";
     public const string GCallActive = "gcall_active";
 
+    // Blob (Attachments)
+    public const string BlobUpload = "blob_upload";
+    public const string BlobUploadOk = "blob_upload_ok";
+    public const string BlobUploadFail = "blob_upload_fail";
+    public const string BlobFetch = "blob_fetch";
+    public const string BlobData = "blob_data";
+    public const string BlobDataFail = "blob_data_fail";
+
     // Status / Presence
     public const string StatusUpdate = "status_update";
     public const string StatusSubscribe = "status_subscribe";

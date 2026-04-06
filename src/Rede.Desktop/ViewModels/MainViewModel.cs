@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -182,16 +183,40 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        // Handle edit mode
+        if (IsEditing && EditingMsgId is not null)
+        {
+            var editMsgId = EditingMsgId;
+            CancelEdit();
+            // Update the message in UI
+            var existing = Messages.FirstOrDefault(m => m.MsgId == editMsgId);
+            if (existing is not null)
+            {
+                existing.Text = text;
+                existing.IsEdited = true;
+            }
+            OnMessageEdit?.Invoke(editMsgId, text);
+            return;
+        }
+
+        // Capture reply state before clearing
+        var replyMsgId = ReplyToMsgId;
+        var replyPreview = ReplyToPreview;
+        var replyAuthor = ReplyToAuthor;
+        CancelReply();
+
         // Add message to UI immediately (optimistic)
         Messages.Add(new ChatMessageViewModel
         {
             Text = text,
             IsOwn = true,
             Timestamp = DateTime.Now,
+            ReplyToPreview = replyPreview,
+            ReplyToAuthor = replyAuthor,
         });
 
         // Actual send logic will be wired via service layer
-        OnMessageSend?.Invoke(text);
+        OnMessageSend?.Invoke(text, replyMsgId, replyPreview, replyAuthor);
     }
 
     private void HandleCommand(string text)
@@ -207,7 +232,9 @@ public partial class MainViewModel : ViewModelBase
         OnChatHistoryRequested?.Invoke(chatId);
     }
 
-    public void AddIncomingMessage(string from, string text, DateTime timestamp, bool isSystem = false, string? senderRole = null, string? roleBadgeColor = null)
+    public void AddIncomingMessage(string from, string text, DateTime timestamp, bool isSystem = false,
+        string? senderRole = null, string? roleBadgeColor = null,
+        string? msgId = null, string? replyToPreview = null, string? replyToAuthor = null)
     {
         // M10: Truncate incoming message text before rendering
         if (text.Length > 8192) text = text[..8192] + "…";
@@ -232,6 +259,9 @@ public partial class MainViewModel : ViewModelBase
             HasSenderAvatar = contact?.HasAvatar ?? false,
             SenderRole = senderRole,
             RoleBadgeColor = roleBadgeColor ?? "#8b5cf6",
+            MsgId = msgId,
+            ReplyToPreview = replyToPreview,
+            ReplyToAuthor = replyToAuthor,
         };
         // M5: Cap in-memory message display to prevent OOM
         while (Messages.Count >= 1000)
@@ -253,7 +283,60 @@ public partial class MainViewModel : ViewModelBase
         });
     }
 
-    public event Action<string>? OnMessageSend;
+    // Reply state
+    [ObservableProperty] private string? _replyToMsgId;
+    [ObservableProperty] private string? _replyToPreview;
+    [ObservableProperty] private string? _replyToAuthor;
+    [ObservableProperty] private bool _isReplying;
+
+    [RelayCommand]
+    private void CancelReply()
+    {
+        ReplyToMsgId = null;
+        ReplyToPreview = null;
+        ReplyToAuthor = null;
+        IsReplying = false;
+    }
+
+    public void SetReplyTarget(ChatMessageViewModel msg)
+    {
+        CancelEdit(); // Can't reply while editing
+        ReplyToMsgId = msg.MsgId;
+        ReplyToPreview = msg.Text.Length > 100 ? msg.Text[..100] : msg.Text;
+        ReplyToAuthor = msg.From;
+        IsReplying = true;
+    }
+
+    // Edit state
+    [ObservableProperty] private string? _editingMsgId;
+    [ObservableProperty] private bool _isEditing;
+
+    public void StartEdit(ChatMessageViewModel msg)
+    {
+        CancelReply(); // Can't edit while replying
+        EditingMsgId = msg.MsgId;
+        IsEditing = true;
+        InputText = msg.Text; // Load original text into input
+    }
+
+    [RelayCommand]
+    private void CancelEdit()
+    {
+        EditingMsgId = null;
+        IsEditing = false;
+        // Don't clear InputText — user may have typed something
+    }
+
+    public event Action<string, string?, string?, string?>? OnMessageSend; // text, replyToMsgId, replyToPreview, replyToAuthor
+    public event Action<string, string>? OnMessageEdit; // msgId, newText
+    public event Action<string>? OnMessageDelete; // msgId
+    public event Action<string[]>? OnAttachFiles; // file paths
+
+    public void RequestDelete(string msgId) => OnMessageDelete?.Invoke(msgId);
+    public void RequestAttach(string[] paths) => OnAttachFiles?.Invoke(paths);
+
+    public event Action<string, string, string>? OnPinMessage; // msgId, preview, author
+    public void RequestPin(string msgId, string preview, string author) => OnPinMessage?.Invoke(msgId, preview, author);
     public event Action<string, string[]>? OnCommandExecuted;
     public event Action<string>? OnChatHistoryRequested;
     public event Action<string>? OnMemberListRequested;
@@ -433,10 +516,61 @@ public partial class ChatMessageViewModel : ViewModelBase
     [ObservableProperty] private string? _senderRole; // "Owner", "Admin", or null
     [ObservableProperty] private string _roleBadgeColor = "#8b5cf6"; // customizable per-place
 
+    // Reply support
+    [ObservableProperty] private string? _msgId;
+    [ObservableProperty] private string? _replyToPreview;
+    [ObservableProperty] private string? _replyToAuthor;
+
+    // Edit + Delete
+    [ObservableProperty] private bool _isEdited;
+    [ObservableProperty] private bool _isDeleted;
+
+    // Attachments
+    [ObservableProperty] private ObservableCollection<AttachmentViewModel> _attachments = new();
+    [ObservableProperty] private bool _hasAttachments;
+
+    // Reactions
+    [ObservableProperty] private ObservableCollection<ReactionViewModel> _reactions = new();
+    [ObservableProperty] private bool _hasReactions;
+
+    public void UpdateReactions(Dictionary<string, List<string>>? rxDict, string? ownUserId)
+    {
+        Reactions.Clear();
+        if (rxDict is null || rxDict.Count == 0) { HasReactions = false; return; }
+        foreach (var (emoji, users) in rxDict)
+        {
+            Reactions.Add(new ReactionViewModel
+            {
+                Emoji = emoji,
+                Count = users.Count,
+                IsOwn = ownUserId is not null && users.Contains(ownUserId),
+            });
+        }
+        HasReactions = Reactions.Count > 0;
+    }
+
     public string TimeString => Timestamp.ToString("h:mm tt").ToLowerInvariant();
     public bool HasTtl => Ttl > 0;
     public string TtlDisplay => Ttl > 0 ? $"{Ttl}d" : "";
     public IBrush SenderAccentBrush => ColorHelper.SafeParse(SenderAccentColor);
     public bool HasSenderRole => SenderRole is not null;
     public IBrush RoleBadgeBrush => ColorHelper.SafeParse(RoleBadgeColor);
+    public bool IsReply => ReplyToPreview is not null;
+}
+
+public partial class ReactionViewModel : ViewModelBase
+{
+    [ObservableProperty] private string _emoji = "";
+    [ObservableProperty] private int _count;
+    [ObservableProperty] private bool _isOwn; // current user reacted with this emoji
+}
+
+public partial class AttachmentViewModel : ViewModelBase
+{
+    [ObservableProperty] private string _name = "";
+    [ObservableProperty] private string _blobId = "";
+    [ObservableProperty] private string _sizeDisplay = "";
+    [ObservableProperty] private bool _isImage;
+    [ObservableProperty] private Bitmap? _preview;
+    [ObservableProperty] private bool _hasPreview;
 }

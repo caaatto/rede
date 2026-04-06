@@ -231,10 +231,15 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private double _inputVolume = 100;       // 0-200 (percentage)
     [ObservableProperty] private double _outputVolume = 100;      // 0-200 (percentage)
     [ObservableProperty] private double _noiseGateThreshold = 2;  // 0-100 (percentage, 0=off)
+    [ObservableProperty] private bool _noiseSuppression;
+    [ObservableProperty] private bool _isNoiseSuppressionAvailable;
 
     public string InputVolumeText => $"{(int)InputVolume}%";
     public string OutputVolumeText => $"{(int)OutputVolume}%";
     public string NoiseGateText => NoiseGateThreshold < 1 ? "Off" : $"{(int)NoiseGateThreshold}%";
+    public string NoiseSuppressionStatus => IsNoiseSuppressionAvailable
+        ? "RNNoise — removes background noise from your mic"
+        : "Not available — install librnnoise on your system";
 
     public event Action? OnBackRequested;
     public event Action? OnAudioSettingsChanged;
@@ -271,6 +276,10 @@ public partial class SettingsViewModel : ViewModelBase
     partial void OnNoiseGateThresholdChanged(double value)
     {
         OnPropertyChanged(nameof(NoiseGateText));
+        DebouncedAudioChange();
+    }
+    partial void OnNoiseSuppressionChanged(bool value)
+    {
         DebouncedAudioChange();
     }
 

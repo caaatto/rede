@@ -406,24 +406,81 @@
             <ContentControl DockPanel.Dock="Bottom"
                             x:Name="CallOverlay" />
 
-            <!-- Message input bar -->
-            <Border DockPanel.Dock="Bottom" Padding="16,12"
-                    Background="{DynamicResource RedeSurfaceBrush}"
-                    BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
-                    BorderThickness="0,1,0,0">
-                <Grid ColumnDefinitions="*,8,Auto">
-                    <TextBox Grid.Column="0"
-                             Text="{Binding InputText}"
-                             Watermark="Type a message or /command..."
-                             MaxLength="4096"
-                             KeyDown="InputBox_KeyDown" />
-                    <Button Grid.Column="2"
-                            Content="Send"
-                            Background="{Binding OwnAccentBrush}"
-                            Foreground="White"
-                            Command="{Binding SendMessageCommand}" />
-                </Grid>
-            </Border>
+            <!-- Reply preview bar + Message input bar -->
+            <StackPanel DockPanel.Dock="Bottom">
+                <!-- Reply preview (shown when replying) -->
+                <Border Padding="16,8"
+                        Background="{DynamicResource RedeSurfaceBrush}"
+                        BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,1,0,0"
+                        IsVisible="{Binding IsReplying}">
+                    <Grid ColumnDefinitions="Auto,8,*,8,Auto">
+                        <Border Grid.Column="0" Width="3" CornerRadius="2"
+                                Background="{DynamicResource RedeAccentBrush}" />
+                        <StackPanel Grid.Column="2" Spacing="2">
+                            <TextBlock Text="{Binding ReplyToAuthor, StringFormat='Replying to {0}'}"
+                                       FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource RedeAccentBrush}" />
+                            <TextBlock Text="{Binding ReplyToPreview}"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource RedeSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis"
+                                       MaxLines="1" />
+                        </StackPanel>
+                        <Button Grid.Column="4" Content="✕"
+                                FontSize="14" Padding="6,2"
+                                Background="Transparent"
+                                Foreground="{DynamicResource RedeSecondaryBrush}"
+                                Command="{Binding CancelReplyCommand}" />
+                    </Grid>
+                </Border>
+                <!-- Edit preview (shown when editing) -->
+                <Border Padding="16,8"
+                        Background="{DynamicResource RedeSurfaceBrush}"
+                        BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,1,0,0"
+                        IsVisible="{Binding IsEditing}">
+                    <Grid ColumnDefinitions="Auto,8,*,8,Auto">
+                        <Border Grid.Column="0" Width="3" CornerRadius="2"
+                                Background="{DynamicResource RedeAccentTealBrush}" />
+                        <TextBlock Grid.Column="2"
+                                   Text="Editing message"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource RedeAccentTealBrush}" />
+                        <Button Grid.Column="4" Content="✕"
+                                FontSize="14" Padding="6,2"
+                                Background="Transparent"
+                                Foreground="{DynamicResource RedeSecondaryBrush}"
+                                Command="{Binding CancelEditCommand}" />
+                    </Grid>
+                </Border>
+                <!-- Input bar -->
+                <Border Padding="16,12"
+                        Background="{DynamicResource RedeSurfaceBrush}"
+                        BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,1,0,0">
+                    <Grid ColumnDefinitions="Auto,8,*,8,Auto">
+                        <Button Grid.Column="0"
+                                Content="+"
+                                FontSize="18" FontWeight="Bold"
+                                Padding="8,4"
+                                Background="Transparent"
+                                Foreground="{DynamicResource RedeSecondaryBrush}"
+                                Click="AttachButton_Click"
+                                ToolTip.Tip="Attach file" />
+                        <TextBox Grid.Column="2"
+                                 Text="{Binding InputText}"
+                                 Watermark="Type a message or /command..."
+                                 MaxLength="4096"
+                                 KeyDown="InputBox_KeyDown" />
+                        <Button Grid.Column="4"
+                                Content="Send"
+                                Background="{Binding OwnAccentBrush}"
+                                Foreground="White"
+                                Command="{Binding SendMessageCommand}" />
+                    </Grid>
+                </Border>
+            </StackPanel>
 
             <!-- Messages area -->
             <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -433,7 +490,9 @@
                               VerticalAlignment="Bottom">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:ChatMessageViewModel">
-                            <Border Margin="0,2" Padding="0,4">
+                            <Border Margin="0,2" Padding="0,4"
+                                    Tag="{Binding}"
+                                    PointerReleased="MessageItem_PointerReleased">
                                 <Grid>
                                     <!-- Security alert (centered, warning color) -->
                                     <Border Background="#1af59e0b"
@@ -506,13 +565,42 @@
                                                            FontSize="{StaticResource RedeCaptionSize}"
                                                            VerticalAlignment="Bottom" />
                                             </StackPanel>
+                                            <!-- Reply quote -->
+                                            <Border Background="{DynamicResource RedeBorderBrush}"
+                                                    CornerRadius="4"
+                                                    Padding="10,6"
+                                                    Margin="0,0,0,2"
+                                                    BorderThickness="2,0,0,0"
+                                                    BorderBrush="{DynamicResource RedeAccentBrush}"
+                                                    IsVisible="{Binding IsReply}">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding ReplyToAuthor}"
+                                                               FontSize="12" FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource RedeAccentBrush}" />
+                                                    <TextBlock Text="{Binding ReplyToPreview}"
+                                                               FontSize="12"
+                                                               Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxLines="1" />
+                                                </StackPanel>
+                                            </Border>
                                             <Border Background="{DynamicResource RedeSurfaceBrush}"
                                                     CornerRadius="4,12,12,12"
                                                     Padding="14,10"
                                                     IsVisible="{Binding !IsSystem}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="[message deleted]"
+                                                               FontStyle="Italic"
+                                                               Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                               IsVisible="{Binding IsDeleted}" />
                                                     <controls:MarkdownTextBlock Markdown="{Binding Text}"
-                                                               TextWrapping="Wrap" />
+                                                               TextWrapping="Wrap"
+                                                               IsVisible="{Binding !IsDeleted}" />
+                                                    <TextBlock Text="(edited)"
+                                                               FontSize="{StaticResource RedeCaptionSize}"
+                                                               Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                               VerticalAlignment="Bottom"
+                                                               IsVisible="{Binding IsEdited}" />
                                                     <StackPanel Orientation="Horizontal" Spacing="3"
                                                                 VerticalAlignment="Bottom"
                                                                 IsVisible="{Binding HasTtl}">
@@ -524,6 +612,59 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                             </Border>
+                                            <!-- Attachments (incoming) -->
+                                            <ItemsControl ItemsSource="{Binding Attachments}"
+                                                          IsVisible="{Binding HasAttachments}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border CornerRadius="6" Padding="8,6" Margin="0,4,0,0"
+                                                                Background="{DynamicResource RedeSurfaceBrush}"
+                                                                BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                                BorderThickness="1"
+                                                                Cursor="Hand"
+                                                                Tag="{Binding}"
+                                                                PointerReleased="AttachmentItem_Click">
+                                                            <StackPanel Spacing="4">
+                                                                <Image Source="{Binding Preview}"
+                                                                       IsVisible="{Binding HasPreview}"
+                                                                       MaxWidth="300" MaxHeight="200"
+                                                                       Stretch="Uniform" />
+                                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                    <TextBlock Text="{Binding Name}" FontSize="13"
+                                                                               Foreground="{DynamicResource RedeAccentBrush}" />
+                                                                    <TextBlock Text="{Binding SizeDisplay}" FontSize="12"
+                                                                               Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <!-- Reaction pills (incoming) -->
+                                            <ItemsControl ItemsSource="{Binding Reactions}"
+                                                          IsVisible="{Binding HasReactions}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel Orientation="Horizontal" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border CornerRadius="10"
+                                                                Padding="6,3"
+                                                                Margin="0,2,4,0"
+                                                                Background="{DynamicResource RedeSurfaceBrush}"
+                                                                BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                                BorderThickness="1">
+                                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                                <TextBlock Text="{Binding Emoji}" FontSize="13" />
+                                                                <TextBlock Text="{Binding Count}" FontSize="12"
+                                                                           Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
                                         </StackPanel>
                                     </StackPanel>
 
@@ -533,12 +674,41 @@
                                                 Margin="80,0,0,0"
                                                 MaxWidth="600"
                                                 IsVisible="{Binding IsOwn}">
+                                        <!-- Reply quote (own) -->
+                                        <Border Background="{DynamicResource RedeBorderBrush}"
+                                                CornerRadius="4"
+                                                Padding="10,6"
+                                                Margin="0,0,0,2"
+                                                BorderThickness="2,0,0,0"
+                                                BorderBrush="{DynamicResource RedeAccentBrush}"
+                                                IsVisible="{Binding IsReply}">
+                                            <StackPanel Spacing="2">
+                                                <TextBlock Text="{Binding ReplyToAuthor}"
+                                                           FontSize="12" FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource RedeAccentBrush}" />
+                                                <TextBlock Text="{Binding ReplyToPreview}"
+                                                           FontSize="12"
+                                                           Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="1" />
+                                            </StackPanel>
+                                        </Border>
                                         <Border Background="{DynamicResource RedeSurfaceActiveBrush}"
                                                 CornerRadius="12,4,12,12"
                                                 Padding="14,10">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="[message deleted]"
+                                                           FontStyle="Italic"
+                                                           Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                           IsVisible="{Binding IsDeleted}" />
                                                 <controls:MarkdownTextBlock Markdown="{Binding Text}"
-                                                           TextWrapping="Wrap" />
+                                                           TextWrapping="Wrap"
+                                                           IsVisible="{Binding !IsDeleted}" />
+                                                <TextBlock Text="(edited)"
+                                                           FontSize="{StaticResource RedeCaptionSize}"
+                                                           Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                           VerticalAlignment="Bottom"
+                                                           IsVisible="{Binding IsEdited}" />
                                                 <StackPanel Orientation="Horizontal" Spacing="3"
                                                             VerticalAlignment="Bottom"
                                                             IsVisible="{Binding HasTtl}">
@@ -550,6 +720,61 @@
                                                 </StackPanel>
                                             </StackPanel>
                                         </Border>
+                                        <!-- Attachments (own) -->
+                                        <ItemsControl ItemsSource="{Binding Attachments}"
+                                                      IsVisible="{Binding HasAttachments}"
+                                                      HorizontalAlignment="Right">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border CornerRadius="6" Padding="8,6" Margin="0,4,0,0"
+                                                            Background="{DynamicResource RedeSurfaceActiveBrush}"
+                                                            BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                            BorderThickness="1"
+                                                            Cursor="Hand"
+                                                            Tag="{Binding}"
+                                                            PointerReleased="AttachmentItem_Click">
+                                                        <StackPanel Spacing="4">
+                                                            <Image Source="{Binding Preview}"
+                                                                   IsVisible="{Binding HasPreview}"
+                                                                   MaxWidth="300" MaxHeight="200"
+                                                                   Stretch="Uniform" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <TextBlock Text="{Binding Name}" FontSize="13"
+                                                                           Foreground="{DynamicResource RedeAccentBrush}" />
+                                                                <TextBlock Text="{Binding SizeDisplay}" FontSize="12"
+                                                                           Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <!-- Reaction pills (own) -->
+                                        <ItemsControl ItemsSource="{Binding Reactions}"
+                                                      IsVisible="{Binding HasReactions}"
+                                                      HorizontalAlignment="Right">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border CornerRadius="10"
+                                                            Padding="6,3"
+                                                            Margin="0,2,4,0"
+                                                            Background="{DynamicResource RedeSurfaceBrush}"
+                                                            BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                            BorderThickness="1">
+                                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                                            <TextBlock Text="{Binding Emoji}" FontSize="13" />
+                                                            <TextBlock Text="{Binding Count}" FontSize="12"
+                                                                       Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                         <StackPanel Orientation="Horizontal" Spacing="6"
                                                     HorizontalAlignment="Right">
                                             <TextBlock Text="{Binding TimeString}"

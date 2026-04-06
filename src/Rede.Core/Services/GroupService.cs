@@ -29,6 +29,9 @@ public class GroupService : IDisposable
     public event Action<string, string, string, DateTime>? OnGroupMessageReceived; // groupId, from, text, ts
     public event Action? OnGroupsChanged;
     public event Action<string, string, int>? OnGroupMessageSent; // groupId, text, ttl
+    public event Action<string, string, string, Dictionary<string, List<string>>>? OnReactionUpdated; // chatKey, msgId, emoji, reactions
+    public event Action<string, string, string>? OnMessageEdited; // chatKey, msgId, newText
+    public event Action<string, string>? OnMessageDeleted; // chatKey, msgId
 
     public GroupService(RedeConnection conn, ProfileStore store)
     {
@@ -358,16 +361,134 @@ public class GroupService : IDisposable
             }
         }
 
-        // M2: Sanitize group message text (ANSI escape stripping)
-        var sanitized = ChatService.EscapeContent(plaintext);
+        // Handle control messages (reactions, edits, deletes)
+        var ctrl = MessageEnvelope.TryParseControl(plaintext);
+        if (ctrl is not null)
+        {
+            HandleControlMessage(ctrl.Value.ctrl, ctrl.Value.obj, from, groupId);
+            return;
+        }
+
+        // Decode JSON envelope (backward-compatible with plain-text messages)
+        var text = MessageEnvelope.Decode(plaintext, out var replyToMsgId, out var replyToPreview, out var replyToAuthor);
+
+        var sanitized = ChatService.EscapeContent(text);
+        var serverMsgId = ProtocolSerializer.GetString(msg, "msgId");
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
 
-        _store.AddChatMessage(Profile, groupId, new ChatMessage
+        var chatMsg = new ChatMessage
         {
             From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"),
             Ttl = ProtocolSerializer.GetInt(msg, "ttl"),
-        }, Passphrase);
+            MsgId = serverMsgId,
+            ReplyToMsgId = replyToMsgId,
+            ReplyToPreview = replyToPreview is not null ? ChatService.EscapeContent(replyToPreview) : null,
+            ReplyToAuthor = replyToAuthor,
+        };
 
+        _store.AddChatMessage(Profile, groupId, chatMsg, Passphrase);
         OnGroupMessageReceived?.Invoke(groupId, from, sanitized, ts);
+    }
+
+    private void HandleControlMessage(string ctrl, JsonObject obj, string from, string chatKey)
+    {
+        switch (ctrl)
+        {
+            case "reaction":
+            {
+                var msgId = obj["mid"]?.GetValue<string>();
+                var emoji = obj["emoji"]?.GetValue<string>();
+                var action = obj["action"]?.GetValue<string>();
+                if (msgId is null || emoji is null) return;
+                if (emoji.Length > 32) emoji = emoji[..32];
+                ApplyReaction(chatKey, msgId, emoji, from, action == "add");
+                break;
+            }
+            case "edit":
+            {
+                var msgId = obj["mid"]?.GetValue<string>();
+                var newText = obj["newText"]?.GetValue<string>();
+                if (msgId is null || newText is null) return;
+                ApplyEdit(chatKey, msgId, newText, from);
+                break;
+            }
+            case "delete":
+            {
+                var msgId = obj["mid"]?.GetValue<string>();
+                if (msgId is null) return;
+                ApplyDelete(chatKey, msgId, from);
+                break;
+            }
+        }
+    }
+
+    private void ApplyReaction(string chatKey, string msgId, string emoji, string userId, bool add)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.ChatHistory.TryGetValue(chatKey, out var messages)) return;
+
+        var target = messages.FirstOrDefault(m => m.MsgId == msgId);
+        if (target is null) return;
+
+        target.Reactions ??= new();
+
+        if (add)
+        {
+            if (!target.Reactions.TryGetValue(emoji, out var users))
+            {
+                users = new List<string>();
+                target.Reactions[emoji] = users;
+            }
+            if (!users.Contains(userId))
+                users.Add(userId);
+        }
+        else
+        {
+            if (target.Reactions.TryGetValue(emoji, out var users))
+            {
+                users.Remove(userId);
+                if (users.Count == 0)
+                    target.Reactions.Remove(emoji);
+            }
+        }
+
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnReactionUpdated?.Invoke(chatKey, msgId, emoji, target.Reactions);
+    }
+
+    private void ApplyEdit(string chatKey, string msgId, string newText, string? from = null)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.ChatHistory.TryGetValue(chatKey, out var messages)) return;
+
+        var target = messages.FirstOrDefault(m => m.MsgId == msgId);
+        if (target is null) return;
+
+        // Only the original author can edit
+        if (from is not null && target.From != from) return;
+
+        target.Text = ChatService.EscapeContent(newText);
+        target.EditedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnMessageEdited?.Invoke(chatKey, msgId, target.Text);
+    }
+
+    private void ApplyDelete(string chatKey, string msgId, string? from = null)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.ChatHistory.TryGetValue(chatKey, out var messages)) return;
+
+        var target = messages.FirstOrDefault(m => m.MsgId == msgId);
+        if (target is null) return;
+
+        // Author can delete own messages
+        if (from is not null && target.From != from) return; // Groups don't have admin roles for delete
+
+        target.IsDeleted = true;
+        target.Text = "";
+
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnMessageDeleted?.Invoke(chatKey, msgId);
     }
 }

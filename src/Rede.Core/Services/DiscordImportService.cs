@@ -52,9 +52,13 @@ public class DiscordImportService
 
     public class DiscordMessage
     {
+        public string Id { get; set; } = "";
         public string Author { get; set; } = "";
         public string Content { get; set; } = "";
         public DateTimeOffset Timestamp { get; set; }
+        public string? ReferencedMessageId { get; set; }
+        public string? ReferencedMessagePreview { get; set; }
+        public string? ReferencedMessageAuthor { get; set; }
     }
 
     public class DiscordEmote
@@ -385,6 +389,8 @@ public class DiscordImportService
         {
             if (string.IsNullOrWhiteSpace(msg.Content)) continue;
             var time = msg.Timestamp.ToString("yyyy-MM-dd HH:mm");
+            if (msg.ReferencedMessagePreview is not null)
+                lines.Add($"> _{msg.ReferencedMessageAuthor ?? "?"}: {msg.ReferencedMessagePreview}_");
             lines.Add($"[{time}] *{msg.Author}*: {msg.Content}");
         }
         return string.Join("\n", lines);
@@ -398,13 +404,12 @@ public class DiscordImportService
         }
     }
 
-    private async Task FetchChannelMessagesAsync(HttpClient http, DiscordChannel channel)
+    private async Task FetchChannelMessagesAsync(HttpClient http, DiscordChannel channel, int maxMessages = 0)
     {
         string? before = null;
         int totalFetched = 0;
-        const int maxMessages = 500; // cap per channel
 
-        while (totalFetched < maxMessages)
+        while (maxMessages <= 0 || totalFetched < maxMessages)
         {
             var url = $"{ApiBase}/channels/{channel.Id}/messages?limit={MessageBatchSize}";
             if (before is not null)
@@ -422,7 +427,6 @@ public class DiscordImportService
                 var author = "Unknown";
                 if (m.TryGetProperty("author", out var aEl))
                 {
-                    // Prefer global_name, fall back to username
                     if (aEl.TryGetProperty("global_name", out var gnEl) && gnEl.GetString() is string gn)
                         author = gn;
                     else if (aEl.TryGetProperty("username", out var unEl) && unEl.GetString() is string un)
@@ -433,13 +437,39 @@ public class DiscordImportService
                     ? DateTimeOffset.Parse(tEl.GetString()!)
                     : DateTimeOffset.UtcNow;
 
-                var msgId = m.GetProperty("id").GetString();
+                var msgId = m.GetProperty("id").GetString() ?? "";
+
+                // Parse reply reference
+                string? refMsgId = null;
+                string? refPreview = null;
+                string? refAuthor = null;
+                if (m.TryGetProperty("message_reference", out var refEl)
+                    && refEl.TryGetProperty("message_id", out var refIdEl))
+                {
+                    refMsgId = refIdEl.GetString();
+                }
+                if (m.TryGetProperty("referenced_message", out var refMsg) && refMsg.ValueKind == JsonValueKind.Object)
+                {
+                    var refContent = refMsg.TryGetProperty("content", out var rcEl) ? rcEl.GetString() : null;
+                    refPreview = refContent is not null && refContent.Length > 100 ? refContent[..100] : refContent;
+                    if (refMsg.TryGetProperty("author", out var raEl))
+                    {
+                        if (raEl.TryGetProperty("global_name", out var rgnEl) && rgnEl.GetString() is string rgn)
+                            refAuthor = rgn;
+                        else if (raEl.TryGetProperty("username", out var runEl) && runEl.GetString() is string run)
+                            refAuthor = run;
+                    }
+                }
 
                 channel.Messages.Add(new DiscordMessage
                 {
+                    Id = msgId,
                     Author = author,
                     Content = content,
                     Timestamp = timestamp,
+                    ReferencedMessageId = refMsgId,
+                    ReferencedMessagePreview = refPreview,
+                    ReferencedMessageAuthor = refAuthor,
                 });
 
                 before = msgId;

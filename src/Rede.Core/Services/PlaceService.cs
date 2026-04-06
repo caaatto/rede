@@ -29,9 +29,12 @@ public class PlaceService : IDisposable
     public byte[]? Passphrase { get; set; }
 
     public event Action<string>? OnSystemMessage;
-    public event Action<string, string, string, string, DateTime>? OnChannelMessageReceived; // placeId, channelId, from, text, ts
+    public event Action<string, string, string, string, DateTime, ChatMessage?>? OnChannelMessageReceived; // placeId, channelId, from, text, ts, fullMsg
     public event Action? OnPlacesChanged;
     public event Action<string, string, int>? OnChannelMessageSent; // placeId:channelId, text, ttl
+    public event Action<string, string, string, Dictionary<string, List<string>>>? OnReactionUpdated; // chatKey, msgId, emoji, reactions
+    public event Action<string, string, string>? OnMessageEdited; // chatKey, msgId, newText
+    public event Action<string, string>? OnMessageDeleted; // chatKey, msgId
 
     public PlaceService(RedeConnection conn, ProfileStore store)
     {
@@ -346,13 +349,416 @@ public class PlaceService : IDisposable
         OnPlacesChanged?.Invoke();
     }
 
+    /// <summary>Pin a message in a channel. Admin+ only. Max 50 pins per channel.</summary>
+    public void PinMessage(string placeId, string channelId, string msgId, string preview, string author, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("Only admins can pin messages.");
+            return;
+        }
+
+        if (!place.Pins.TryGetValue(channelId, out var pins))
+        {
+            pins = new List<PlacePin>();
+            place.Pins[channelId] = pins;
+        }
+
+        if (pins.Count >= 50)
+        {
+            OnSystemMessage?.Invoke("Maximum 50 pins per channel.");
+            return;
+        }
+
+        if (pins.Any(p => p.MsgId == msgId)) return; // Already pinned
+
+        pins.Add(new PlacePin
+        {
+            MsgId = msgId,
+            PinnedBy = Profile.UserId,
+            PinnedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Preview = preview.Length > 100 ? preview[..100] : preview,
+            ChannelId = channelId,
+            Author = author,
+        });
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke("Message pinned.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    /// <summary>Unpin a message. Admin+ only.</summary>
+    public void UnpinMessage(string placeId, string channelId, string msgId, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin)) return;
+
+        if (place.Pins.TryGetValue(channelId, out var pins))
+        {
+            pins.RemoveAll(p => p.MsgId == msgId);
+            if (pins.Count == 0) place.Pins.Remove(channelId);
+            _store.SaveProfileDebounced(Profile, Passphrase);
+            DistributeMetadata(placeId, place, chatService);
+            OnSystemMessage?.Invoke("Message unpinned.");
+            OnPlacesChanged?.Invoke();
+        }
+    }
+
+    /// <summary>Set a nickname for a user in a place. User can set own, admin can set any.</summary>
+    public void SetNickname(string placeId, string userId, string? nickname, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+
+        // User can set own nickname, admin can set anyone's
+        if (userId != Profile.UserId && !HasPermission(place, Profile.UserId, PlaceRole.Admin))
+        {
+            OnSystemMessage?.Invoke("You can only set your own nickname.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(nickname))
+        {
+            place.Nicknames.Remove(userId);
+        }
+        else
+        {
+            if (nickname.Length > 32) nickname = nickname[..32];
+            place.Nicknames[userId] = nickname;
+        }
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke(string.IsNullOrWhiteSpace(nickname)
+            ? $"Nickname cleared for {userId}."
+            : $"Nickname set to \"{nickname}\" for {userId}.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    /// <summary>Get pins for a channel.</summary>
+    public List<PlacePin>? GetPins(string placeId, string channelId)
+    {
+        if (Profile?.Places.TryGetValue(placeId, out var place) == true &&
+            place.Pins.TryGetValue(channelId, out var pins))
+            return pins;
+        return null;
+    }
+
+    /// <summary>Get a user's nickname in a place, or null.</summary>
+    public string? GetNickname(string placeId, string userId)
+    {
+        if (Profile?.Places.TryGetValue(placeId, out var place) == true &&
+            place.Nicknames.TryGetValue(userId, out var nick))
+            return nick;
+        return null;
+    }
+
     // --- Permission helpers ---
 
     public static bool HasPermission(Place place, string userId, PlaceRole minRole)
     {
         if (place.CreatorId == userId) return true; // Owner always has all permissions
+        // Check custom roles first (if they exist)
+        if (place.CustomRoles.Count > 0)
+            return HasCustomPermission(place, userId, MinRoleToPermission(minRole));
+        // Fallback to legacy 3-tier
         if (!place.Roles.TryGetValue(userId, out var role)) role = PlaceRole.Member;
         return role >= minRole;
+    }
+
+    /// <summary>Check a specific permission using the custom roles system.</summary>
+    public static bool HasCustomPermission(Place place, string userId, PlacePermission perm)
+    {
+        if (place.CreatorId == userId) return true;
+        if (!place.MemberRoles.TryGetValue(userId, out var roleIds)) return false;
+        foreach (var roleId in roleIds)
+        {
+            if (place.CustomRoles.TryGetValue(roleId, out var role) && role.Has(perm))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Resolve effective permissions for a user in a specific channel.</summary>
+    public static long ResolveChannelPermissions(Place place, string userId, string channelId)
+    {
+        if (place.CreatorId == userId) return long.MaxValue; // Owner = all
+
+        // Base permissions from roles
+        long perms = 0;
+        if (place.MemberRoles.TryGetValue(userId, out var roleIds))
+        {
+            foreach (var roleId in roleIds)
+            {
+                if (place.CustomRoles.TryGetValue(roleId, out var role))
+                    perms |= role.Permissions;
+            }
+        }
+
+        // Apply channel overrides
+        if (place.Channels.TryGetValue(channelId, out var ch) && ch.PermissionOverrides is not null)
+        {
+            var userRoleIds = roleIds ?? new List<string>();
+            foreach (var ov in ch.PermissionOverrides)
+            {
+                if (userRoleIds.Contains(ov.RoleId))
+                {
+                    perms |= ov.Allow;
+                    perms &= ~ov.Deny;
+                }
+            }
+        }
+
+        // Administrator grants everything
+        if ((perms & (long)PlacePermission.Administrator) != 0) return long.MaxValue;
+        return perms;
+    }
+
+    private static PlacePermission MinRoleToPermission(PlaceRole minRole) => minRole switch
+    {
+        PlaceRole.Owner => PlacePermission.Administrator,
+        PlaceRole.Admin => PlacePermission.KickMembers, // Admin-level proxy
+        _ => PlacePermission.SendMessages,
+    };
+
+    /// <summary>Get the highest role for a user (for display). Returns role name and color.</summary>
+    public static (string Name, string Color, int Position) GetHighestRole(Place place, string userId)
+    {
+        if (place.CreatorId == userId)
+            return ("Owner", place.OwnerColor, int.MaxValue);
+
+        if (place.CustomRoles.Count == 0)
+        {
+            // Legacy fallback
+            if (place.Roles.TryGetValue(userId, out var legacyRole))
+            {
+                return legacyRole switch
+                {
+                    PlaceRole.Owner => ("Owner", place.OwnerColor, 2),
+                    PlaceRole.Admin => ("Admin", place.AdminColor, 1),
+                    _ => ("Member", place.MemberColor, 0),
+                };
+            }
+            return ("Member", place.MemberColor, 0);
+        }
+
+        if (!place.MemberRoles.TryGetValue(userId, out var roleIds) || roleIds.Count == 0)
+            return ("Member", place.MemberColor, 0);
+
+        CustomRole? highest = null;
+        foreach (var roleId in roleIds)
+        {
+            if (place.CustomRoles.TryGetValue(roleId, out var role))
+            {
+                if (highest is null || role.Position > highest.Position)
+                    highest = role;
+            }
+        }
+
+        return highest is not null
+            ? (highest.Name, highest.Color, highest.Position)
+            : ("Member", place.MemberColor, 0);
+    }
+
+    // --- Custom Role management ---
+
+    /// <summary>Create a new custom role. Owner only.</summary>
+    public void CreateCustomRole(string placeId, string name, string color, long permissions, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+        if (place.CreatorId != Profile.UserId)
+        {
+            OnSystemMessage?.Invoke("Only the owner can create roles.");
+            return;
+        }
+        if (place.CustomRoles.Count >= 50)
+        {
+            OnSystemMessage?.Invoke("Maximum 50 custom roles.");
+            return;
+        }
+
+        var roleId = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+        var maxPos = place.CustomRoles.Values.Any() ? place.CustomRoles.Values.Max(r => r.Position) : 0;
+
+        place.CustomRoles[roleId] = new CustomRole
+        {
+            Id = roleId,
+            Name = name.Length > 32 ? name[..32] : name,
+            Color = ValidateColor(color, "#6b7280"),
+            Position = maxPos + 1,
+            Permissions = permissions,
+        };
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Role \"{name}\" created.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    /// <summary>Delete a custom role. Owner only.</summary>
+    public void DeleteCustomRole(string placeId, string roleId, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+        if (place.CreatorId != Profile.UserId) return;
+
+        if (!place.CustomRoles.Remove(roleId)) return;
+
+        // Remove from all members
+        foreach (var (_, roles) in place.MemberRoles)
+            roles.Remove(roleId);
+
+        // Remove from channel overrides
+        foreach (var (_, ch) in place.Channels)
+            ch.PermissionOverrides?.RemoveAll(o => o.RoleId == roleId);
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke("Role deleted.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    /// <summary>Assign a role to a member. Requires ManageRoles permission, can only assign roles below own level.</summary>
+    public void AssignRole(string placeId, string userId, string roleId, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+
+        // Permission check
+        if (place.CreatorId != Profile.UserId)
+        {
+            if (!HasCustomPermission(place, Profile.UserId, PlacePermission.ManageRoles))
+            {
+                OnSystemMessage?.Invoke("No permission to manage roles.");
+                return;
+            }
+            // Can only assign roles below own level
+            var ownHighest = GetHighestRole(place, Profile.UserId);
+            if (place.CustomRoles.TryGetValue(roleId, out var targetRole) && targetRole.Position >= ownHighest.Position)
+            {
+                OnSystemMessage?.Invoke("Cannot assign a role at or above your own level.");
+                return;
+            }
+        }
+
+        if (!place.CustomRoles.ContainsKey(roleId)) return;
+
+        if (!place.MemberRoles.TryGetValue(userId, out var roles))
+        {
+            roles = new List<string>();
+            place.MemberRoles[userId] = roles;
+        }
+        if (!roles.Contains(roleId))
+            roles.Add(roleId);
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Role assigned to {userId}.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    /// <summary>Remove a role from a member.</summary>
+    public void RemoveRole(string placeId, string userId, string roleId, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+
+        if (place.CreatorId != Profile.UserId &&
+            !HasCustomPermission(place, Profile.UserId, PlacePermission.ManageRoles))
+            return;
+
+        if (place.MemberRoles.TryGetValue(userId, out var roles))
+        {
+            roles.Remove(roleId);
+            if (roles.Count == 0) place.MemberRoles.Remove(userId);
+        }
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+        OnSystemMessage?.Invoke($"Role removed from {userId}.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    /// <summary>Set channel permission overrides. Admin+ only.</summary>
+    public void SetChannelPermOverride(string placeId, string channelId, string roleId, long allow, long deny, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+        if (!HasPermission(place, Profile.UserId, PlaceRole.Admin)) return;
+        if (!place.Channels.TryGetValue(channelId, out var ch)) return;
+
+        ch.PermissionOverrides ??= new List<ChannelPermOverride>();
+
+        // Update or add
+        var existing = ch.PermissionOverrides.FirstOrDefault(o => o.RoleId == roleId);
+        if (existing is not null)
+        {
+            existing.Allow = allow;
+            existing.Deny = deny;
+        }
+        else
+        {
+            ch.PermissionOverrides.Add(new ChannelPermOverride { RoleId = roleId, Allow = allow, Deny = deny });
+        }
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+        OnPlacesChanged?.Invoke();
+    }
+
+    /// <summary>Initialize default roles for a new or migrating place.</summary>
+    public void InitializeDefaultRoles(Place place, string creatorId)
+    {
+        if (place.CustomRoles.Count > 0) return; // Already initialized
+
+        // @everyone (base role for all members)
+        var everyoneId = "everyone";
+        place.CustomRoles[everyoneId] = new CustomRole
+        {
+            Id = everyoneId, Name = "@everyone", Color = place.MemberColor,
+            Position = 0, Permissions = (long)PlacePermission.SendMessages,
+        };
+
+        // Admin
+        var adminId = "admin";
+        place.CustomRoles[adminId] = new CustomRole
+        {
+            Id = adminId, Name = "Admin", Color = place.AdminColor,
+            Position = 100,
+            Permissions = (long)(PlacePermission.SendMessages | PlacePermission.ManageMessages |
+                PlacePermission.ManageChannels | PlacePermission.KickMembers | PlacePermission.BanMembers |
+                PlacePermission.ManageEmotes | PlacePermission.ManagePlace),
+        };
+
+        // Owner (built-in, immutable)
+        var ownerId = "owner";
+        place.CustomRoles[ownerId] = new CustomRole
+        {
+            Id = ownerId, Name = "Owner", Color = place.OwnerColor,
+            Position = int.MaxValue, Permissions = (long)PlacePermission.Administrator,
+        };
+
+        // Assign owner role to creator
+        place.MemberRoles[creatorId] = new List<string> { ownerId, everyoneId };
+
+        // Migrate existing roles
+        foreach (var (userId, legacyRole) in place.Roles)
+        {
+            if (userId == creatorId) continue;
+            var roleList = new List<string> { everyoneId };
+            if (legacyRole >= PlaceRole.Admin) roleList.Add(adminId);
+            place.MemberRoles[userId] = roleList;
+        }
+
+        // Ensure all members have @everyone
+        foreach (var memberId in place.Members)
+        {
+            if (!place.MemberRoles.ContainsKey(memberId))
+                place.MemberRoles[memberId] = new List<string> { everyoneId };
+        }
     }
 
     // --- Emote management ---
@@ -755,7 +1161,9 @@ public class PlaceService : IDisposable
     private static string SenderKeyKey(string placeId, string channelId)
         => $"place:{placeId}:{channelId}";
 
-    public void SendChannelMessage(string placeId, string channelId, string text, int ttl = 0)
+    public void SendChannelMessage(string placeId, string channelId, string text, int ttl = 0,
+        string? replyToMsgId = null, string? replyToPreview = null, string? replyToAuthor = null,
+        List<AttachmentInfo>? attachments = null)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -770,6 +1178,9 @@ public class PlaceService : IDisposable
             OnSystemMessage?.Invoke("Channel not found");
             return;
         }
+
+        // Build JSON envelope for structured message data
+        var plaintext = MessageEnvelope.Encode(text, replyToMsgId, replyToPreview, replyToAuthor, attachments);
 
         var skKey = SenderKeyKey(placeId, channelId);
         var skStateJson = _store.LoadSenderKeyState(Profile, skKey);
@@ -791,7 +1202,7 @@ public class PlaceService : IDisposable
             skState = SenderKeys.Generate();
         }
 
-        var result = SenderKeys.Encrypt(skState, text, Profile.SigningSecretKey, skKey);
+        var result = SenderKeys.Encrypt(skState, plaintext, Profile.SigningSecretKey, skKey);
 
         var stateObj = new JsonObject
         {
@@ -824,11 +1235,212 @@ public class PlaceService : IDisposable
         _store.AddChatMessage(Profile, chatKey, new ChatMessage
         {
             From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
+            ReplyToMsgId = replyToMsgId, ReplyToPreview = replyToPreview, ReplyToAuthor = replyToAuthor,
+            Attachments = attachments,
         }, Passphrase);
         OnChannelMessageSent?.Invoke(chatKey, text, ttl);
     }
 
     public IReadOnlyDictionary<string, Place>? GetPlaces() => Profile?.Places;
+
+    /// <summary>Send a reaction on a message in a Place channel.</summary>
+    public void SendReaction(string placeId, string channelId, string msgId, string emoji, bool add)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var controlText = MessageEnvelope.EncodeReaction(msgId, emoji, add);
+        SendControlMessage(placeId, channelId, controlText);
+        ApplyReaction(ChatKey(placeId, channelId), msgId, emoji, Profile.UserId, add);
+    }
+
+    /// <summary>Send an edit control message for a message you authored.</summary>
+    public void SendEdit(string placeId, string channelId, string msgId, string newText)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var controlText = MessageEnvelope.EncodeEdit(msgId, newText);
+        SendControlMessage(placeId, channelId, controlText);
+        ApplyEdit(ChatKey(placeId, channelId), msgId, newText, Profile.UserId);
+    }
+
+    /// <summary>Send a delete control message. Author or admin can delete.</summary>
+    public void SendDelete(string placeId, string channelId, string msgId)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var controlText = MessageEnvelope.EncodeDelete(msgId);
+        SendControlMessage(placeId, channelId, controlText);
+        ApplyDelete(ChatKey(placeId, channelId), msgId);
+    }
+
+    /// <summary>Encrypt and send a control message via Sender Keys (shared with SendReaction).</summary>
+    private void SendControlMessage(string placeId, string channelId, string controlText)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+        if (!place.Channels.ContainsKey(channelId)) return;
+
+        var skKey = SenderKeyKey(placeId, channelId);
+        var skStateJson = _store.LoadSenderKeyState(Profile, skKey);
+        SenderKeys.SenderKeyState skState;
+
+        if (skStateJson is not null)
+        {
+            var parsed = JsonSerializer.Deserialize<JsonElement>(skStateJson.Value);
+            var ownNode = parsed.GetProperty("own");
+            var ckB64 = ownNode.GetProperty("chainKey").GetString() ?? "";
+            skState = new SenderKeys.SenderKeyState
+            {
+                ChainKey = ckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(ckB64),
+                MessageNumber = ownNode.GetProperty("messageNumber").GetInt32(),
+            };
+        }
+        else
+        {
+            skState = SenderKeys.Generate();
+        }
+
+        var result = SenderKeys.Encrypt(skState, controlText, Profile.SigningSecretKey, skKey);
+
+        var stateObj = new JsonObject
+        {
+            ["own"] = new JsonObject
+            {
+                ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
+                ["messageNumber"] = skState.MessageNumber,
+            }
+        };
+        _store.SaveSenderKeyStateAsync(Profile, skKey, JsonSerializer.SerializeToElement(stateObj), Passphrase);
+
+        var payload = ProtocolSerializer.Payload(
+            ("placeId", JsonValue.Create(placeId)),
+            ("channelId", JsonValue.Create(channelId)),
+            ("encrypted", JsonValue.Create(result.Ciphertext)),
+            ("nonce", JsonValue.Create(result.Nonce)),
+            ("senderKeyHeader", new JsonObject
+            {
+                ["messageNumber"] = result.MessageNumber,
+                ["signature"] = result.Signature,
+            })
+        );
+        _conn.Send(Msg.PlaceMessage, payload);
+    }
+
+    private void HandleControlMessage(string ctrl, JsonObject obj, string from, string chatKey)
+    {
+        switch (ctrl)
+        {
+            case "reaction":
+            {
+                var msgId = obj["mid"]?.GetValue<string>();
+                var emoji = obj["emoji"]?.GetValue<string>();
+                var action = obj["action"]?.GetValue<string>();
+                if (msgId is null || emoji is null) return;
+                if (emoji.Length > 32) emoji = emoji[..32];
+                ApplyReaction(chatKey, msgId, emoji, from, action == "add");
+                break;
+            }
+            case "edit":
+            {
+                var msgId = obj["mid"]?.GetValue<string>();
+                var newText = obj["newText"]?.GetValue<string>();
+                if (msgId is null || newText is null) return;
+                // Only the original author can edit
+                ApplyEdit(chatKey, msgId, newText, from);
+                break;
+            }
+            case "delete":
+            {
+                var msgId = obj["mid"]?.GetValue<string>();
+                if (msgId is null) return;
+                // Author or admin can delete — verify in ApplyDelete
+                ApplyDelete(chatKey, msgId, from);
+                break;
+            }
+        }
+    }
+
+    private void ApplyReaction(string chatKey, string msgId, string emoji, string userId, bool add)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.ChatHistory.TryGetValue(chatKey, out var messages)) return;
+
+        var target = messages.FirstOrDefault(m => m.MsgId == msgId);
+        if (target is null) return;
+
+        target.Reactions ??= new();
+
+        if (add)
+        {
+            if (!target.Reactions.TryGetValue(emoji, out var users))
+            {
+                users = new List<string>();
+                target.Reactions[emoji] = users;
+            }
+            if (!users.Contains(userId))
+                users.Add(userId);
+        }
+        else
+        {
+            if (target.Reactions.TryGetValue(emoji, out var users))
+            {
+                users.Remove(userId);
+                if (users.Count == 0)
+                    target.Reactions.Remove(emoji);
+            }
+        }
+
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnReactionUpdated?.Invoke(chatKey, msgId, emoji, target.Reactions);
+    }
+
+    private void ApplyEdit(string chatKey, string msgId, string newText, string? from = null)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.ChatHistory.TryGetValue(chatKey, out var messages)) return;
+
+        var target = messages.FirstOrDefault(m => m.MsgId == msgId);
+        if (target is null) return;
+
+        // Only the original author can edit
+        if (from is not null && target.From != from) return;
+
+        target.Text = ChatService.EscapeContent(newText);
+        target.EditedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnMessageEdited?.Invoke(chatKey, msgId, target.Text);
+    }
+
+    private void ApplyDelete(string chatKey, string msgId, string? from = null)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.ChatHistory.TryGetValue(chatKey, out var messages)) return;
+
+        var target = messages.FirstOrDefault(m => m.MsgId == msgId);
+        if (target is null) return;
+
+        // Author can delete own. Admin/Owner can delete any (check place role).
+        if (from is not null && target.From != from)
+        {
+            // Check if sender is admin/owner for this place
+            var parts = chatKey.Split(':');
+            if (parts.Length >= 2)
+            {
+                var placeId = parts[0];
+                if (Profile.Places.TryGetValue(placeId, out var place) &&
+                    place.Roles.TryGetValue(from, out var role) && role >= PlaceRole.Admin)
+                {
+                    // Admin/owner can delete — fall through
+                }
+                else return;
+            }
+            else return;
+        }
+
+        target.IsDeleted = true;
+        target.Text = "";
+
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnMessageDeleted?.Invoke(chatKey, msgId);
+    }
 
     // --- Handlers ---
 
@@ -1045,17 +1657,36 @@ public class PlaceService : IDisposable
             }
         }
 
-        var sanitized = ChatService.EscapeContent(plaintext);
+        // Handle control messages (reactions, edits, deletes)
+        var ctrl = MessageEnvelope.TryParseControl(plaintext);
+        if (ctrl is not null)
+        {
+            var chatKey2 = ChatKey(placeId, channelId);
+            HandleControlMessage(ctrl.Value.ctrl, ctrl.Value.obj, from, chatKey2);
+            return;
+        }
+
+        // Decode JSON envelope (backward-compatible with plain-text messages)
+        var text = MessageEnvelope.Decode(plaintext, out var replyToMsgId, out var replyToPreview, out var replyToAuthor, out var attachments);
+
+        var sanitized = ChatService.EscapeContent(text);
+        var serverMsgId = ProtocolSerializer.GetString(msg, "msgId");
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var chatKey = ChatKey(placeId, channelId);
 
-        _store.AddChatMessage(Profile, chatKey, new ChatMessage
+        var chatMsg = new ChatMessage
         {
             From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"),
             Ttl = ProtocolSerializer.GetInt(msg, "ttl"),
-        }, Passphrase);
+            MsgId = serverMsgId,
+            ReplyToMsgId = replyToMsgId,
+            ReplyToPreview = replyToPreview is not null ? ChatService.EscapeContent(replyToPreview) : null,
+            ReplyToAuthor = replyToAuthor,
+            Attachments = attachments,
+        };
 
-        OnChannelMessageReceived?.Invoke(placeId, channelId, from, sanitized, ts);
+        _store.AddChatMessage(Profile, chatKey, chatMsg, Passphrase);
+        OnChannelMessageReceived?.Invoke(placeId, channelId, from, sanitized, ts, chatMsg);
     }
 
     private void HandlePlaceRoleSetOk(JsonObject msg)

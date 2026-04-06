@@ -46,6 +46,9 @@ desktop.ini
 # .NET build artifacts
 bin/
 obj/
+
+# Native libraries (bundled separately in releases)
+src/Rede.Core/runtimes/
 *.user
 *.suo
 *.DotSettings.user

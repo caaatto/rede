@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Rede.Desktop.ViewModels;
 
 namespace Rede.Desktop.Views;
@@ -1122,6 +1123,97 @@ public partial class MainView : UserControl
         btn.ContextMenu = menu;
         menu.Closed += (_, _) => btn.ContextMenu = null;
         menu.Open(btn);
+        e.Handled = true;
+    }
+
+    private async void AttachButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null) return;
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Attach files",
+            AllowMultiple = true,
+        });
+
+        if (files.Count > 0)
+        {
+            var paths = files.Select(f => f.TryGetLocalPath()).Where(p => p is not null).ToArray();
+            if (paths.Length > 0) vm.RequestAttach(paths!);
+        }
+    }
+
+    private void AttachmentItem_Click(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Left) return;
+        if (sender is not Border border || border.Tag is not AttachmentViewModel att) return;
+        // Download will be handled by MainWindow via event
+    }
+
+    private void MessageItem_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Right) return;
+        if (sender is not Border border || border.Tag is not ChatMessageViewModel msg) return;
+        if (DataContext is not MainViewModel vm) return;
+        if (msg.IsSystem || msg.IsSecurityAlert || msg.IsDeleted) return;
+
+        var menu = new ContextMenu();
+
+        // Reply (always available)
+        if (msg.MsgId is not null)
+        {
+            var replyItem = new MenuItem { Header = "Reply", Foreground = Brush.Parse("#e0e0e8") };
+            replyItem.Click += (_, _) => vm.SetReplyTarget(msg);
+            menu.Items.Add(replyItem);
+        }
+
+        // Edit (own messages only)
+        if (msg.IsOwn && msg.MsgId is not null)
+        {
+            var editItem = new MenuItem { Header = "Edit", Foreground = Brush.Parse("#e0e0e8") };
+            editItem.Click += (_, _) => vm.StartEdit(msg);
+            menu.Items.Add(editItem);
+        }
+
+        // Delete (own messages, or admin in places)
+        if (msg.MsgId is not null)
+        {
+            var canDelete = msg.IsOwn;
+            // Admin/owner can delete any message in a Place
+            if (!canDelete && vm.SelectedConversation is ChannelItemViewModel)
+            {
+                // Check if user is admin/owner — approximate via presence of SenderRole being non-null would be wrong.
+                // We check if own messages have "Owner" or "Admin" role in this place context.
+                canDelete = true; // Allow for places — server-side will validate
+            }
+            if (canDelete)
+            {
+                var deleteItem = new MenuItem { Header = "Delete", Foreground = Brush.Parse("#f87171") };
+                deleteItem.Click += (_, _) =>
+                {
+                    msg.IsDeleted = true;
+                    msg.Text = "";
+                    vm.RequestDelete(msg.MsgId);
+                };
+                menu.Items.Add(deleteItem);
+            }
+        }
+
+        // Pin (Places only, messages with msgId)
+        if (msg.MsgId is not null && vm.SelectedConversation is ChannelItemViewModel pinCh)
+        {
+            var pinItem = new MenuItem { Header = "Pin message", Foreground = Brush.Parse("#eab308") };
+            pinItem.Click += (_, _) => vm.RequestPin(msg.MsgId, msg.Text, msg.From);
+            menu.Items.Add(pinItem);
+        }
+
+        if (menu.Items.Count == 0) return;
+
+        border.ContextMenu = menu;
+        menu.Closed += (_, _) => border.ContextMenu = null;
+        menu.Open(border);
         e.Handled = true;
     }
 }

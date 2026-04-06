@@ -325,6 +325,17 @@
 
                             <TextBlock Text="Noise gate mutes mic when input is below threshold. 0 = off. Volumes above 100% amplify the signal."
                                        Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+
+                            <!-- Noise Suppression (RNNoise) -->
+                            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,12,0,0">
+                                <CheckBox IsChecked="{Binding NoiseSuppression}"
+                                          IsEnabled="{Binding IsNoiseSuppressionAvailable}"
+                                          VerticalAlignment="Center" />
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Noise Suppression" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding NoiseSuppressionStatus}" Classes="secondary" FontSize="11" />
+                                </StackPanel>
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
 

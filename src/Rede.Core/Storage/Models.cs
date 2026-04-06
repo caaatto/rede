@@ -102,6 +102,9 @@ public class Profile
     [JsonPropertyName("noiseGateThreshold")]
     public float NoiseGateThreshold { get; set; } = 0.02f;
 
+    [JsonPropertyName("noiseSuppression")]
+    public bool NoiseSuppression { get; set; }
+
     // Profile customization
     [JsonPropertyName("accentColor")]
     public string? AccentColor { get; set; } // hex color, e.g. "#8b5cf6"
@@ -296,6 +299,22 @@ public class Place
 
     [JsonPropertyName("memberColor")]
     public string MemberColor { get; set; } = "#6b7280"; // gray
+
+    /// <summary>Pinned messages per channel: channelId → list of pins (max 50/channel).</summary>
+    [JsonPropertyName("pins")]
+    public Dictionary<string, List<PlacePin>> Pins { get; set; } = new();
+
+    /// <summary>Nicknames: userId → display name override.</summary>
+    [JsonPropertyName("nicknames")]
+    public Dictionary<string, string> Nicknames { get; set; } = new();
+
+    /// <summary>Custom roles: roleId → CustomRole. Replaces the 3-tier system.</summary>
+    [JsonPropertyName("customRoles")]
+    public Dictionary<string, CustomRole> CustomRoles { get; set; } = new();
+
+    /// <summary>Member role assignments: userId → list of roleIds.</summary>
+    [JsonPropertyName("memberRoles")]
+    public Dictionary<string, List<string>> MemberRoles { get; set; } = new();
 }
 
 public class PlaceEmote
@@ -328,6 +347,27 @@ public class PlaceBan
     public long BannedAt { get; set; }
 }
 
+public class PlacePin
+{
+    [JsonPropertyName("msgId")]
+    public string MsgId { get; set; } = "";
+
+    [JsonPropertyName("pinnedBy")]
+    public string PinnedBy { get; set; } = "";
+
+    [JsonPropertyName("pinnedAt")]
+    public long PinnedAt { get; set; }
+
+    [JsonPropertyName("preview")]
+    public string Preview { get; set; } = ""; // first ~100 chars of the message
+
+    [JsonPropertyName("channelId")]
+    public string ChannelId { get; set; } = "";
+
+    [JsonPropertyName("author")]
+    public string Author { get; set; } = "";
+}
+
 public class PlaceChannel
 {
     [JsonPropertyName("name")]
@@ -344,6 +384,9 @@ public class PlaceChannel
 
     [JsonPropertyName("createdAt")]
     public long CreatedAt { get; set; }
+
+    [JsonPropertyName("permOverrides")]
+    public List<ChannelPermOverride>? PermissionOverrides { get; set; }
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -352,6 +395,57 @@ public enum PlaceRole
     Member = 0,
     Admin = 1,
     Owner = 2,
+}
+
+/// <summary>Permission bitfield for custom roles.</summary>
+[Flags]
+public enum PlacePermission : long
+{
+    None            = 0,
+    SendMessages    = 1 << 0,
+    ManageMessages  = 1 << 1, // delete others' messages
+    ManageChannels  = 1 << 2,
+    ManageRoles     = 1 << 3, // assign roles (only below own level)
+    KickMembers     = 1 << 4,
+    BanMembers      = 1 << 5,
+    ManageEmotes    = 1 << 6,
+    ManagePlace     = 1 << 7, // name/icon/accent
+    Administrator   = 1 << 8, // all permissions
+    ViewAuditLog    = 1 << 9,
+}
+
+public class CustomRole
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("color")]
+    public string Color { get; set; } = "#6b7280";
+
+    [JsonPropertyName("position")]
+    public int Position { get; set; } // higher = more power
+
+    [JsonPropertyName("permissions")]
+    public long Permissions { get; set; }
+
+    /// <summary>Check if this role has a specific permission.</summary>
+    public bool Has(PlacePermission perm)
+        => (Permissions & (long)PlacePermission.Administrator) != 0 || (Permissions & (long)perm) != 0;
+}
+
+public class ChannelPermOverride
+{
+    [JsonPropertyName("roleId")]
+    public string RoleId { get; set; } = "";
+
+    [JsonPropertyName("allow")]
+    public long Allow { get; set; }
+
+    [JsonPropertyName("deny")]
+    public long Deny { get; set; }
 }
 
 public class ChatMessage
@@ -367,6 +461,52 @@ public class ChatMessage
 
     [JsonPropertyName("ttl")]
     public int Ttl { get; set; }
+
+    [JsonPropertyName("mid")]
+    public string? MsgId { get; set; }
+
+    [JsonPropertyName("ref")]
+    public string? ReplyToMsgId { get; set; }
+
+    [JsonPropertyName("rp")]
+    public string? ReplyToPreview { get; set; }
+
+    [JsonPropertyName("ra")]
+    public string? ReplyToAuthor { get; set; }
+
+    /// <summary>Reactions: emoji → list of userIds who reacted.</summary>
+    [JsonPropertyName("rx")]
+    public Dictionary<string, List<string>>? Reactions { get; set; }
+
+    [JsonPropertyName("eat")]
+    public long? EditedAt { get; set; }
+
+    [JsonPropertyName("del")]
+    public bool IsDeleted { get; set; }
+
+    [JsonPropertyName("att")]
+    public List<AttachmentInfo>? Attachments { get; set; }
+}
+
+public class AttachmentInfo
+{
+    [JsonPropertyName("bid")]
+    public string BlobId { get; set; } = "";
+
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = ""; // base64 symmetric key for decryption
+
+    [JsonPropertyName("nonce")]
+    public string Nonce { get; set; } = ""; // base64 nonce
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("mime")]
+    public string? MimeType { get; set; }
+
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
 }
 
 public class KeyPairData
