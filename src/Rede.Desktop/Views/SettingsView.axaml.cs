@@ -1,9 +1,11 @@
 using System;
+using System.Security.Cryptography;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Rede.Desktop.Controls;
 using Rede.Desktop.ViewModels;
 
 namespace Rede.Desktop.Views;
@@ -84,6 +86,53 @@ public partial class SettingsView : UserControl
         if (DataContext is SettingsViewModel vm && TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
         {
             await clipboard.SetTextAsync(vm.Fingerprint);
+        }
+    }
+
+    private async void ChangePassphrase_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SettingsViewModel vm) return;
+
+        var currentBox = this.FindControl<SecureTextBox>("CurrentPassphraseBox");
+        var newBox = this.FindControl<SecureTextBox>("NewPassphraseBox");
+        var confirmBox = this.FindControl<SecureTextBox>("ConfirmPassphraseBox");
+        if (currentBox is null || newBox is null || confirmBox is null) return;
+
+        if (currentBox.ByteLength == 0 || newBox.ByteLength == 0)
+        {
+            vm.PassphraseChangeStatus = "Please fill in all fields.";
+            return;
+        }
+
+        // Compare new and confirm
+        var newBytes = newBox.PeekPassphrase();
+        var confirmBytes = confirmBox.PeekPassphrase();
+        bool match = newBytes.Length == confirmBytes.Length
+                     && CryptographicOperations.FixedTimeEquals(newBytes, confirmBytes);
+        CryptographicOperations.ZeroMemory(confirmBytes);
+
+        if (!match)
+        {
+            CryptographicOperations.ZeroMemory(newBytes);
+            vm.PassphraseChangeStatus = "New passphrases don't match.";
+            return;
+        }
+        CryptographicOperations.ZeroMemory(newBytes);
+
+        // Extract (zeros internal buffers)
+        var currentPass = currentBox.ExtractPassphrase();
+        var newPass = newBox.ExtractPassphrase();
+        confirmBox.Clear();
+
+        try
+        {
+            await vm.ChangePassphraseAsync(currentPass, newPass);
+            // newPass ownership transferred to MainWindow handler if successful
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(currentPass);
+            // newPass is zeroed by the handler after mlock replacement
         }
     }
 }

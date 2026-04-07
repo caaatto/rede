@@ -220,6 +220,36 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
+    // Passphrase change
+    [ObservableProperty] private string _passphraseChangeStatus = "";
+    [ObservableProperty] private bool _isChangingPassphrase;
+
+    public event Func<byte[], byte[], System.Threading.Tasks.Task<bool>>? OnChangePassphraseRequested;
+
+    public async System.Threading.Tasks.Task ChangePassphraseAsync(byte[] currentPassphrase, byte[] newPassphrase)
+    {
+        if (IsChangingPassphrase) return;
+        IsChangingPassphrase = true;
+        PassphraseChangeStatus = "";
+
+        try
+        {
+            if (OnChangePassphraseRequested is not null)
+            {
+                var success = await OnChangePassphraseRequested.Invoke(currentPassphrase, newPassphrase);
+                PassphraseChangeStatus = success ? "Passphrase changed." : "Wrong current passphrase.";
+            }
+        }
+        catch (Exception ex)
+        {
+            PassphraseChangeStatus = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            IsChangingPassphrase = false;
+        }
+    }
+
     // Voice call transport (read-only, derived from connection)
     [ObservableProperty] private string _callTransport = "Direct";
 

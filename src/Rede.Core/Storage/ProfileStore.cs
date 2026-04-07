@@ -461,6 +461,24 @@ public class ProfileStore
         if (_cachedPassphrase is not null) { CryptoService.ZeroOut(_cachedPassphrase); _cachedPassphrase = null; }
     }
 
+    /// <summary>
+    /// Re-encrypt the profile and chat history with a new passphrase.
+    /// Caller must verify the old passphrase matches before calling.
+    /// Returns the new passphrase byte[] (caller owns it and must mlock + zero).
+    /// </summary>
+    public async Task ChangePassphraseAsync(Profile profile, byte[] oldPassphrase, byte[] newPassphrase)
+    {
+        // Invalidate cached key so next save derives from newPassphrase
+        ClearCachedKey();
+
+        // Re-encrypt and save profile + history with the new passphrase
+        await SaveProfileAsync(profile, newPassphrase);
+        await SaveChatHistoryAsync(profile, newPassphrase);
+
+        // Cache the new key for future debounced saves
+        CacheKey(newPassphrase);
+    }
+
     public async Task<Profile> CreateProfileAsync(string internalId, string displayName, byte[] passphrase)
     {
         var encKP = CryptoService.GenerateKeyPair();

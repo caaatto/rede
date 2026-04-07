@@ -2260,6 +2260,34 @@ public partial class MainWindow : Window
             }
         };
 
+        // Passphrase change
+        vm.OnChangePassphraseRequested += async (currentPass, newPass) =>
+        {
+            if (_auth?.Profile is null || _auth.Passphrase is null) return false;
+
+            // Verify the current passphrase matches the active one
+            if (currentPass.Length != _auth.Passphrase.Length ||
+                !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(currentPass, _auth.Passphrase))
+                return false;
+
+            // Re-encrypt everything with the new passphrase
+            await _store.ChangePassphraseAsync(_auth.Profile, _auth.Passphrase, newPass);
+
+            // Update the in-memory passphrase: zero old, adopt new copy
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(_auth.Passphrase);
+            _passphraseLock?.Dispose();
+
+            // Clone new passphrase (caller may zero their copy) and mlock it
+            var owned = (byte[])newPass.Clone();
+            _auth.Passphrase = owned;
+            _passphraseLock = Rede.Core.Crypto.SecureMemory.Lock(owned);
+
+            // Propagate to all services that hold a reference
+            PropagateProfile();
+
+            return true;
+        };
+
         // Start a standalone audio monitor for the level meter (works without an active call)
         Rede.Core.Audio.AudioEngine? settingsMonitor = null;
         try

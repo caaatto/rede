@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Rede.Desktop.ViewModels"
              xmlns:local="using:Rede.Desktop.Converters"
+             xmlns:controls="using:Rede.Desktop.Controls"
              x:Class="Rede.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
@@ -456,6 +457,47 @@
                                            HorizontalAlignment="Center"
                                            TextWrapping="Wrap" />
                             </Border>
+                        </StackPanel>
+
+                        <Separator />
+
+                        <!-- Change Passphrase -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Change Passphrase" Classes="header" />
+                            <TextBlock Text="Re-encrypts your profile and chat history with a new passphrase."
+                                       Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+
+                            <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Current" Classes="secondary" VerticalAlignment="Center" />
+                                <controls:SecureTextBox Grid.Row="0" Grid.Column="1"
+                                                        x:Name="CurrentPassphraseBox"
+                                                        Watermark="Current passphrase"
+                                                        IsInputEnabled="{Binding !IsChangingPassphrase}" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="New" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                <controls:SecureTextBox Grid.Row="1" Grid.Column="1"
+                                                        x:Name="NewPassphraseBox"
+                                                        Watermark="New passphrase"
+                                                        Margin="0,8,0,0"
+                                                        IsInputEnabled="{Binding !IsChangingPassphrase}" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Confirm" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                <controls:SecureTextBox Grid.Row="2" Grid.Column="1"
+                                                        x:Name="ConfirmPassphraseBox"
+                                                        Watermark="Confirm new passphrase"
+                                                        Margin="0,8,0,0"
+                                                        IsInputEnabled="{Binding !IsChangingPassphrase}" />
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Content="Change Passphrase"
+                                        Click="ChangePassphrase_Click"
+                                        IsEnabled="{Binding !IsChangingPassphrase}"
+                                        Padding="16,6" />
+                                <TextBlock Text="{Binding PassphraseChangeStatus}"
+                                           VerticalAlignment="Center"
+                                           FontSize="12" />
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
 

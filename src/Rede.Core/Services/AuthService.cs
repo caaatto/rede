@@ -28,7 +28,7 @@ public class AuthService : IDisposable
     /// MainWindow, which zeros it on logout/close. Services hold references but never
     /// allocate their own copies.
     /// </summary>
-    public byte[]? Passphrase { get; private set; }
+    public byte[]? Passphrase { get; set; }
 
     public AuthService(RedeConnection conn, ProfileStore store)
     {

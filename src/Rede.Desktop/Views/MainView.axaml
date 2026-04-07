@@ -588,7 +588,7 @@
                                                     CornerRadius="4,12,12,12"
                                                     Padding="14,10"
                                                     IsVisible="{Binding !IsSystem}">
-                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <StackPanel Spacing="4">
                                                     <TextBlock Text="[message deleted]"
                                                                FontStyle="Italic"
                                                                Foreground="{DynamicResource RedeSecondaryBrush}"
@@ -596,13 +596,13 @@
                                                     <controls:MarkdownTextBlock Markdown="{Binding Text}"
                                                                TextWrapping="Wrap"
                                                                IsVisible="{Binding !IsDeleted}" />
-                                                    <TextBlock Text="(edited)"
-                                                               FontSize="{StaticResource RedeCaptionSize}"
-                                                               Foreground="{DynamicResource RedeSecondaryBrush}"
-                                                               VerticalAlignment="Bottom"
-                                                               IsVisible="{Binding IsEdited}" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="6"
+                                                                IsVisible="{Binding IsEdited}">
+                                                        <TextBlock Text="(edited)"
+                                                                   FontSize="{StaticResource RedeCaptionSize}"
+                                                                   Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                    </StackPanel>
                                                     <StackPanel Orientation="Horizontal" Spacing="3"
-                                                                VerticalAlignment="Bottom"
                                                                 IsVisible="{Binding HasTtl}">
                                                         <Image Source="{StaticResource IconClock}" Width="12" Height="12"
                                                                VerticalAlignment="Center" />
@@ -696,7 +696,7 @@
                                         <Border Background="{DynamicResource RedeSurfaceActiveBrush}"
                                                 CornerRadius="12,4,12,12"
                                                 Padding="14,10">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <StackPanel Spacing="4">
                                                 <TextBlock Text="[message deleted]"
                                                            FontStyle="Italic"
                                                            Foreground="{DynamicResource RedeSecondaryBrush}"
@@ -704,13 +704,13 @@
                                                 <controls:MarkdownTextBlock Markdown="{Binding Text}"
                                                            TextWrapping="Wrap"
                                                            IsVisible="{Binding !IsDeleted}" />
-                                                <TextBlock Text="(edited)"
-                                                           FontSize="{StaticResource RedeCaptionSize}"
-                                                           Foreground="{DynamicResource RedeSecondaryBrush}"
-                                                           VerticalAlignment="Bottom"
-                                                           IsVisible="{Binding IsEdited}" />
+                                                <StackPanel Orientation="Horizontal" Spacing="6"
+                                                            IsVisible="{Binding IsEdited}">
+                                                    <TextBlock Text="(edited)"
+                                                               FontSize="{StaticResource RedeCaptionSize}"
+                                                               Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                </StackPanel>
                                                 <StackPanel Orientation="Horizontal" Spacing="3"
-                                                            VerticalAlignment="Bottom"
                                                             IsVisible="{Binding HasTtl}">
                                                     <Image Source="{StaticResource IconClock}" Width="12" Height="12"
                                                            VerticalAlignment="Center" />
