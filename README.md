@@ -14,13 +14,13 @@ Grab the latest release for your platform:
 
 **[Download for Linux / Windows](https://github.com/caaatto/rede/releases)**
 
-No runtime or SDK required — the app is fully self-contained and
+No runtime or SDK required - the app is fully self-contained and
 auto-updates when a new version is published.
 
 
 ## linux installation
 
-**Quick start** — download and run:
+**Quick start** - download and run:
 ```bash
 chmod +x REDE
 ./REDE
@@ -32,7 +32,7 @@ sudo cp REDE /usr/local/bin/REDE
 sudo chmod 755 /usr/local/bin/REDE
 ```
 
-**Install script** — clones the repo, builds from source, creates a launcher
+**Install script** - clones the repo, builds from source, creates a launcher
 and `.desktop` entry:
 ```bash
 curl -sL https://raw.githubusercontent.com/caaatto/rede/main/scripts/install.sh | bash
@@ -43,7 +43,7 @@ This installs to `~/.local/share/rede` and creates a `rede` launcher in
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-**Desktop entry** — if you placed the binary manually and want an app
+**Desktop entry** - if you placed the binary manually and want an app
 launcher, create `~/.local/share/applications/rede.desktop`:
 ```ini
 [Desktop Entry]
@@ -63,18 +63,18 @@ Double-click `REDE.exe`.
 
 ## features
 
-- **End-to-end encryption** — X3DH + Double Ratchet (Signal Protocol), XSalsa20-Poly1305
-- **Sealed sender** — the server can't see who sent a message
-- **Groups** — Sender Keys for group PFS, Ed25519 signed
-- **Places** — Discord-like servers with channels, customizable profile (icon, accent color). All metadata is E2EE
-- **Voice calls** — E2EE audio via SRTP (AES-128-CM + HMAC-SHA1-80), Opus 96kbps, RNNoise suppression, AGC, echo cancellation
-- **Group calls** — LiveKit SFU for Places/Groups, E2EE via SFrame (key never leaves client), up to 25 participants, 1080p60 video
-- **Profile customization** — accent colors, avatar images (PNG/GIF/JPEG), shared with contacts
-- **Multi-device** — each device has its own keys, messages delivered to all devices
-- **Anonymous transport** — connect via I2P or Tor to hide your IP from the server
-- **Message padding** — fixed-size buckets prevent traffic analysis
-- **Self-destructing messages** — TTL-based auto-delete
-- **No tracking** — no phone number, no email, no analytics, no ads
+- **End-to-end encryption** - X3DH + Double Ratchet (Signal Protocol), XSalsa20-Poly1305
+- **Sealed sender** - the server can't see who sent a message
+- **Groups** - Sender Keys for group PFS, Ed25519 signed
+- **Places** - Discord-like servers with channels, customizable profile (icon, accent color). All metadata is E2EE
+- **Voice calls** - E2EE audio via SRTP (AES-128-CM + HMAC-SHA1-80), Opus 96kbps, RNNoise suppression, AGC, echo cancellation
+- **Group calls** - LiveKit SFU for Places/Groups, E2EE via SFrame (key never leaves client), up to 25 participants, 1080p60 video
+- **Profile customization** - accent colors, avatar images (PNG/GIF/JPEG), shared with contacts
+- **Multi-device** - each device has its own keys, messages delivered to all devices
+- **Anonymous transport** - connect via I2P or Tor to hide your IP from the server
+- **Message padding** - fixed-size buckets prevent traffic analysis
+- **Self-destructing messages** - TTL-based auto-delete
+- **No tracking** - no phone number, no email, no analytics, no ads
 
 
 ## getting started
@@ -85,7 +85,7 @@ Double-click `REDE.exe`.
 4. Click **Register**
 
 Your user ID will be `displayname#tag` (e.g. `alice#a3f1`).
-The passphrase encrypts your profile locally — there is no recovery if you lose it.
+The passphrase encrypts your profile locally - there is no recovery if you lose it.
 
 
 ## transport options
@@ -157,7 +157,7 @@ Right-click groups and places for management options (invite, kick, rotate key).
 ## voice calls
 
 Audio is encrypted with SRTP at 96kbps Opus (above Discord standard).
-The call transport matches your connection — if you're on I2P, your call
+The call transport matches your connection - if you're on I2P, your call
 is anonymous. SRTP keys are exchanged over your existing Double Ratchet
 session, so the server never has access to audio.
 
@@ -167,17 +167,17 @@ hang up controls.
 **Group calls** (Places/Groups) use a LiveKit SFU for media routing, but
 audio and video are still end-to-end encrypted with SFrame. The SFrame key
 is derived from the Place's metadata key (or Group's shared key) via HKDF
-with domain separation — neither the Rede server nor the LiveKit SFU ever
+with domain separation - neither the Rede server nor the LiveKit SFU ever
 see it. Up to 25 participants per call, 1080p60 video, Opus audio.
 
 
 ## places
 
-Places work like Discord servers — a place has channels, members, and roles.
+Places work like Discord servers - a place has channels, members, and roles.
 Unlike Discord, all metadata (names, topics, icons, colors) is end-to-end
 encrypted. The server only sees opaque IDs.
 
-Each place has its own profile — accent color and icon — visible in the
+Each place has its own profile - accent color and icon - visible in the
 sidebar. Right-click a place to manage members, channels, keys, and the
 place profile. Only the creator can edit the profile, kick members, or
 delete channels.
@@ -186,8 +186,8 @@ delete channels.
 ## profile
 
 Customize your profile in Settings:
-- **Accent color** — 12 preset colors, visible to your contacts in chat
-- **Avatar** — upload a PNG, JPEG, or GIF (max 256KB)
+- **Accent color** - 12 preset colors, visible to your contacts in chat
+- **Avatar** - upload a PNG, JPEG, or GIF (max 256KB)
 
 Changes are previewed locally. Click **Apply** to save and share with contacts.
 
@@ -219,7 +219,7 @@ your IP address ........... hidden with I2P/Tor, visible with direct WSS
 
 Your profile (keys, contacts, chat history) is stored locally in `~/.rede/`,
 encrypted with your passphrase using scrypt + NaCl secretbox.
-There is no recovery mechanism — do not lose your passphrase.
+There is no recovery mechanism - do not lose your passphrase.
 
 
 ## security
