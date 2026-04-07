@@ -14,17 +14,51 @@ Grab the latest release for your platform:
 
 **[Download for Linux / Windows](https://github.com/caaatto/rede/releases)**
 
-**Linux:**
-```
+No runtime or SDK required — the app is fully self-contained and
+auto-updates when a new version is published.
+
+
+## linux installation
+
+**Quick start** — download and run:
+```bash
 chmod +x REDE
 ./REDE
 ```
 
+**System-wide install** (optional):
+```bash
+sudo cp REDE /usr/local/bin/REDE
+sudo chmod 755 /usr/local/bin/REDE
+```
+
+**Install script** — clones the repo, builds from source, creates a launcher
+and `.desktop` entry:
+```bash
+curl -sL https://raw.githubusercontent.com/caaatto/rede/main/scripts/install.sh | bash
+```
+This installs to `~/.local/share/rede` and creates a `rede` launcher in
+`~/.local/bin`. If `~/.local/bin` is not in your `PATH`, add it:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**Desktop entry** — if you placed the binary manually and want an app
+launcher, create `~/.local/share/applications/rede.desktop`:
+```ini
+[Desktop Entry]
+Name=REDE
+GenericName=Secure Messenger
+Comment=Secure, anonymous E2EE messenger
+Exec=/path/to/REDE
+Icon=rede
+Terminal=false
+Type=Application
+Categories=Network;Chat;InstantMessaging;
+```
+
 **Windows:**
 Double-click `REDE.exe`.
-
-No runtime or SDK required — the app is fully self-contained and
-auto-updates when a new version is published.
 
 
 ## features

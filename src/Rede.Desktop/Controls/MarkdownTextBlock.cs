@@ -31,8 +31,7 @@ public class MarkdownTextBlock : SelectableTextBlock
         @"(`[^`]+`)" +                          // group 1: inline code
         @"|(?<!\w)\*([^*]+?)\*(?!\w)" +          // group 2: *bold*
         @"|(?<!\w)_([^_]+?)_(?!\w)" +            // group 3: _italic_
-        @"|~~([^~]+?)~~" +                       // group 4: ~~strikethrough~~
-        @"|(?<!\w)-([^-]+?)-(?!\w)",             // group 5: -strikethrough-
+        @"|~~([^~]+?)~~",                        // group 4: ~~strikethrough~~
         RegexOptions.Compiled, RegexTimeout);
 
     private const int MaxRenderLength = 8192; // M10: Limit text length before regex processing
@@ -135,18 +134,6 @@ public class MarkdownTextBlock : SelectableTextBlock
                 span.Inlines?.Add(new Run(match.Groups[4].Value));
                 inlines.Add(span);
             }
-            else if (match.Groups[5].Success)
-            {
-                // Strikethrough: -text-
-                var span = new Span();
-                span.TextDecorations = new TextDecorationCollection
-                {
-                    new TextDecoration { Location = TextDecorationLocation.Strikethrough }
-                };
-                span.Inlines?.Add(new Run(match.Groups[5].Value));
-                inlines.Add(span);
-            }
-
             lastEnd = match.Index + match.Length;
         }
 

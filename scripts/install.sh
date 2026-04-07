@@ -53,15 +53,14 @@ fi
 
 # Build desktop client
 echo "[*] Building desktop client..."
-cd "$INSTALL_DIR/rede-client"
-dotnet build Rede.sln -c Release --nologo -v q
+dotnet build "$INSTALL_DIR/Rede.sln" -c Release --nologo -v q
 
 # Create launcher script
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/rede" << 'LAUNCHER'
 #!/usr/bin/env bash
 INSTALL_DIR="${REDE_INSTALL_DIR:-$HOME/.local/share/rede}"
-cd "$INSTALL_DIR/rede-client"
+cd "$INSTALL_DIR"
 exec dotnet run --project src/Rede.Desktop -c Release --no-build -- "$@"
 LAUNCHER
 chmod +x "$BIN_DIR/rede"
@@ -69,7 +68,7 @@ chmod +x "$BIN_DIR/rede"
 # Install icon
 ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
 mkdir -p "$ICON_DIR"
-cp "$INSTALL_DIR/rede-client/src/Rede.Desktop/Assets/icon.png" "$ICON_DIR/rede.png" 2>/dev/null || true
+cp "$INSTALL_DIR/src/Rede.Desktop/Assets/icon.png" "$ICON_DIR/rede.png" 2>/dev/null || true
 
 # Create .desktop entry (Linux)
 if [ -d "$DESKTOP_DIR" ] || mkdir -p "$DESKTOP_DIR"; then

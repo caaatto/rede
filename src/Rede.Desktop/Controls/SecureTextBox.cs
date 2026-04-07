@@ -4,6 +4,7 @@ using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.TextInput;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -40,6 +41,7 @@ public class SecureTextBox : Border
 
     private readonly TextBlock _displayText;
     private readonly TextBlock _toggleIcon;
+    private readonly SecureInputClient _inputClient;
 
     private static readonly IBrush BgBrush = new SolidColorBrush(Color.Parse("#12121a"));
     private static readonly IBrush IdleBorder = new SolidColorBrush(Color.Parse("#2a2a3a"));
@@ -118,9 +120,18 @@ public class SecureTextBox : Border
         Child = panel;
 
         _bufferLock = SecureMemory.Lock(_buffer);
+        _inputClient = new SecureInputClient(this);
         UpdateDisplay();
 
+        // Register with input method system so OnTextInput fires on all platforms
+        AddHandler(TextInputMethodClientRequestedEvent, OnTextInputMethodClientRequested);
+
         WatermarkProperty.Changed.AddClassHandler<SecureTextBox>((x, _) => x.UpdateDisplay());
+    }
+
+    private void OnTextInputMethodClientRequested(object? sender, TextInputMethodClientRequestedEventArgs e)
+    {
+        e.Client = _inputClient;
     }
 
     protected override void OnGotFocus(GotFocusEventArgs e)
@@ -305,5 +316,23 @@ public class SecureTextBox : Border
         _charCount = 0;
         _bufferLock?.Dispose();
         _bufferLock = null;
+    }
+
+    /// <summary>
+    /// Minimal TextInputMethodClient that tells the platform IME this control accepts text.
+    /// Does NOT expose any buffer content (security: passphrase stays internal).
+    /// </summary>
+    private sealed class SecureInputClient : TextInputMethodClient
+    {
+        private readonly SecureTextBox _owner;
+        public SecureInputClient(SecureTextBox owner) => _owner = owner;
+
+        public override Visual TextViewVisual => _owner;
+        public override bool SupportsPreedit => false;
+        public override bool SupportsSurroundingText => false;
+        public override string? SurroundingText => null;
+        public override TextSelection Selection { get => default; set { } }
+        public override Rect CursorRectangle => default;
+        public override void SetPreeditText(string? text) { }
     }
 }

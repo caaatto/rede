@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.18.16-beta";
+    private const string CurrentVersion = "2.18.17-beta";
 
     /// <summary>
     /// Path to a file that records the last successfully installed release tag.
@@ -320,25 +320,64 @@ public class UpdateService
             var currentExe = Environment.ProcessPath;
             if (currentExe is null) return false;
 
-            var backupPath = currentExe + ".old";
-            var newPath = currentExe + ".new";
+            // Check if we need elevated privileges (binary in root-owned dir like /usr/bin)
+            var needsElevation = !RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                                 && NeedsRootPrivileges(currentExe);
 
-            // Write new binary
-            await File.WriteAllBytesAsync(newPath, bytes);
-
-            // On Linux, set executable permission
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            if (needsElevation)
             {
-                File.SetUnixFileMode(newPath,
+                // Write new binary to temp dir (user-writable), then pkexec to swap
+                var tempNew = Path.Combine(Path.GetTempPath(), $"rede-update-{Guid.NewGuid():N}");
+                await File.WriteAllBytesAsync(tempNew, bytes);
+                File.SetUnixFileMode(tempNew,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
                     UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
                     UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-            }
 
-            // Swap: current -> .old, new -> current
-            if (File.Exists(backupPath)) File.Delete(backupPath);
-            File.Move(currentExe, backupPath);
-            File.Move(newPath, currentExe);
+                onStatus?.Invoke("Requesting root privileges...");
+
+                // pkexec runs a shell one-liner: backup old, move new into place
+                var script = $"mv -f '{currentExe}' '{currentExe}.old' && mv -f '{tempNew}' '{currentExe}' && chmod 755 '{currentExe}'";
+                var psi = new ProcessStartInfo("pkexec", $"sh -c \"{script}\"")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                using var proc = Process.Start(psi);
+                if (proc is null) { File.Delete(tempNew); return false; }
+                await proc.WaitForExitAsync();
+
+                if (proc.ExitCode != 0)
+                {
+                    File.Delete(tempNew);
+                    var err = await proc.StandardError.ReadToEndAsync();
+                    onStatus?.Invoke($"Update failed: privilege elevation denied or failed. {err}");
+                    return false;
+                }
+            }
+            else
+            {
+                var backupPath = currentExe + ".old";
+                var newPath = currentExe + ".new";
+
+                // Write new binary
+                await File.WriteAllBytesAsync(newPath, bytes);
+
+                // On Linux, set executable permission
+                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    File.SetUnixFileMode(newPath,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                        UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                }
+
+                // Swap: current -> .old, new -> current
+                if (File.Exists(backupPath)) File.Delete(backupPath);
+                File.Move(currentExe, backupPath);
+                File.Move(newPath, currentExe);
+            }
 
             // Persist the installed tag to prevent re-prompt on next launch
             WriteInstalledTag(release.Tag);
@@ -458,6 +497,27 @@ public class UpdateService
         catch
         {
             return null; // Can't verify — proceed with caution
+        }
+    }
+
+    /// <summary>
+    /// Check if the given path requires root to write (e.g. /usr/bin, /usr/local/bin).
+    /// </summary>
+    private static bool NeedsRootPrivileges(string path)
+    {
+        try
+        {
+            // Try to open the file for writing — if it throws UnauthorizedAccess, we need elevation
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
