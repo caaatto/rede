@@ -33,7 +33,13 @@ public partial class MainView : UserControl
             _scrollHandler = (_, args) =>
             {
                 if (args.Action == NotifyCollectionChangedAction.Add)
-                    MessageScroller.ScrollToEnd();
+                {
+                    // Post to dispatcher so layout completes before we scroll
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        MessageScroller.ScrollToEnd();
+                    }, Avalonia.Threading.DispatcherPriority.Loaded);
+                }
             };
             vm.Messages.CollectionChanged += _scrollHandler;
         }
@@ -1185,6 +1191,19 @@ public partial class MainView : UserControl
         if (msg.IsSystem || msg.IsSecurityAlert || msg.IsDeleted) return;
 
         var menu = new ContextMenu();
+
+        // Copy message text
+        if (!string.IsNullOrEmpty(msg.Text))
+        {
+            var copyItem = new MenuItem { Header = "Copy", Foreground = Brush.Parse("#e0e0e8") };
+            copyItem.Click += async (_, _) =>
+            {
+                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                if (clipboard is not null)
+                    await clipboard.SetTextAsync(msg.Text);
+            };
+            menu.Items.Add(copyItem);
+        }
 
         // Reply (always available)
         if (msg.MsgId is not null)
