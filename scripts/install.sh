@@ -5,7 +5,7 @@ set -euo pipefail
 # Clones the repo, builds the desktop client, and creates a launcher.
 
 REPO_URL="git@github.com:caaatto/rede.git"
-BRANCH="v2"
+BRANCH="main"
 INSTALL_DIR="${REDE_INSTALL_DIR:-$HOME/.local/share/rede}"
 BIN_DIR="${HOME}/.local/bin"
 DESKTOP_DIR="${HOME}/.local/share/applications"
@@ -66,21 +66,29 @@ exec dotnet run --project src/Rede.Desktop -c Release --no-build -- "$@"
 LAUNCHER
 chmod +x "$BIN_DIR/rede"
 
+# Install icon
+ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
+mkdir -p "$ICON_DIR"
+cp "$INSTALL_DIR/rede-client/src/Rede.Desktop/Assets/icon.png" "$ICON_DIR/rede.png" 2>/dev/null || true
+
 # Create .desktop entry (Linux)
 if [ -d "$DESKTOP_DIR" ] || mkdir -p "$DESKTOP_DIR"; then
     cat > "$DESKTOP_DIR/rede.desktop" << DESKTOP
 [Desktop Entry]
-Name=Rede
-Comment=Secure E2EE Messenger
+Name=REDE
+GenericName=Secure Messenger
+Comment=Secure, anonymous E2EE messenger
 Exec=$BIN_DIR/rede
+Icon=rede
 Terminal=false
 Type=Application
 Categories=Network;Chat;InstantMessaging;
-Keywords=messenger;encrypted;e2ee;secure;
+Keywords=messenger;encrypted;e2ee;secure;anonymous;
 StartupWMClass=Rede.Desktop
 DESKTOP
     # Update desktop database if available
     update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+    gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 fi
 
 echo ""

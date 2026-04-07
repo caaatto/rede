@@ -19,8 +19,10 @@ namespace Rede.Desktop.Controls;
 /// the internal buffer.
 ///
 /// Limitations vs TextBox (by design):
-/// - No clipboard paste — the clipboard would hand us a managed string that
-///   we cannot zero, defeating the purpose.
+/// - Clipboard paste IS supported (Ctrl+V / Cmd+V) for password managers.
+///   The pasted string briefly exists as a managed string (same as keystroke
+///   TextInput args) — unavoidable, but the window is microseconds.
+/// - Copy and Cut are blocked — the passphrase never leaves this control.
 /// - No cursor movement / no selection — the caret is always at the end.
 /// - Backspace removes the trailing UTF-8 codepoint; Delete clears everything.
 /// - Each TextInput event's string argument briefly exists on the GC heap for
@@ -34,14 +36,22 @@ public class SecureTextBox : Border
     private int _length;
     private int _charCount; // codepoint count, for display
     private SecureMemory.SecureHandle? _bufferLock;
+    private bool _isRevealed;
 
     private readonly TextBlock _displayText;
+    private readonly TextBlock _toggleIcon;
 
     private static readonly IBrush BgBrush = new SolidColorBrush(Color.Parse("#12121a"));
     private static readonly IBrush IdleBorder = new SolidColorBrush(Color.Parse("#2a2a3a"));
     private static readonly IBrush FocusBorder = new SolidColorBrush(Color.Parse("#8b5cf6"));
     private static readonly IBrush TextBrush = new SolidColorBrush(Color.Parse("#e6e6ed"));
     private static readonly IBrush WatermarkBrush = new SolidColorBrush(Color.Parse("#6b6b7c"));
+    private static readonly IBrush ToggleIdleBrush = new SolidColorBrush(Color.Parse("#6b6b7c"));
+    private static readonly IBrush ToggleHoverBrush = new SolidColorBrush(Color.Parse("#e6e6ed"));
+
+    // Eye symbols (closed = hidden, open = revealed)
+    private const string EyeClosed = "\u25C9"; // ◉ — password hidden
+    private const string EyeOpen = "\u25CE";   // ◎ — password visible
 
     public static readonly StyledProperty<string> WatermarkProperty =
         AvaloniaProperty.Register<SecureTextBox, string>(nameof(Watermark), "");
@@ -87,7 +97,25 @@ public class SecureTextBox : Border
             FontSize = 14,
             Foreground = TextBrush,
         };
-        Child = _displayText;
+
+        _toggleIcon = new TextBlock
+        {
+            Text = EyeClosed,
+            FontSize = 16,
+            Foreground = ToggleIdleBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Margin = new Thickness(8, 0, 0, 0),
+        };
+        _toggleIcon.PointerPressed += OnTogglePressed;
+        _toggleIcon.PointerEntered += (_, _) => _toggleIcon.Foreground = ToggleHoverBrush;
+        _toggleIcon.PointerExited += (_, _) => _toggleIcon.Foreground = ToggleIdleBrush;
+
+        var panel = new DockPanel();
+        DockPanel.SetDock(_toggleIcon, Dock.Right);
+        panel.Children.Add(_toggleIcon);
+        panel.Children.Add(_displayText);
+        Child = panel;
 
         _bufferLock = SecureMemory.Lock(_buffer);
         UpdateDisplay();
@@ -137,6 +165,22 @@ public class SecureTextBox : Border
         base.OnKeyDown(e);
         if (!IsInputEnabled) return;
 
+        // Block Copy (Ctrl+C) and Cut (Ctrl+X) — passphrase must never leave this control
+        var mod = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta);
+        if (mod != KeyModifiers.None && (e.Key == Key.C || e.Key == Key.X))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        // Paste (Ctrl+V / Cmd+V) — for password managers
+        if (mod != KeyModifiers.None && e.Key == Key.V)
+        {
+            e.Handled = true;
+            _ = PasteFromClipboardAsync();
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Back:
@@ -152,6 +196,28 @@ public class SecureTextBox : Border
                 EnterPressed?.Invoke(this, EventArgs.Empty);
                 break;
         }
+    }
+
+    private async System.Threading.Tasks.Task PasteFromClipboardAsync()
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return;
+
+#pragma warning disable CS0618 // IClipboard.GetTextAsync is marked obsolete but TryGetTextAsync requires IAsyncDataTransfer
+        var text = await clipboard.GetTextAsync();
+#pragma warning restore CS0618
+        if (string.IsNullOrEmpty(text)) return;
+
+        var bytes = Encoding.UTF8.GetByteCount(text);
+        if (_length + bytes > MaxBytes) return;
+
+        Encoding.UTF8.GetBytes(text, 0, text.Length, _buffer, _length);
+        _length += bytes;
+        foreach (var ch in text)
+            if (!char.IsLowSurrogate(ch)) _charCount++;
+
+        UpdateDisplay();
+        SecureTextChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void RemoveLastCodepoint()
@@ -173,6 +239,8 @@ public class SecureTextBox : Border
         for (int i = 0; i < _length; i++) _buffer[i] = 0;
         _length = 0;
         _charCount = 0;
+        _isRevealed = false;
+        _toggleIcon.Text = EyeClosed;
         UpdateDisplay();
         SecureTextChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -201,12 +269,26 @@ public class SecureTextBox : Border
         return copy;
     }
 
+    private void OnTogglePressed(object? sender, PointerPressedEventArgs e)
+    {
+        e.Handled = true;
+        _isRevealed = !_isRevealed;
+        _toggleIcon.Text = _isRevealed ? EyeOpen : EyeClosed;
+        UpdateDisplay();
+        Focus();
+    }
+
     private void UpdateDisplay()
     {
         if (_charCount == 0 && !string.IsNullOrEmpty(Watermark))
         {
             _displayText.Text = Watermark;
             _displayText.Foreground = WatermarkBrush;
+        }
+        else if (_isRevealed && _length > 0)
+        {
+            _displayText.Text = Encoding.UTF8.GetString(_buffer, 0, _length);
+            _displayText.Foreground = TextBrush;
         }
         else
         {

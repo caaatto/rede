@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=REDE
+GenericName=Secure Messenger
+Comment=Secure, anonymous E2EE messenger
+Exec=REDE %u
+Icon=rede
+Terminal=false
+Type=Application
+Categories=Network;Chat;InstantMessaging;
+Keywords=messenger;encrypted;e2ee;secure;anonymous;
+StartupWMClass=Rede.Desktop
+MimeType=x-scheme-handler/rede;
