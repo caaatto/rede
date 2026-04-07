@@ -1210,37 +1210,33 @@ public partial class MainView : UserControl
 
         var menu = new ContextMenu();
 
-        // React (quick emoji row)
+        // React (quick emoji row as horizontal panel)
         if (msg.MsgId is not null)
         {
             var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
-            var emojiPanel = new WrapPanel { Orientation = Orientation.Horizontal };
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 2) };
             foreach (var emoji in emojis)
             {
-                var btn = new Button
+                var capturedEmoji = emoji;
+                var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
+                var isOwn = existing is not null && existing.IsOwn;
+                var emojiBtn = new Border
                 {
-                    Content = emoji,
-                    FontSize = 18,
-                    Padding = new Thickness(4, 2),
-                    MinWidth = 0,
-                    MinHeight = 0,
-                    Background = Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
+                    Child = new TextBlock { Text = emoji, FontSize = 18, VerticalAlignment = VerticalAlignment.Center },
+                    Padding = new Thickness(5, 3),
+                    CornerRadius = new CornerRadius(4),
+                    Background = isOwn ? Brush.Parse("#2a2a3a") : Brushes.Transparent,
                     Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
                 };
-                var capturedEmoji = emoji;
-                btn.Click += (_, _) =>
+                emojiBtn.PointerReleased += (_, ev) =>
                 {
-                    // Toggle: remove if already reacted, add otherwise
-                    var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
-                    var add = existing is null || !existing.IsOwn;
-                    vm.RequestReaction(msg.MsgId, capturedEmoji, add);
+                    vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
                     menu.Close();
+                    ev.Handled = true;
                 };
-                emojiPanel.Children.Add(btn);
+                panel.Children.Add(emojiBtn);
             }
-            var reactItem = new MenuItem { Header = emojiPanel, Padding = new Thickness(4, 2) };
-            menu.Items.Add(reactItem);
+            menu.Items.Add(panel);
             menu.Items.Add(new Separator());
         }
 

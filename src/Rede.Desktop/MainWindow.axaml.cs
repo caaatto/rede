@@ -1283,6 +1283,8 @@ public partial class MainWindow : Window
         {
             if (_mainVm.SelectedConversation is ChannelItemViewModel ch)
                 _places?.SendReaction(ch.PlaceId, ch.ChannelId, msgId, emoji, add);
+            else if (_mainVm.SelectedConversation is GroupItemViewModel gr)
+                _groups?.SendReaction(gr.GroupId, msgId, emoji, add);
         };
     }
 

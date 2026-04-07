@@ -211,16 +211,29 @@ public class GroupService : IDisposable
 
         _conn.Send(Msg.GroupMessage, payload);
 
-        // Persist own group message (debounced)
-        var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        _store.AddChatMessage(Profile, groupId, new ChatMessage
+        // Persist own group message (skip control messages)
+        if (!text.Contains("\"__rede_ctrl\""))
         {
-            From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
-        }, Passphrase);
-        OnGroupMessageSent?.Invoke(groupId, text, ttl);
+            var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _store.AddChatMessage(Profile, groupId, new ChatMessage
+            {
+                From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
+            }, Passphrase);
+            OnGroupMessageSent?.Invoke(groupId, text, ttl);
+        }
     }
 
     public IReadOnlyDictionary<string, Group>? GetGroups() => Profile?.Groups;
+
+    public void SendReaction(string groupId, string msgId, string emoji, bool add)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var controlText = MessageEnvelope.EncodeReaction(msgId, emoji, add);
+        // Reuse SendGroupMessage which handles Sender Keys encryption + GROUP_MESSAGE send.
+        // Control messages are filtered from chat history by the __rede_ctrl check.
+        SendGroupMessage(groupId, controlText);
+        ApplyReaction(groupId, msgId, emoji, Profile.UserId, add);
+    }
 
     // --- Handlers ---
 
