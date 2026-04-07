@@ -21,18 +21,22 @@ public partial class MainView : UserControl
     }
 
     private NotifyCollectionChangedEventHandler? _scrollHandler;
+    private bool _isAtBottom = true;
 
     protected override void OnLoaded(Avalonia.Interactivity.RoutedEventArgs e)
     {
         base.OnLoaded(e);
 
-        // Auto-scroll when new messages arrive
+        // Track scroll position for "Newest Messages" button
+        MessageScroller.ScrollChanged += OnMessageScrollChanged;
+
+        // Auto-scroll when new messages arrive (only if already at bottom)
         if (DataContext is MainViewModel vm)
         {
             // M4: Store handler reference for cleanup in OnUnloaded
             _scrollHandler = (_, args) =>
             {
-                if (args.Action == NotifyCollectionChangedAction.Add)
+                if (args.Action == NotifyCollectionChangedAction.Add && _isAtBottom)
                 {
                     // Post to dispatcher so layout completes before we scroll
                     Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -48,12 +52,26 @@ public partial class MainView : UserControl
     protected override void OnUnloaded(Avalonia.Interactivity.RoutedEventArgs e)
     {
         base.OnUnloaded(e);
+        MessageScroller.ScrollChanged -= OnMessageScrollChanged;
         // M4: Unsubscribe to prevent memory leak
         if (DataContext is MainViewModel vm && _scrollHandler is not null)
         {
             vm.Messages.CollectionChanged -= _scrollHandler;
             _scrollHandler = null;
         }
+    }
+
+    private void OnMessageScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        var sv = MessageScroller;
+        // Consider "at bottom" if within 50px of the end
+        _isAtBottom = sv.Offset.Y >= sv.Extent.Height - sv.Viewport.Height - 50;
+        NewestMessagesBtn.IsVisible = !_isAtBottom;
+    }
+
+    private void NewestMessagesBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        MessageScroller.ScrollToEnd();
     }
 
     public event Action? OnRetryConnection;
@@ -1191,6 +1209,40 @@ public partial class MainView : UserControl
         if (msg.IsSystem || msg.IsSecurityAlert || msg.IsDeleted) return;
 
         var menu = new ContextMenu();
+
+        // React (quick emoji row)
+        if (msg.MsgId is not null)
+        {
+            var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
+            var emojiPanel = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var emoji in emojis)
+            {
+                var btn = new Button
+                {
+                    Content = emoji,
+                    FontSize = 18,
+                    Padding = new Thickness(4, 2),
+                    MinWidth = 0,
+                    MinHeight = 0,
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                };
+                var capturedEmoji = emoji;
+                btn.Click += (_, _) =>
+                {
+                    // Toggle: remove if already reacted, add otherwise
+                    var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
+                    var add = existing is null || !existing.IsOwn;
+                    vm.RequestReaction(msg.MsgId, capturedEmoji, add);
+                    menu.Close();
+                };
+                emojiPanel.Children.Add(btn);
+            }
+            var reactItem = new MenuItem { Header = emojiPanel, Padding = new Thickness(4, 2) };
+            menu.Items.Add(reactItem);
+            menu.Items.Add(new Separator());
+        }
 
         // Copy message text
         if (!string.IsNullOrEmpty(msg.Text))

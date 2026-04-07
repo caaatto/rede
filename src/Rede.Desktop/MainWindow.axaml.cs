@@ -440,6 +440,7 @@ public partial class MainWindow : Window
             }
 
             PropagateProfile();
+            BroadcastOwnProfile();
         }
         catch (Exception ex)
         {
@@ -603,6 +604,7 @@ public partial class MainWindow : Window
             }
 
             PropagateProfile();
+            BroadcastOwnProfile();
         }
         catch (Exception ex)
         {
@@ -893,11 +895,16 @@ public partial class MainWindow : Window
         };
 
         // Contact events
-        _contacts.OnContactAdded += (userId, displayName, fp) => Dispatcher.UIThread.Post(() =>
+        _contacts.OnContactAdded += (userId, displayName, fp) =>
         {
-            _mainVm.AddSystemMessage($"Contact added: {displayName} ({fp})");
-            RefreshContacts();
-        });
+            // Send own profile to the new contact so they get our avatar/accent
+            SendProfileToContact(userId);
+            Dispatcher.UIThread.Post(() =>
+            {
+                _mainVm.AddSystemMessage($"Contact added: {displayName} ({fp})");
+                RefreshContacts();
+            });
+        };
 
         _contacts.OnKeyChangeWarning += (userId, oldFp, newFp) => Dispatcher.UIThread.Post(() =>
         {
@@ -1114,6 +1121,24 @@ public partial class MainWindow : Window
         });
     }
 
+    /// <summary>Broadcast own profile (avatar, accent) to all contacts on login.</summary>
+    private void BroadcastOwnProfile()
+    {
+        var p = _auth?.Profile;
+        if (p is null || _chat is null) return;
+        if (p.AccentColor is null && p.AvatarData is null) return;
+        _chat.BroadcastProfile(p.AccentColor, p.AvatarData, p.AvatarMimeType);
+    }
+
+    /// <summary>Send own profile to a single contact.</summary>
+    private void SendProfileToContact(string contactId)
+    {
+        var p = _auth?.Profile;
+        if (p is null || _chat is null) return;
+        if (p.AccentColor is null && p.AvatarData is null) return;
+        _chat.SendProfileTo(contactId, p.AccentColor, p.AvatarData, p.AvatarMimeType);
+    }
+
     // The color used for contacts / places / own profile when no per-entity
     // accent is set. Follows the user's profile accent so changing it in
     // Settings recolors every "default" avatar in the sidebar.
@@ -1252,6 +1277,12 @@ public partial class MainWindow : Window
         {
             if (_mainVm.SelectedConversation is ChannelItemViewModel ch)
                 _places?.PinMessage(ch.PlaceId, ch.ChannelId, msgId, preview, author, _chat);
+        };
+
+        _mainVm.OnReactionSend += (msgId, emoji, add) =>
+        {
+            if (_mainVm.SelectedConversation is ChannelItemViewModel ch)
+                _places?.SendReaction(ch.PlaceId, ch.ChannelId, msgId, emoji, add);
         };
     }
 

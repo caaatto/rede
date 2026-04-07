@@ -335,6 +335,9 @@ public partial class MainViewModel : ViewModelBase
     public void RequestDelete(string msgId) => OnMessageDelete?.Invoke(msgId);
     public void RequestAttach(string[] paths) => OnAttachFiles?.Invoke(paths);
 
+    public event Action<string, string, bool>? OnReactionSend; // msgId, emoji, add
+    public void RequestReaction(string msgId, string emoji, bool add) => OnReactionSend?.Invoke(msgId, emoji, add);
+
     public event Action<string, string, string>? OnPinMessage; // msgId, preview, author
     public void RequestPin(string msgId, string preview, string author) => OnPinMessage?.Invoke(msgId, preview, author);
     public event Action<string, string[]>? OnCommandExecuted;

@@ -483,6 +483,7 @@
             </StackPanel>
 
             <!-- Messages area -->
+            <Panel>
             <ScrollViewer VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           x:Name="MessageScroller">
@@ -786,6 +787,24 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+
+            <!-- "Newest Messages" scroll-to-bottom button -->
+            <Button x:Name="NewestMessagesBtn"
+                    IsVisible="False"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,12"
+                    Padding="14,7"
+                    Background="{DynamicResource RedeAccentBrush}"
+                    Foreground="#ffffff"
+                    CornerRadius="14"
+                    FontSize="{StaticResource RedeSmallSize}"
+                    FontWeight="{StaticResource RedeWeightSemiBold}"
+                    Cursor="Hand"
+                    Click="NewestMessagesBtn_Click">
+                <TextBlock Text="Newest Messages" />
+            </Button>
+            </Panel>
 
         </DockPanel>
 

@@ -76,12 +76,34 @@ public class ChatService : IDisposable
     {
         if (Profile is null || Passphrase is null) return;
 
-        // M12: Validate avatar size before broadcasting to all contacts
-        if (avatarData is not null && avatarData.Length > 350_000) // ~256KB decoded = ~350KB base64
+        var text = BuildProfilePayload(accentColor, avatarData, avatarMimeType);
+        if (text is null) return;
+
+        // Send to all contacts in background — avoids blocking UI with many contacts
+        var contactIds = Profile.Contacts.Keys.ToList();
+        Task.Run(() =>
         {
-            OnSystemMessage?.Invoke("Avatar too large to broadcast.");
-            return;
-        }
+            foreach (var contactId in contactIds)
+                SendMessage(contactId, text, 0);
+        });
+    }
+
+    /// <summary>Send own profile to a single contact (e.g. after adding them).</summary>
+    public void SendProfileTo(string contactId, string? accentColor, string? avatarData, string? avatarMimeType)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        var text = BuildProfilePayload(accentColor, avatarData, avatarMimeType);
+        if (text is null) return;
+
+        Task.Run(() => SendMessage(contactId, text, 0));
+    }
+
+    private static string? BuildProfilePayload(string? accentColor, string? avatarData, string? avatarMimeType)
+    {
+        // M12: Validate avatar size before broadcasting
+        if (avatarData is not null && avatarData.Length > 350_000) // ~256KB decoded = ~350KB base64
+            return null;
 
         var payload = new System.Text.Json.Nodes.JsonObject
         {
@@ -91,14 +113,7 @@ public class ChatService : IDisposable
         if (avatarData is not null) payload["avatarData"] = avatarData;
         if (avatarMimeType is not null) payload["avatarMimeType"] = avatarMimeType;
 
-        var text = payload.ToJsonString();
-        // Send to all contacts in background — avoids blocking UI with many contacts
-        var contactIds = Profile.Contacts.Keys.ToList();
-        Task.Run(() =>
-        {
-            foreach (var contactId in contactIds)
-                SendMessage(contactId, text, 0);
-        });
+        return payload.ToJsonString();
     }
 
     public void SendMessage(string targetId, string text, int ttl = 0)
