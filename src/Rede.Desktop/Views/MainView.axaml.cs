@@ -1214,24 +1214,56 @@ public partial class MainView : UserControl
         var fg = Brush.Parse("#e0e0e8");
         var dim = Brush.Parse("#6b7280");
 
-        // — Reactions (individual menu items per emoji) —
+        // — Reactions: top 5 quick + expandable categories —
         if (msg.MsgId is not null)
         {
-            var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
-            foreach (var emoji in emojis)
+            var quickEmojis = new[] { "👍", "❤️", "😂", "🔥", "👀" };
+            foreach (var emoji in quickEmojis)
             {
                 var capturedEmoji = emoji;
                 var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
                 var isOwn = existing is not null && existing.IsOwn;
                 var item = new MenuItem
                 {
-                    Header = isOwn ? $"{emoji} (remove)" : emoji,
+                    Header = isOwn ? $"{emoji} ✕" : emoji,
                     Foreground = fg,
                     FontSize = 18,
                 };
                 item.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
                 menu.Items.Add(item);
             }
+
+            var categories = new (string Name, string[] Emojis)[]
+            {
+                ("😀 Smileys", new[] { "😀", "😁", "😅", "🤣", "😊", "😇", "😍", "🥰", "😘", "😎", "🤩", "🤔", "🤨", "😏", "🙄", "😬", "😢", "😭", "😤", "😡", "🥺", "😱", "🤯", "😴", "🤮", "🥳", "😈", "🤡" }),
+                ("👋 Gestures", new[] { "👍", "👎", "👏", "🙌", "🤝", "🙏", "💪", "✌️", "🤞", "👌", "✋", "👋", "🤙", "✊", "👊", "☝️", "🫡", "🫶" }),
+                ("❤️ Hearts", new[] { "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💔", "❣️", "💕", "💖", "💝" }),
+                ("⭐ Symbols", new[] { "✨", "⭐", "💯", "💥", "💫", "💤", "💬", "👀", "✅", "❌", "⚠️", "🚀", "🎉", "🏆", "💎", "🔔", "📌", "🎯", "🔥", "💀", "☠️", "🤖", "👽", "👻", "💩" }),
+                ("🐾 Animals", new[] { "🐶", "🐱", "🐭", "🐰", "🦊", "🐻", "🐼", "🐸", "🐵", "🙈", "🙉", "🙊", "🐧", "🦄", "🐍", "🦋", "🐝", "🐢" }),
+                ("🍕 Food", new[] { "🍎", "🍕", "🍔", "🌮", "🍟", "🍿", "🍩", "🍪", "🎂", "🍰", "☕", "🍺", "🍷", "🧃", "🍫" }),
+            };
+
+            var moreItem = new MenuItem { Header = "More…", Foreground = dim };
+            foreach (var (catName, catEmojis) in categories)
+            {
+                var catItem = new MenuItem { Header = catName, Foreground = fg };
+                foreach (var emoji in catEmojis)
+                {
+                    var capturedEmoji = emoji;
+                    var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
+                    var isOwn = existing is not null && existing.IsOwn;
+                    var emojiItem = new MenuItem
+                    {
+                        Header = isOwn ? $"{emoji} ✕" : emoji,
+                        Foreground = fg,
+                        FontSize = 18,
+                    };
+                    emojiItem.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
+                    catItem.Items.Add(emojiItem);
+                }
+                moreItem.Items.Add(catItem);
+            }
+            menu.Items.Add(moreItem);
             menu.Items.Add(new Separator());
         }
 
