@@ -2429,9 +2429,33 @@ public partial class MainWindow : Window
 
                 using var http = new HttpClient();
                 http.Timeout = TimeSpan.FromSeconds(60);
-                // Download from the latest release
-                var url = $"https://github.com/caaatto/rede/releases/latest/download/{libFile}";
-                var bytes = await http.GetByteArrayAsync(url);
+                // GitHub's /latest/ only considers non-prerelease — use API to find actual latest
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("REDE-Updater");
+                var apiUrl = "https://api.github.com/repos/caaatto/rede/releases";
+                var releasesJson = await http.GetStringAsync(apiUrl);
+                string? downloadUrl = null;
+                using (var doc = System.Text.Json.JsonDocument.Parse(releasesJson))
+                {
+                    foreach (var release in doc.RootElement.EnumerateArray())
+                    {
+                        if (release.TryGetProperty("assets", out var assets))
+                        {
+                            foreach (var asset in assets.EnumerateArray())
+                            {
+                                if (asset.GetProperty("name").GetString() == libFile &&
+                                    asset.TryGetProperty("browser_download_url", out var urlProp))
+                                {
+                                    downloadUrl = urlProp.GetString();
+                                    break;
+                                }
+                            }
+                        }
+                        if (downloadUrl is not null) break;
+                    }
+                }
+                if (downloadUrl is null)
+                    throw new Exception($"{libFile} not found in any GitHub release — upload it with the next release");
+                var bytes = await http.GetByteArrayAsync(downloadUrl);
                 await File.WriteAllBytesAsync(destPath, bytes);
 
                 Rede.Core.Audio.RNNoise.TryReload();

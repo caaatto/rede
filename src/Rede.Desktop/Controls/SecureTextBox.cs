@@ -77,7 +77,13 @@ public class SecureTextBox : Border
     {
         base.OnPropertyChanged(change);
         if (change.Property == IsInputEnabledProperty)
-            Opacity = IsInputEnabled ? 1.0 : 0.4;
+        {
+            // Opacity alone is invisible on near-black backgrounds — dim the
+            // inner content (text + toggle icon) so the change is obvious.
+            if (Child is DockPanel panel)
+                panel.Opacity = IsInputEnabled ? 1.0 : 0.3;
+            BorderBrush = IsInputEnabled ? IdleBorder : new SolidColorBrush(Color.Parse("#18182a"));
+        }
     }
 
     /// <summary>Raised when the user presses Enter while focused.</summary>

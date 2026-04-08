@@ -1214,35 +1214,26 @@ public partial class MainView : UserControl
         var fg = Brush.Parse("#e0e0e8");
         var dim = Brush.Parse("#6b7280");
 
-        // — Add Reaction (emoji row) —
+        // — Add Reaction (submenu with emoji choices) —
         if (msg.MsgId is not null)
         {
             var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
-            var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+            var reactItem = new MenuItem { Header = "Add Reaction", Foreground = fg };
             foreach (var emoji in emojis)
             {
                 var capturedEmoji = emoji;
                 var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
                 var isOwn = existing is not null && existing.IsOwn;
-                var emojiBtn = new Button
+                var sub = new MenuItem
                 {
-                    Content = new TextBlock { Text = emoji, FontSize = 18 },
-                    Padding = new Thickness(4, 2),
-                    MinWidth = 0,
-                    MinHeight = 0,
-                    Background = isOwn ? Brush.Parse("#2a2a3a") : Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
-                    Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                    Header = isOwn ? $"{capturedEmoji}  (remove)" : capturedEmoji,
+                    Foreground = fg,
+                    FontSize = 18,
                 };
-                emojiBtn.Click += (_, _) =>
-                {
-                    vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
-                    menu.Close();
-                };
-                panel.Children.Add(emojiBtn);
+                sub.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
+                reactItem.Items.Add(sub);
             }
-            var emojiItem = new MenuItem { Header = panel, Padding = new Thickness(0) };
-            menu.Items.Add(emojiItem);
+            menu.Items.Add(reactItem);
             menu.Items.Add(new Separator());
         }
 
