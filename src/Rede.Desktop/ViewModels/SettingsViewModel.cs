@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -263,6 +264,8 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private double _noiseGateThreshold = -60;  // dB: -100 to 0
     [ObservableProperty] private bool _noiseSuppression;
     [ObservableProperty] private bool _isNoiseSuppressionAvailable;
+    [ObservableProperty] private bool _isRnnoiseInstalling;
+    [ObservableProperty] private string _rnnoiseInstallStatus = "";
     [ObservableProperty] private bool _autoInputSensitivity = true;
     [ObservableProperty] private bool _autoGainControl;
     [ObservableProperty] private bool _echoCancellation = true;
@@ -273,7 +276,14 @@ public partial class SettingsViewModel : ViewModelBase
     public string NoiseGateText => AutoInputSensitivity ? "Auto" : $"{(int)NoiseGateThreshold} dB";
     public string NoiseSuppressionStatus => IsNoiseSuppressionAvailable
         ? "RNNoise - removes background noise from your mic"
-        : "Not installed. Run scripts/install-rnnoise.sh (Linux) or install-rnnoise.ps1 (Windows)";
+        : "Not installed";
+
+    public bool ShowRnnoiseInstall => !IsNoiseSuppressionAvailable && !IsRnnoiseInstalling;
+
+    partial void OnIsNoiseSuppressionAvailableChanged(bool value) => OnPropertyChanged(nameof(ShowRnnoiseInstall));
+    partial void OnIsRnnoiseInstallingChanged(bool value) => OnPropertyChanged(nameof(ShowRnnoiseInstall));
+
+    public Func<Task>? OnInstallRnnoise;
 
     public event Action? OnBackRequested;
     public event Action? OnAudioSettingsChanged;

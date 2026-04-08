@@ -89,6 +89,12 @@ public partial class SettingsView : UserControl
         }
     }
 
+    private async void InstallRnnoise_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is SettingsViewModel vm && vm.OnInstallRnnoise is not null)
+            await vm.OnInstallRnnoise.Invoke();
+    }
+
     private async void ChangePassphrase_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not SettingsViewModel vm) return;

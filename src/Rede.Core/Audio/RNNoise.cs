@@ -31,27 +31,33 @@ public sealed class RNNoise : IDisposable
 
     /// <summary>
     /// True if RNNoise native library was loaded successfully.
+    /// Updated by TryReload() after runtime install.
     /// </summary>
-    public static bool IsAvailable { get; }
+    public static bool IsAvailable { get; private set; }
+
+    /// <summary>
+    /// Path where RNNoise native libs should be installed (~/.rede/libs/).
+    /// </summary>
+    public static string LibsDirectory { get; } =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".rede", "libs");
+
+    /// <summary>
+    /// Expected filename for the current platform.
+    /// </summary>
+    public static string LibFileName { get; } =
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "rnnoise.dll" : "librnnoise.so";
 
     static RNNoise()
     {
-        // Register a custom resolver so .NET can find the lib in runtimes/{RID}/native/
-        // even when the default probing paths don't cover it (e.g. single-file publish).
         NativeLibrary.SetDllImportResolver(typeof(RNNoise).Assembly, (name, asm, searchPath) =>
         {
             if (name != LibName) return IntPtr.Zero;
-            // Try default resolution first (covers system-installed libs)
             if (NativeLibrary.TryLoad(name, asm, searchPath, out var handle))
                 return handle;
-            var isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-            var libFile = isWin ? "rnnoise.dll" : "librnnoise.so";
-            var redeDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".rede", "libs");
-            var baseDir = AppContext.BaseDirectory;
             var candidates = new[]
             {
-                Path.Combine(redeDir, libFile),       // ~/.rede/libs/ (installed by rnnoise installer)
-                Path.Combine(baseDir, libFile),       // next to the exe (dev builds)
+                Path.Combine(LibsDirectory, LibFileName),  // ~/.rede/libs/
+                Path.Combine(AppContext.BaseDirectory, LibFileName),  // next to exe
             };
             foreach (var path in candidates)
             {
@@ -61,6 +67,22 @@ public sealed class RNNoise : IDisposable
             return IntPtr.Zero;
         });
 
+        ProbeAvailability();
+    }
+
+    /// <summary>
+    /// Re-probe after installing the native library at runtime.
+    /// </summary>
+    public static void TryReload()
+    {
+        if (IsAvailable) return;
+        var libPath = Path.Combine(LibsDirectory, LibFileName);
+        if (!File.Exists(libPath)) return;
+        ProbeAvailability();
+    }
+
+    private static void ProbeAvailability()
+    {
         try
         {
             var state = rnnoise_create(IntPtr.Zero);

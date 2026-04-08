@@ -380,7 +380,22 @@
                                               VerticalAlignment="Center" />
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="Noise Suppression" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding NoiseSuppressionStatus}" Classes="secondary" FontSize="11" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding NoiseSuppressionStatus}" Classes="secondary" FontSize="11"
+                                                   VerticalAlignment="Center" />
+                                        <Button Content="Install RNNoise"
+                                                IsVisible="{Binding ShowRnnoiseInstall}"
+                                                Click="InstallRnnoise_Click"
+                                                FontSize="11" Padding="8,3"
+                                                Foreground="{DynamicResource RedeAccentBrush}"
+                                                Background="{DynamicResource RedeSurfaceBrush}"
+                                                CornerRadius="4" />
+                                        <TextBlock Text="{Binding RnnoiseInstallStatus}"
+                                                   IsVisible="{Binding IsRnnoiseInstalling}"
+                                                   Classes="secondary" FontSize="11"
+                                                   Foreground="{DynamicResource RedeAccentBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
 

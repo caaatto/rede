@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -2413,6 +2415,45 @@ public partial class MainWindow : Window
             vm.IsNoiseSuppressionAvailable = Rede.Core.Audio.AudioEngine.IsNoiseSuppressionAvailable;
         }
         catch { /* PortAudio not available */ }
+
+        vm.OnInstallRnnoise += async () =>
+        {
+            vm.IsRnnoiseInstalling = true;
+            vm.RnnoiseInstallStatus = "Downloading...";
+            try
+            {
+                var libsDir = Rede.Core.Audio.RNNoise.LibsDirectory;
+                Directory.CreateDirectory(libsDir);
+                var libFile = Rede.Core.Audio.RNNoise.LibFileName;
+                var destPath = Path.Combine(libsDir, libFile);
+
+                using var http = new HttpClient();
+                http.Timeout = TimeSpan.FromSeconds(60);
+                // Download from the latest release
+                var url = $"https://github.com/caaatto/rede/releases/latest/download/{libFile}";
+                var bytes = await http.GetByteArrayAsync(url);
+                await File.WriteAllBytesAsync(destPath, bytes);
+
+                Rede.Core.Audio.RNNoise.TryReload();
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    vm.IsNoiseSuppressionAvailable = Rede.Core.Audio.RNNoise.IsAvailable;
+                    vm.IsRnnoiseInstalling = false;
+                    vm.RnnoiseInstallStatus = Rede.Core.Audio.RNNoise.IsAvailable
+                        ? "Installed!"
+                        : "Downloaded but failed to load";
+                });
+            }
+            catch (Exception ex)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    vm.IsRnnoiseInstalling = false;
+                    vm.RnnoiseInstallStatus = $"Failed: {ex.Message}";
+                });
+            }
+        };
 
         // Cache device list to avoid re-enumerating on every slider change
         var cachedDevices = Rede.Core.Audio.AudioEngine.GetDevices();
