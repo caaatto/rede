@@ -13,11 +13,8 @@
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
   </ItemGroup>
 
-  <!-- RNNoise native libraries — excluded from single-file so they sit next to the exe.
-       Both platforms included; the resolver picks the right one at runtime. -->
-  <ItemGroup>
-    <Content Include="runtimes\linux-x64\native\librnnoise.so" Link="librnnoise.so" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <Content Include="runtimes\win-x64\native\rnnoise.dll" Link="rnnoise.dll" Condition="Exists('runtimes\win-x64\native\rnnoise.dll')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-  </ItemGroup>
+  <!-- RNNoise native libraries are NOT bundled with the app.
+       Users install them separately via scripts/install-rnnoise.sh or .ps1
+       which places them in ~/.rede/libs/. The resolver probes that path at runtime. -->
 
 </Project>

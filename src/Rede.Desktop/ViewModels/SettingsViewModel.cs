@@ -273,7 +273,7 @@ public partial class SettingsViewModel : ViewModelBase
     public string NoiseGateText => AutoInputSensitivity ? "Auto" : $"{(int)NoiseGateThreshold} dB";
     public string NoiseSuppressionStatus => IsNoiseSuppressionAvailable
         ? "RNNoise - removes background noise from your mic"
-        : "RNNoise unavailable on this platform";
+        : "Not installed. Run scripts/install-rnnoise.sh (Linux) or install-rnnoise.ps1 (Windows)";
 
     public event Action? OnBackRequested;
     public event Action? OnAudioSettingsChanged;

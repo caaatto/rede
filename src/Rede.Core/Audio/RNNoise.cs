@@ -41,30 +41,23 @@ public sealed class RNNoise : IDisposable
         NativeLibrary.SetDllImportResolver(typeof(RNNoise).Assembly, (name, asm, searchPath) =>
         {
             if (name != LibName) return IntPtr.Zero;
-            // Try default resolution first
+            // Try default resolution first (covers system-installed libs)
             if (NativeLibrary.TryLoad(name, asm, searchPath, out var handle))
                 return handle;
-            // Build candidate paths — single-file publish extracts native libs to AppContext.BaseDirectory
-            var baseDir = AppContext.BaseDirectory;
-            var asmDir = string.IsNullOrEmpty(asm.Location) ? baseDir : (Path.GetDirectoryName(asm.Location) ?? baseDir);
             var isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-            var rid = isWin ? "win-x64" : "linux-x64";
             var libFile = isWin ? "rnnoise.dll" : "librnnoise.so";
+            var redeDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".rede", "libs");
+            var baseDir = AppContext.BaseDirectory;
             var candidates = new[]
             {
-                Path.Combine(baseDir, libFile),
-                Path.Combine(baseDir, "runtimes", rid, "native", libFile),
-                Path.Combine(asmDir, "runtimes", rid, "native", libFile),
-                Path.Combine(asmDir, libFile),
+                Path.Combine(redeDir, libFile),       // ~/.rede/libs/ (installed by rnnoise installer)
+                Path.Combine(baseDir, libFile),       // next to the exe (dev builds)
             };
             foreach (var path in candidates)
             {
                 if (File.Exists(path) && NativeLibrary.TryLoad(path, out handle))
                     return handle;
             }
-            // Last resort: try the bare library name via OS search paths
-            if (NativeLibrary.TryLoad(libFile, out handle))
-                return handle;
             return IntPtr.Zero;
         });
 
