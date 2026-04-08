@@ -795,12 +795,12 @@ public partial class MainWindow : Window
         });
 
         // Chat events
-        _chat.OnMessageReceived += (from, text, chatId, ts, isSealed) => Dispatcher.UIThread.Post(() =>
+        _chat.OnMessageReceived += (from, text, chatId, ts, isSealed, msgId) => Dispatcher.UIThread.Post(() =>
         {
             // Only render in chat if the matching conversation is selected;
             // message is already persisted in chat history by the service layer
             if (_mainVm.SelectedConversation is ContactItemViewModel sel && sel.UserId == from)
-                _mainVm.AddIncomingMessage(from, text, ts);
+                _mainVm.AddIncomingMessage(from, text, ts, msgId: msgId);
             MarkContactUnread(from);
 
             // Desktop notification if not viewing this conversation
@@ -810,6 +810,27 @@ public partial class MainWindow : Window
                     ? c.DisplayName ?? from : from;
                 _notifications.ShowMessageNotification(displayName, text);
             }
+        });
+
+        _chat.OnOwnMessageIdAssigned += (contactId, msgId) => Dispatcher.UIThread.Post(() =>
+        {
+            if (_mainVm.SelectedConversation is ContactItemViewModel sel && sel.UserId == contactId)
+            {
+                for (int i = _mainVm.Messages.Count - 1; i >= 0; i--)
+                {
+                    if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
+                    {
+                        _mainVm.Messages[i].MsgId = msgId;
+                        break;
+                    }
+                }
+            }
+        });
+
+        _chat.OnReactionUpdated += (chatId, msgId, emoji, reactions) => Dispatcher.UIThread.Post(() =>
+        {
+            var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
+            msg?.UpdateReactions(reactions, _auth?.Profile?.UserId);
         });
 
         _chat.OnSystemMessage += msg => Dispatcher.UIThread.Post(() =>
@@ -1312,6 +1333,8 @@ public partial class MainWindow : Window
                 _places?.SendReaction(ch.PlaceId, ch.ChannelId, msgId, emoji, add);
             else if (_mainVm.SelectedConversation is GroupItemViewModel gr)
                 _groups?.SendReaction(gr.GroupId, msgId, emoji, add);
+            else if (_mainVm.SelectedConversation is ContactItemViewModel ct)
+                _chat?.SendReaction(ct.UserId, msgId, emoji, add);
         };
 
         _mainVm.OnForwardMessage += (targetId, text, isGroup) =>

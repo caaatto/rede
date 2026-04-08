@@ -39,9 +39,11 @@ public class ChatService : IDisposable
     // H7: Queue per target — multiple messages can be pending before bundle arrives
     private readonly Dictionary<string, List<(string Text, int Ttl)>> _pendingOutgoing = new();
 
-    public event Action<string, string, string, DateTime, bool>? OnMessageReceived; // from, text, chatId, timestamp, isSealed
+    public event Action<string, string, string, DateTime, bool, string?>? OnMessageReceived; // from, text, chatId, timestamp, isSealed, msgId
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
+    public event Action<string, string>? OnOwnMessageIdAssigned; // contactId, msgId
+    public event Action<string, string, string, Dictionary<string, List<string>>>? OnReactionUpdated; // chatId, msgId, emoji, reactions
     public event Action<string, string, string, string, string>? OnGroupKeyReceived; // groupId, name, key, sig, senderId
     public event Action<string, string, string, string>? OnPlaceKeyReceived; // placeId, metadataKey, encryptedMetadata, senderId
     public event Action<string, string?, string?, string?>? OnProfileReceived; // senderId, accentColor, avatarData, avatarMimeType
@@ -114,6 +116,49 @@ public class ChatService : IDisposable
         if (avatarMimeType is not null) payload["avatarMimeType"] = avatarMimeType;
 
         return payload.ToJsonString();
+    }
+
+    /// <summary>Send a reaction on a 1:1 message.</summary>
+    public void SendReaction(string contactId, string msgId, string emoji, bool add)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var controlText = MessageEnvelope.EncodeReaction(msgId, emoji, add);
+        SendMessage(contactId, controlText, 0);
+        ApplyReaction(contactId, msgId, emoji, Profile.UserId, add);
+    }
+
+    private void ApplyReaction(string chatKey, string msgId, string emoji, string userId, bool add)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.ChatHistory.TryGetValue(chatKey, out var messages)) return;
+
+        var target = messages.FirstOrDefault(m => m.MsgId == msgId);
+        if (target is null) return;
+
+        target.Reactions ??= new();
+
+        if (add)
+        {
+            if (!target.Reactions.TryGetValue(emoji, out var users))
+            {
+                users = new List<string>();
+                target.Reactions[emoji] = users;
+            }
+            if (!users.Contains(userId))
+                users.Add(userId);
+        }
+        else
+        {
+            if (target.Reactions.TryGetValue(emoji, out var users))
+            {
+                users.Remove(userId);
+                if (users.Count == 0)
+                    target.Reactions.Remove(emoji);
+            }
+        }
+
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnReactionUpdated?.Invoke(chatKey, msgId, emoji, target.Reactions);
     }
 
     public void SendMessage(string targetId, string text, int ttl = 0)
@@ -285,20 +330,21 @@ public class ChatService : IDisposable
         var plaintext = ReceiveRatcheted(msg, from);
         if (plaintext is null) return;
 
-        // Check for control messages (group key distribution)
+        // Check for control messages (group key distribution, reactions)
         if (TryHandleControlMessage(plaintext, from)) return;
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var ttl = ProtocolSerializer.GetInt(msg, "ttl");
+        var msgId = ProtocolSerializer.GetString(msg, "msgId");
 
         // Store chat history (debounced)
         _store.AddChatMessage(Profile, from, new ChatMessage
         {
-            From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"), Ttl = ttl,
+            From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"), Ttl = ttl, MsgId = msgId,
         }, Passphrase);
 
-        OnMessageReceived?.Invoke(from, sanitized, from, ts, false);
+        OnMessageReceived?.Invoke(from, sanitized, from, ts, false, msgId);
     }
 
     private void HandleSealedMessage(JsonObject msg)
@@ -337,18 +383,19 @@ public class ChatService : IDisposable
         var plaintext = ReceiveRatcheted(innerObj, from);
         if (plaintext is null) return;
 
-        // Check for control messages (group key distribution)
+        // Check for control messages (group key distribution, reactions)
         if (TryHandleControlMessage(plaintext, from)) return;
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTime.Now;
+        var msgId = ProtocolSerializer.GetString(innerObj, "msgId");
 
         _store.AddChatMessage(Profile, from, new ChatMessage
         {
-            From = from, Text = sanitized, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = 0,
+            From = from, Text = sanitized, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = 0, MsgId = msgId,
         }, Passphrase);
 
-        OnMessageReceived?.Invoke(from, sanitized, from, ts, true);
+        OnMessageReceived?.Invoke(from, sanitized, from, ts, true, msgId);
     }
 
     private string? ReceiveRatcheted(JsonObject msg, string from)
@@ -532,7 +579,27 @@ public class ChatService : IDisposable
         return plaintext;
     }
 
-    private void HandleMessageAck(JsonObject msg) { /* delivery confirmation */ }
+    private void HandleMessageAck(JsonObject msg)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var msgId = ProtocolSerializer.GetString(msg, "msgId");
+        var to = ProtocolSerializer.GetString(msg, "to");
+        if (msgId is null || to is null) return;
+
+        // Assign msgId to the most recent own message without one
+        if (Profile.ChatHistory.TryGetValue(to, out var history) && history.Count > 0)
+        {
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                if (history[i].From == Profile.UserId && history[i].MsgId is null)
+                {
+                    history[i].MsgId = msgId;
+                    break;
+                }
+            }
+        }
+        OnOwnMessageIdAssigned?.Invoke(to, msgId);
+    }
     private void HandleSealedMessageAck(JsonObject msg) { /* sealed delivery confirmation */ }
 
     private void HandlePrekeyBundle(JsonObject msg)
@@ -783,6 +850,19 @@ public class ChatService : IDisposable
                 if (placeId is not null && metadataKey is not null && encryptedMetadata is not null)
                 {
                     OnPlaceKeyReceived?.Invoke(placeId, metadataKey, encryptedMetadata, from);
+                    return true;
+                }
+            }
+
+            if (ctrl.GetString() == "reaction")
+            {
+                var msgId = root.TryGetProperty("mid", out var mid) ? mid.GetString() : null;
+                var emoji = root.TryGetProperty("emoji", out var em) ? em.GetString() : null;
+                var action = root.TryGetProperty("action", out var act) ? act.GetString() : null;
+                if (msgId is not null && emoji is not null)
+                {
+                    if (emoji.Length > 32) emoji = emoji[..32];
+                    ApplyReaction(from, msgId, emoji, from, action == "add");
                     return true;
                 }
             }
