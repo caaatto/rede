@@ -36,17 +36,17 @@ public partial class LoginView : UserControl
 
     private void OnQuickLoginClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is LoginViewModel vm) DoQuickLogin(vm);
+        if (DataContext is LoginViewModel vm && !vm.IsLoading) DoQuickLogin(vm);
     }
 
     private void OnLoginClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is LoginViewModel vm) DoLogin(vm);
+        if (DataContext is LoginViewModel vm && !vm.IsLoading) DoLogin(vm);
     }
 
     private void OnRegisterClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is LoginViewModel vm) DoRegister(vm);
+        if (DataContext is LoginViewModel vm && !vm.IsLoading) DoRegister(vm);
     }
 
     private void DoQuickLogin(LoginViewModel vm)

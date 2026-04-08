@@ -73,6 +73,13 @@ public class SecureTextBox : Border
         set => SetValue(IsInputEnabledProperty, value);
     }
 
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == IsInputEnabledProperty)
+            Opacity = IsInputEnabled ? 1.0 : 0.4;
+    }
+
     /// <summary>Raised when the user presses Enter while focused.</summary>
     public event EventHandler? EnterPressed;
 
