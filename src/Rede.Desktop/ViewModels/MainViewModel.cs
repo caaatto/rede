@@ -340,6 +340,10 @@ public partial class MainViewModel : ViewModelBase
 
     public event Action<string, string, string>? OnPinMessage; // msgId, preview, author
     public void RequestPin(string msgId, string preview, string author) => OnPinMessage?.Invoke(msgId, preview, author);
+
+    public event Action<string, string, bool>? OnForwardMessage; // targetId, text, isGroup
+    public void RequestForward(string targetId, string text, bool isGroup) => OnForwardMessage?.Invoke(targetId, text, isGroup);
+
     public event Action<string, string[]>? OnCommandExecuted;
     public event Action<string>? OnChatHistoryRequested;
     public event Action<string>? OnMemberListRequested;

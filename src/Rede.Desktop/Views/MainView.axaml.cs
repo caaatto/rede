@@ -9,6 +9,8 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
+using Rede.Desktop.Controls;
 using Rede.Desktop.ViewModels;
 
 namespace Rede.Desktop.Views;
@@ -1209,8 +1211,10 @@ public partial class MainView : UserControl
         if (msg.IsSystem || msg.IsSecurityAlert || msg.IsDeleted) return;
 
         var menu = new ContextMenu();
+        var fg = Brush.Parse("#e0e0e8");
+        var dim = Brush.Parse("#6b7280");
 
-        // React (quick emoji row as horizontal panel)
+        // — Add Reaction (emoji row) —
         if (msg.MsgId is not null)
         {
             var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
@@ -1228,7 +1232,7 @@ public partial class MainView : UserControl
                     Background = isOwn ? Brush.Parse("#2a2a3a") : Brushes.Transparent,
                     Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
                 };
-                emojiBtn.PointerReleased += (_, ev) =>
+                emojiBtn.PointerPressed += (_, ev) =>
                 {
                     vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
                     menu.Close();
@@ -1240,49 +1244,137 @@ public partial class MainView : UserControl
             menu.Items.Add(new Separator());
         }
 
-        // Copy message text
-        if (!string.IsNullOrEmpty(msg.Text))
-        {
-            var copyItem = new MenuItem { Header = "Copy", Foreground = Brush.Parse("#e0e0e8") };
-            copyItem.Click += async (_, _) =>
-            {
-                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-                if (clipboard is not null)
-                    await clipboard.SetTextAsync(msg.Text);
-            };
-            menu.Items.Add(copyItem);
-        }
-
-        // Reply (always available)
-        if (msg.MsgId is not null)
-        {
-            var replyItem = new MenuItem { Header = "Reply", Foreground = Brush.Parse("#e0e0e8") };
-            replyItem.Click += (_, _) => vm.SetReplyTarget(msg);
-            menu.Items.Add(replyItem);
-        }
-
-        // Edit (own messages only)
+        // — Edit Message (own only) —
         if (msg.IsOwn && msg.MsgId is not null)
         {
-            var editItem = new MenuItem { Header = "Edit", Foreground = Brush.Parse("#e0e0e8") };
+            var editItem = new MenuItem { Header = "Edit Message", Foreground = fg };
             editItem.Click += (_, _) => vm.StartEdit(msg);
             menu.Items.Add(editItem);
         }
 
-        // Delete (own messages, or admin in places)
+        // — Reply —
+        if (msg.MsgId is not null)
+        {
+            var replyItem = new MenuItem { Header = "Reply", Foreground = fg };
+            replyItem.Click += (_, _) => vm.SetReplyTarget(msg);
+            menu.Items.Add(replyItem);
+        }
+
+        // — Forward (submenu with contacts + groups) —
+        if (!string.IsNullOrEmpty(msg.Text))
+        {
+            var forwardItem = new MenuItem { Header = "Forward", Foreground = fg };
+            foreach (var contact in vm.Contacts)
+            {
+                var c = contact;
+                var sub = new MenuItem { Header = c.DisplayName, Foreground = fg };
+                sub.Click += (_, _) => vm.RequestForward(c.UserId, msg.Text, false);
+                forwardItem.Items.Add(sub);
+            }
+            if (vm.Contacts.Count > 0 && vm.Groups.Count > 0)
+                forwardItem.Items.Add(new Separator());
+            foreach (var group in vm.Groups)
+            {
+                var g = group;
+                var sub = new MenuItem { Header = $"# {g.Name}", Foreground = fg };
+                sub.Click += (_, _) => vm.RequestForward(g.GroupId, msg.Text, true);
+                forwardItem.Items.Add(sub);
+            }
+            if (forwardItem.Items.Count > 0)
+                menu.Items.Add(forwardItem);
+        }
+
+        // — Copy Text —
+        if (!string.IsNullOrEmpty(msg.Text))
+        {
+            string? selectedText = null;
+            foreach (var desc in border.GetVisualDescendants())
+            {
+                if (desc is MarkdownTextBlock mtb && !string.IsNullOrEmpty(mtb.SelectedText))
+                {
+                    selectedText = mtb.SelectedText;
+                    break;
+                }
+            }
+            var textToCopy = selectedText ?? msg.Text;
+            var copyItem = new MenuItem
+            {
+                Header = selectedText is not null ? "Copy Selection" : "Copy Text",
+                Foreground = fg
+            };
+            copyItem.Click += async (_, _) =>
+            {
+                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                if (clipboard is not null)
+                    await clipboard.SetTextAsync(textToCopy);
+            };
+            menu.Items.Add(copyItem);
+        }
+
+        // — Pin Message (Places only) —
+        if (msg.MsgId is not null && vm.SelectedConversation is ChannelItemViewModel)
+        {
+            var pinItem = new MenuItem { Header = "Pin Message", Foreground = fg };
+            pinItem.Click += (_, _) => vm.RequestPin(msg.MsgId, msg.Text, msg.From);
+            menu.Items.Add(pinItem);
+        }
+
+        // — Mark Unread —
+        {
+            var markItem = new MenuItem { Header = "Mark Unread", Foreground = fg };
+            markItem.Click += (_, _) =>
+            {
+                if (vm.SelectedConversation is ContactItemViewModel c) c.HasUnread = true;
+                else if (vm.SelectedConversation is GroupItemViewModel g) g.HasUnread = true;
+                else if (vm.SelectedConversation is ChannelItemViewModel ch) ch.HasUnread = true;
+            };
+            menu.Items.Add(markItem);
+        }
+
+        // — Speak Message —
+        if (!string.IsNullOrEmpty(msg.Text))
+        {
+            var speakItem = new MenuItem { Header = "Speak Message", Foreground = fg };
+            speakItem.Click += (_, _) =>
+            {
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo { CreateNoWindow = true, UseShellExecute = false };
+                    if (OperatingSystem.IsLinux())
+                    {
+                        psi.FileName = "spd-say";
+                        psi.ArgumentList.Add(msg.Text);
+                    }
+                    else if (OperatingSystem.IsMacOS())
+                    {
+                        psi.FileName = "say";
+                        psi.ArgumentList.Add(msg.Text);
+                    }
+                    else if (OperatingSystem.IsWindows())
+                    {
+                        psi.FileName = "powershell";
+                        psi.ArgumentList.Add("-Command");
+                        psi.ArgumentList.Add($"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(msg.Text))}')))");
+                    }
+                    if (psi.FileName is not null)
+                        System.Diagnostics.Process.Start(psi);
+                }
+                catch { /* TTS not available */ }
+            };
+            menu.Items.Add(speakItem);
+        }
+
+        menu.Items.Add(new Separator());
+
+        // — Delete Message (red) —
         if (msg.MsgId is not null)
         {
             var canDelete = msg.IsOwn;
-            // Admin/owner can delete any message in a Place
             if (!canDelete && vm.SelectedConversation is ChannelItemViewModel)
-            {
-                // Check if user is admin/owner — approximate via presence of SenderRole being non-null would be wrong.
-                // We check if own messages have "Owner" or "Admin" role in this place context.
-                canDelete = true; // Allow for places — server-side will validate
-            }
+                canDelete = true; // Places: server-side validates permissions
             if (canDelete)
             {
-                var deleteItem = new MenuItem { Header = "Delete", Foreground = Brush.Parse("#f87171") };
+                var deleteItem = new MenuItem { Header = "Delete Message", Foreground = Brush.Parse("#f87171") };
                 deleteItem.Click += (_, _) =>
                 {
                     msg.IsDeleted = true;
@@ -1293,12 +1385,17 @@ public partial class MainView : UserControl
             }
         }
 
-        // Pin (Places only, messages with msgId)
-        if (msg.MsgId is not null && vm.SelectedConversation is ChannelItemViewModel pinCh)
+        // — Copy Message ID —
+        if (msg.MsgId is not null)
         {
-            var pinItem = new MenuItem { Header = "Pin message", Foreground = Brush.Parse("#eab308") };
-            pinItem.Click += (_, _) => vm.RequestPin(msg.MsgId, msg.Text, msg.From);
-            menu.Items.Add(pinItem);
+            var idItem = new MenuItem { Header = "Copy Message ID", Foreground = dim };
+            idItem.Click += async (_, _) =>
+            {
+                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                if (clipboard is not null)
+                    await clipboard.SetTextAsync(msg.MsgId);
+            };
+            menu.Items.Add(idItem);
         }
 
         if (menu.Items.Count == 0) return;

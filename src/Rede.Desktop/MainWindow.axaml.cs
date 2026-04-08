@@ -1286,6 +1286,15 @@ public partial class MainWindow : Window
             else if (_mainVm.SelectedConversation is GroupItemViewModel gr)
                 _groups?.SendReaction(gr.GroupId, msgId, emoji, add);
         };
+
+        _mainVm.OnForwardMessage += (targetId, text, isGroup) =>
+        {
+            var fwd = $"[Forwarded] {text}";
+            if (isGroup)
+                _groups?.SendGroupMessage(targetId, fwd, 0);
+            else
+                _chat?.SendMessage(targetId, fwd, 0);
+        };
     }
 
     private async Task HandleAttachFiles(string[] paths)
