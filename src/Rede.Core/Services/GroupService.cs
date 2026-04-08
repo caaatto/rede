@@ -32,6 +32,7 @@ public class GroupService : IDisposable
     public event Action<string, string, string, Dictionary<string, List<string>>>? OnReactionUpdated; // chatKey, msgId, emoji, reactions
     public event Action<string, string, string>? OnMessageEdited; // chatKey, msgId, newText
     public event Action<string, string>? OnMessageDeleted; // chatKey, msgId
+    public event Action<string, string>? OnOwnMessageIdAssigned; // groupId, msgId
 
     public GroupService(RedeConnection conn, ProfileStore store)
     {
@@ -297,7 +298,28 @@ public class GroupService : IDisposable
         var groupId = ProtocolSerializer.GetString(msg, "groupId");
         var from = ProtocolSerializer.GetString(msg, "from");
         if (groupId is null || from is null) return;
-        if (from == Profile.UserId) return; // Skip own messages
+        if (from == Profile.UserId)
+        {
+            // Server echoes own messages with a server-assigned msgId.
+            // Update the stored message so reactions/edit/delete/reply work.
+            var ownMsgId = ProtocolSerializer.GetString(msg, "msgId");
+            if (ownMsgId is not null && groupId is not null)
+            {
+                if (Profile.ChatHistory.TryGetValue(groupId, out var history) && history.Count > 0)
+                {
+                    for (int i = history.Count - 1; i >= 0; i--)
+                    {
+                        if (history[i].From == Profile.UserId && history[i].MsgId is null)
+                        {
+                            history[i].MsgId = ownMsgId;
+                            break;
+                        }
+                    }
+                }
+                OnOwnMessageIdAssigned?.Invoke(groupId, ownMsgId);
+            }
+            return;
+        }
 
         // C4: Verify group exists and sender is a member
         if (!Profile.Groups.TryGetValue(groupId, out var group))

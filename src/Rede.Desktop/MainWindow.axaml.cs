@@ -955,6 +955,18 @@ public partial class MainWindow : Window
             if (msg is not null) { msg.Text = ""; msg.IsDeleted = true; }
         });
 
+        _groups.OnOwnMessageIdAssigned += (groupId, msgId) => Dispatcher.UIThread.Post(() =>
+        {
+            for (int i = _mainVm.Messages.Count - 1; i >= 0; i--)
+            {
+                if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
+                {
+                    _mainVm.Messages[i].MsgId = msgId;
+                    break;
+                }
+            }
+        });
+
         _groups.OnGroupsChanged += () => Dispatcher.UIThread.Post(RefreshGroups);
 
         _groups.OnSystemMessage += msg => Dispatcher.UIThread.Post(() =>
@@ -1000,6 +1012,19 @@ public partial class MainWindow : Window
         {
             var msg = _mainVm.Messages.FirstOrDefault(m => m.MsgId == msgId);
             if (msg is not null) { msg.Text = ""; msg.IsDeleted = true; }
+        });
+
+        _places.OnOwnMessageIdAssigned += (chatKey, msgId) => Dispatcher.UIThread.Post(() =>
+        {
+            // Find the most recent own message in UI without a MsgId and assign it
+            for (int i = _mainVm.Messages.Count - 1; i >= 0; i--)
+            {
+                if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
+                {
+                    _mainVm.Messages[i].MsgId = msgId;
+                    break;
+                }
+            }
         });
 
         _places.OnPlacesChanged += () => Dispatcher.UIThread.Post(RefreshPlaces);

@@ -35,6 +35,7 @@ public class PlaceService : IDisposable
     public event Action<string, string, string, Dictionary<string, List<string>>>? OnReactionUpdated; // chatKey, msgId, emoji, reactions
     public event Action<string, string, string>? OnMessageEdited; // chatKey, msgId, newText
     public event Action<string, string>? OnMessageDeleted; // chatKey, msgId
+    public event Action<string, string>? OnOwnMessageIdAssigned; // chatKey, msgId
 
     public PlaceService(RedeConnection conn, ProfileStore store)
     {
@@ -1613,7 +1614,29 @@ public class PlaceService : IDisposable
         var channelId = ProtocolSerializer.GetString(msg, "channelId");
         var from = ProtocolSerializer.GetString(msg, "from");
         if (placeId is null || channelId is null || from is null) return;
-        if (from == Profile.UserId) return;
+        if (from == Profile.UserId)
+        {
+            // Server echoes own messages with a server-assigned msgId.
+            // Update the stored message so reactions/edit/delete/reply work.
+            var ownMsgId = ProtocolSerializer.GetString(msg, "msgId");
+            if (ownMsgId is not null)
+            {
+                var ownChatKey = ChatKey(placeId, channelId);
+                if (Profile.ChatHistory.TryGetValue(ownChatKey, out var history) && history.Count > 0)
+                {
+                    for (int i = history.Count - 1; i >= 0; i--)
+                    {
+                        if (history[i].From == Profile.UserId && history[i].MsgId is null)
+                        {
+                            history[i].MsgId = ownMsgId;
+                            break;
+                        }
+                    }
+                }
+                OnOwnMessageIdAssigned?.Invoke(ownChatKey, ownMsgId);
+            }
+            return;
+        }
 
         if (!Profile.Places.TryGetValue(placeId, out var place))
         {
