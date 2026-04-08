@@ -1217,18 +1217,17 @@ public partial class MainView : UserControl
         // — Reactions (individual menu items per emoji) —
         if (msg.MsgId is not null)
         {
-            var emojis = new[] { ("👍", "React +1"), ("❤️", "React Heart"), ("😂", "React Laugh"),
-                                 ("😮", "React Wow"), ("😢", "React Sad"), ("🔥", "React Fire"),
-                                 ("👀", "React Eyes"), ("✅", "React Check") };
-            foreach (var (emoji, label) in emojis)
+            var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
+            foreach (var emoji in emojis)
             {
                 var capturedEmoji = emoji;
                 var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
                 var isOwn = existing is not null && existing.IsOwn;
                 var item = new MenuItem
                 {
-                    Header = isOwn ? $"{label} (remove)" : label,
+                    Header = isOwn ? $"{emoji} (remove)" : emoji,
                     Foreground = fg,
+                    FontSize = 18,
                 };
                 item.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
                 menu.Items.Add(item);
