@@ -1218,29 +1218,31 @@ public partial class MainView : UserControl
         if (msg.MsgId is not null)
         {
             var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
-            var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 2) };
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
             foreach (var emoji in emojis)
             {
                 var capturedEmoji = emoji;
                 var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
                 var isOwn = existing is not null && existing.IsOwn;
-                var emojiBtn = new Border
+                var emojiBtn = new Button
                 {
-                    Child = new TextBlock { Text = emoji, FontSize = 18, VerticalAlignment = VerticalAlignment.Center },
-                    Padding = new Thickness(5, 3),
-                    CornerRadius = new CornerRadius(4),
+                    Content = new TextBlock { Text = emoji, FontSize = 18 },
+                    Padding = new Thickness(4, 2),
+                    MinWidth = 0,
+                    MinHeight = 0,
                     Background = isOwn ? Brush.Parse("#2a2a3a") : Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
                     Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
                 };
-                emojiBtn.PointerPressed += (_, ev) =>
+                emojiBtn.Click += (_, _) =>
                 {
                     vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
                     menu.Close();
-                    ev.Handled = true;
                 };
                 panel.Children.Add(emojiBtn);
             }
-            menu.Items.Add(panel);
+            var emojiItem = new MenuItem { Header = panel, Padding = new Thickness(0) };
+            menu.Items.Add(emojiItem);
             menu.Items.Add(new Separator());
         }
 

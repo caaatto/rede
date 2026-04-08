@@ -2416,7 +2416,7 @@ public partial class MainWindow : Window
         }
         catch { /* PortAudio not available */ }
 
-        vm.OnInstallRnnoise += async () =>
+        vm.OnInstallRnnoise = async () =>
         {
             vm.IsRnnoiseInstalling = true;
             vm.RnnoiseInstallStatus = "Downloading...";
