@@ -44,14 +44,17 @@ public sealed class RNNoise : IDisposable
             // Try default resolution first
             if (NativeLibrary.TryLoad(name, asm, searchPath, out var handle))
                 return handle;
-            // Try explicit paths relative to the assembly location
-            var asmDir = Path.GetDirectoryName(asm.Location) ?? AppContext.BaseDirectory;
-            var rid = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win-x64" : "linux-x64";
-            var libFile = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "rnnoise.dll" : "librnnoise.so";
+            // Build candidate paths — single-file publish extracts native libs to AppContext.BaseDirectory
+            var baseDir = AppContext.BaseDirectory;
+            var asmDir = string.IsNullOrEmpty(asm.Location) ? baseDir : (Path.GetDirectoryName(asm.Location) ?? baseDir);
+            var isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+            var rid = isWin ? "win-x64" : "linux-x64";
+            var libFile = isWin ? "rnnoise.dll" : "librnnoise.so";
             var candidates = new[]
             {
+                Path.Combine(baseDir, libFile),
+                Path.Combine(baseDir, "runtimes", rid, "native", libFile),
                 Path.Combine(asmDir, "runtimes", rid, "native", libFile),
-                Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", libFile),
                 Path.Combine(asmDir, libFile),
             };
             foreach (var path in candidates)
@@ -59,6 +62,9 @@ public sealed class RNNoise : IDisposable
                 if (File.Exists(path) && NativeLibrary.TryLoad(path, out handle))
                     return handle;
             }
+            // Last resort: try the bare library name via OS search paths
+            if (NativeLibrary.TryLoad(libFile, out handle))
+                return handle;
             return IntPtr.Zero;
         });
 

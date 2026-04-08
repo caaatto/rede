@@ -13,10 +13,11 @@
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
   </ItemGroup>
 
-  <!-- RNNoise native library for noise suppression -->
+  <!-- RNNoise native libraries — excluded from single-file so they sit next to the exe.
+       Both platforms included; the resolver picks the right one at runtime. -->
   <ItemGroup>
-    <Content Include="runtimes\linux-x64\native\librnnoise.so" Link="runtimes\linux-x64\native\librnnoise.so" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="runtimes\win-x64\native\rnnoise.dll" Link="runtimes\win-x64\native\rnnoise.dll" Condition="Exists('runtimes\win-x64\native\rnnoise.dll')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="runtimes\linux-x64\native\librnnoise.so" Link="librnnoise.so" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="runtimes\win-x64\native\rnnoise.dll" Link="rnnoise.dll" Condition="Exists('runtimes\win-x64\native\rnnoise.dll')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>
