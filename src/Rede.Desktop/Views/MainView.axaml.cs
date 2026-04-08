@@ -1214,24 +1214,36 @@ public partial class MainView : UserControl
         var fg = Brush.Parse("#e0e0e8");
         var dim = Brush.Parse("#6b7280");
 
-        // — Reactions: top 5 quick + expandable categories —
+        // — Reactions: horizontal quick bar + expandable categories —
         if (msg.MsgId is not null)
         {
             var quickEmojis = new[] { "👍", "❤️", "😂", "🔥", "👀" };
+            var emojiBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
             foreach (var emoji in quickEmojis)
             {
                 var capturedEmoji = emoji;
                 var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
                 var isOwn = existing is not null && existing.IsOwn;
-                var item = new MenuItem
+                var tb = new TextBlock
                 {
-                    Header = isOwn ? $"{emoji} ✕" : emoji,
-                    Foreground = fg,
-                    FontSize = 18,
+                    Text = emoji,
+                    FontSize = 20,
+                    Cursor = new Cursor(StandardCursorType.Hand),
+                    Opacity = isOwn ? 0.5 : 1.0,
+                    Margin = new Thickness(2, 0),
                 };
-                item.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
-                menu.Items.Add(item);
+                tb.PointerPressed += (_, e) =>
+                {
+                    e.Handled = true;
+                    vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
+                    menu.Close();
+                };
+                emojiBar.Children.Add(tb);
             }
+            var barItem = new MenuItem { Header = emojiBar, Padding = new Thickness(4, 2) };
+            // Prevent the MenuItem itself from doing anything on click
+            barItem.Click += (_, e) => { };
+            menu.Items.Add(barItem);
 
             var categories = new (string Name, string[] Emojis)[]
             {

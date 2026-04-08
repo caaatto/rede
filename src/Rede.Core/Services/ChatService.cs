@@ -600,7 +600,29 @@ public class ChatService : IDisposable
         }
         OnOwnMessageIdAssigned?.Invoke(to, msgId);
     }
-    private void HandleSealedMessageAck(JsonObject msg) { /* sealed delivery confirmation */ }
+    private void HandleSealedMessageAck(JsonObject msg)
+    {
+        // Sealed sender ACK also carries msgId — extract it
+        if (Profile is null || Passphrase is null) return;
+        var msgId = ProtocolSerializer.GetString(msg, "msgId");
+        if (msgId is null) return;
+
+        // Find the most recent own message without msgId across all contact chats
+        foreach (var (chatKey, history) in Profile.ChatHistory)
+        {
+            // Skip non-contact chats (groups/places use : separator)
+            if (chatKey.Contains(':')) continue;
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                if (history[i].From == Profile.UserId && history[i].MsgId is null)
+                {
+                    history[i].MsgId = msgId;
+                    OnOwnMessageIdAssigned?.Invoke(chatKey, msgId);
+                    return;
+                }
+            }
+        }
+    }
 
     private void HandlePrekeyBundle(JsonObject msg)
     {
