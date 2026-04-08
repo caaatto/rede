@@ -1214,26 +1214,25 @@ public partial class MainView : UserControl
         var fg = Brush.Parse("#e0e0e8");
         var dim = Brush.Parse("#6b7280");
 
-        // — Add Reaction (submenu with emoji choices) —
+        // — Reactions (individual menu items per emoji) —
         if (msg.MsgId is not null)
         {
-            var emojis = new[] { "👍", "❤️", "😂", "😮", "😢", "🔥", "👀", "✅" };
-            var reactItem = new MenuItem { Header = "Add Reaction", Foreground = fg };
-            foreach (var emoji in emojis)
+            var emojis = new[] { ("👍", "React +1"), ("❤️", "React Heart"), ("😂", "React Laugh"),
+                                 ("😮", "React Wow"), ("😢", "React Sad"), ("🔥", "React Fire"),
+                                 ("👀", "React Eyes"), ("✅", "React Check") };
+            foreach (var (emoji, label) in emojis)
             {
                 var capturedEmoji = emoji;
                 var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
                 var isOwn = existing is not null && existing.IsOwn;
-                var sub = new MenuItem
+                var item = new MenuItem
                 {
-                    Header = isOwn ? $"{capturedEmoji}  (remove)" : capturedEmoji,
+                    Header = isOwn ? $"{label} (remove)" : label,
                     Foreground = fg,
-                    FontSize = 18,
                 };
-                sub.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
-                reactItem.Items.Add(sub);
+                item.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
+                menu.Items.Add(item);
             }
-            menu.Items.Add(reactItem);
             menu.Items.Add(new Separator());
         }
 
