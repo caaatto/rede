@@ -156,7 +156,9 @@ public class ProfileStore
 
     private async Task<Profile?> DecryptProfileFileAsync(string path, byte[] passphrase)
     {
-        var json = await File.ReadAllTextAsync(path);
+        // ConfigureAwait(false) ensures the scrypt-heavy Decrypt runs on a thread
+        // pool thread instead of blocking the UI thread for 2-5 seconds.
+        var json = await File.ReadAllTextAsync(path).ConfigureAwait(false);
         var envelope = JsonSerializer.Deserialize<ProfileEncryption.EncryptedEnvelope>(json, JsonOpts);
         if (envelope is null) return null;
 

@@ -45,6 +45,7 @@ public class SecureTextBox : Border
 
     private static readonly IBrush BgBrush = new SolidColorBrush(Color.Parse("#12121a"));
     private static readonly IBrush IdleBorder = new SolidColorBrush(Color.Parse("#2a2a3a"));
+    private static readonly IBrush DisabledBorder = new SolidColorBrush(Color.Parse("#18182a"));
     private static readonly IBrush FocusBorder = new SolidColorBrush(Color.Parse("#8b5cf6"));
     private static readonly IBrush TextBrush = new SolidColorBrush(Color.Parse("#e6e6ed"));
     private static readonly IBrush WatermarkBrush = new SolidColorBrush(Color.Parse("#6b6b7c"));
@@ -82,7 +83,7 @@ public class SecureTextBox : Border
             // inner content (text + toggle icon) so the change is obvious.
             if (Child is DockPanel panel)
                 panel.Opacity = IsInputEnabled ? 1.0 : 0.3;
-            BorderBrush = IsInputEnabled ? IdleBorder : new SolidColorBrush(Color.Parse("#18182a"));
+            BorderBrush = IsInputEnabled ? IdleBorder : DisabledBorder;
         }
     }
 
