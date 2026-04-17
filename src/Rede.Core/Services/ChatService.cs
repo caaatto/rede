@@ -39,6 +39,13 @@ public class ChatService : IDisposable
     // H7: Queue per target — multiple messages can be pending before bundle arrives
     private readonly Dictionary<string, List<(string Text, int Ttl)>> _pendingOutgoing = new();
 
+    // ACK FIFO: every successful send pushes the target ChatMessage reference.
+    // On each msgId ACK we dequeue the head and stamp its MsgId — this is the only
+    // reliable pairing since sealed ACKs carry no `to` field and scanning ChatHistory
+    // for "first own null-MsgId" can collide with orphan legacy entries from pre-fix.
+    private readonly Queue<(string ChatKey, ChatMessage Msg, bool Sealed)> _pendingAck = new();
+    private readonly object _pendingAckLock = new();
+
     public event Action<string, string, string, DateTime, bool, string?>? OnMessageReceived; // from, text, chatId, timestamp, isSealed, msgId
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
@@ -201,11 +208,16 @@ public class ChatService : IDisposable
         if (sentAny && !text.Contains("\"__rede_ctrl\""))
         {
             var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            _store.AddChatMessage(Profile, targetId, new ChatMessage
+            var persistedMsg = new ChatMessage
             {
                 From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
-            }, Passphrase);
-            DebugLog($"SendMessage persisted own msg to {targetId}, MsgId=null, text.len={text.Length}, ctrl={text.Contains("\"__rede_ctrl\"")}");
+            };
+            _store.AddChatMessage(Profile, targetId, persistedMsg, Passphrase);
+            lock (_pendingAckLock)
+            {
+                _pendingAck.Enqueue((targetId, persistedMsg, false));
+            }
+            DebugLog($"SendMessage persisted own msg to {targetId}, enqueued for ACK (pending={_pendingAck.Count})");
             OnMessageSent?.Invoke(targetId, text, ttl);
         }
         else if (sentAny)
@@ -598,62 +610,35 @@ public class ChatService : IDisposable
         return plaintext;
     }
 
-    private void HandleMessageAck(JsonObject msg)
-    {
-        if (Profile is null || Passphrase is null) return;
-        var msgId = ProtocolSerializer.GetString(msg, "msgId");
-        var to = ProtocolSerializer.GetString(msg, "to");
-        DebugLog($"HandleMessageAck: msgId={msgId ?? "null"} to={to ?? "null"}");
-        if (msgId is null || to is null) return;
+    private void HandleMessageAck(JsonObject msg) => AssignAckMsgId(msg, sealed_: false);
+    private void HandleSealedMessageAck(JsonObject msg) => AssignAckMsgId(msg, sealed_: true);
 
-        // ACKs arrive in send order (FIFO on the WS connection), so assign to
-        // the earliest own message still missing a msgId. Running backwards
-        // would pair ACK_1 with msg_2 when two messages are sent in quick succession.
-        bool assigned = false;
-        if (Profile.ChatHistory.TryGetValue(to, out var history) && history.Count > 0)
-        {
-            for (int i = 0; i < history.Count; i++)
-            {
-                if (history[i].From == Profile.UserId && history[i].MsgId is null)
-                {
-                    history[i].MsgId = msgId;
-                    assigned = true;
-                    DebugLog($"  assigned to history[{i}] in chat={to}");
-                    break;
-                }
-            }
-        }
-        if (!assigned) DebugLog($"  no null-msgId own message found in history[{to}]");
-        if (assigned) _store.SaveChatHistoryDebounced(Profile, Passphrase);
-        OnOwnMessageIdAssigned?.Invoke(to, msgId);
-    }
-    private void HandleSealedMessageAck(JsonObject msg)
+    private void AssignAckMsgId(JsonObject msg, bool sealed_)
     {
-        // Sealed sender ACK also carries msgId — extract it
         if (Profile is null || Passphrase is null) return;
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
-        DebugLog($"HandleSealedMessageAck: msgId={msgId ?? "null"}");
+        DebugLog($"{(sealed_ ? "HandleSealedMessageAck" : "HandleMessageAck")}: msgId={msgId ?? "null"}");
         if (msgId is null) return;
 
-        // Sealed ACKs carry no `to` field, so we scan across contacts and pick
-        // the earliest own message still missing a msgId (FIFO).
-        foreach (var (chatKey, history) in Profile.ChatHistory)
+        // Pair this ACK with the head of the pending-ACK FIFO — WS delivers ACKs
+        // in send order so the head is the oldest un-ACKed outgoing message. Scanning
+        // Profile.ChatHistory for "first own null-MsgId" is unreliable because pre-fix
+        // orphans can absorb new ACKs (see pre-2.18.35 collision with legacy chats).
+        (string ChatKey, ChatMessage Msg, bool Sealed) entry;
+        lock (_pendingAckLock)
         {
-            // Skip non-contact chats (groups/places use : separator)
-            if (chatKey.Contains(':')) continue;
-            for (int i = 0; i < history.Count; i++)
+            if (_pendingAck.Count == 0)
             {
-                if (history[i].From == Profile.UserId && history[i].MsgId is null)
-                {
-                    history[i].MsgId = msgId;
-                    DebugLog($"  assigned to history[{i}] in chat={chatKey}");
-                    _store.SaveChatHistoryDebounced(Profile, Passphrase);
-                    OnOwnMessageIdAssigned?.Invoke(chatKey, msgId);
-                    return;
-                }
+                DebugLog($"  ACK with empty pending queue — dropping");
+                return;
             }
+            entry = _pendingAck.Dequeue();
         }
-        DebugLog($"  no null-msgId own message found in any DM chat");
+
+        entry.Msg.MsgId = msgId;
+        DebugLog($"  assigned to pending head: chat={entry.ChatKey}, remaining={_pendingAck.Count}");
+        _store.SaveChatHistoryDebounced(Profile, Passphrase);
+        OnOwnMessageIdAssigned?.Invoke(entry.ChatKey, msgId);
     }
 
     private static readonly object _debugLogLock = new();
