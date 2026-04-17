@@ -17,6 +17,13 @@ public class GroupService : IDisposable
     private readonly ProfileStore _store;
     private readonly NonceTracker _nonceTracker = new(); // H3: Replay protection for group messages
 
+    // ACK FIFO: every persisted outgoing group message pushes its ChatMessage reference.
+    // Server echoes GROUP_MESSAGE back to sender with a server-assigned msgId, in send order.
+    // Pairing via FIFO is the only reliable method — scanning ChatHistory for "first own
+    // null-MsgId" collides with orphan legacy entries from pre-fix versions.
+    private readonly Queue<(string GroupId, ChatMessage Msg)> _pendingAck = new();
+    private readonly object _pendingAckLock = new();
+
     /// <summary>Replay-protection tracker — exposed for persistence across restarts.</summary>
     public NonceTracker NonceTracker => _nonceTracker;
 
@@ -216,10 +223,12 @@ public class GroupService : IDisposable
         if (!text.Contains("\"__rede_ctrl\""))
         {
             var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            _store.AddChatMessage(Profile, groupId, new ChatMessage
+            var persistedMsg = new ChatMessage
             {
                 From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
-            }, Passphrase);
+            };
+            _store.AddChatMessage(Profile, groupId, persistedMsg, Passphrase);
+            lock (_pendingAckLock) { _pendingAck.Enqueue((groupId, persistedMsg)); }
             OnGroupMessageSent?.Invoke(groupId, text, ttl);
         }
     }
@@ -300,25 +309,23 @@ public class GroupService : IDisposable
         if (groupId is null || from is null) return;
         if (from == Profile.UserId)
         {
-            // Server echoes own messages with a server-assigned msgId.
-            // Update the stored message so reactions/edit/delete/reply work.
+            // Server echoes own GROUP_MESSAGE back with a server-assigned msgId.
+            // Pair with the head of the pending-ACK FIFO — WS delivers echoes in send order.
+            // Scanning ChatHistory for "first own null-MsgId" is unreliable (pre-fix orphans).
             var ownMsgId = ProtocolSerializer.GetString(msg, "msgId");
-            if (ownMsgId is not null && groupId is not null)
+            if (ownMsgId is null) return;
+
+            (string GroupId, ChatMessage Msg) entry;
+            lock (_pendingAckLock)
             {
-                if (Profile.ChatHistory.TryGetValue(groupId, out var history) && history.Count > 0)
-                {
-                    // FIFO: server echoes in send order, pair with earliest own message missing a msgId
-                    for (int i = 0; i < history.Count; i++)
-                    {
-                        if (history[i].From == Profile.UserId && history[i].MsgId is null)
-                        {
-                            history[i].MsgId = ownMsgId;
-                            break;
-                        }
-                    }
-                }
-                OnOwnMessageIdAssigned?.Invoke(groupId, ownMsgId);
+                // Echoes for control messages (reactions/edits/deletes) arrive with no
+                // matching queue entry since we don't persist/enqueue those — drop silently.
+                if (_pendingAck.Count == 0) return;
+                entry = _pendingAck.Dequeue();
             }
+            entry.Msg.MsgId = ownMsgId;
+            _store.SaveChatHistoryDebounced(Profile, Passphrase);
+            OnOwnMessageIdAssigned?.Invoke(entry.GroupId, ownMsgId);
             return;
         }
 
