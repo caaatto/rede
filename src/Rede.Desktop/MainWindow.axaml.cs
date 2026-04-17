@@ -816,7 +816,8 @@ public partial class MainWindow : Window
         {
             if (_mainVm.SelectedConversation is ContactItemViewModel sel && sel.UserId == contactId)
             {
-                for (int i = _mainVm.Messages.Count - 1; i >= 0; i--)
+                // FIFO: pair with earliest own message still missing a msgId
+                for (int i = 0; i < _mainVm.Messages.Count; i++)
                 {
                     if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
                     {
@@ -978,7 +979,8 @@ public partial class MainWindow : Window
 
         _groups.OnOwnMessageIdAssigned += (groupId, msgId) => Dispatcher.UIThread.Post(() =>
         {
-            for (int i = _mainVm.Messages.Count - 1; i >= 0; i--)
+            // FIFO: pair with earliest own message still missing a msgId
+            for (int i = 0; i < _mainVm.Messages.Count; i++)
             {
                 if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
                 {
@@ -1037,8 +1039,8 @@ public partial class MainWindow : Window
 
         _places.OnOwnMessageIdAssigned += (chatKey, msgId) => Dispatcher.UIThread.Post(() =>
         {
-            // Find the most recent own message in UI without a MsgId and assign it
-            for (int i = _mainVm.Messages.Count - 1; i >= 0; i--)
+            // FIFO: pair with earliest own message still missing a msgId
+            for (int i = 0; i < _mainVm.Messages.Count; i++)
             {
                 if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
                 {

@@ -586,10 +586,12 @@ public class ChatService : IDisposable
         var to = ProtocolSerializer.GetString(msg, "to");
         if (msgId is null || to is null) return;
 
-        // Assign msgId to the most recent own message without one
+        // ACKs arrive in send order (FIFO on the WS connection), so assign to
+        // the earliest own message still missing a msgId. Running backwards
+        // would pair ACK_1 with msg_2 when two messages are sent in quick succession.
         if (Profile.ChatHistory.TryGetValue(to, out var history) && history.Count > 0)
         {
-            for (int i = history.Count - 1; i >= 0; i--)
+            for (int i = 0; i < history.Count; i++)
             {
                 if (history[i].From == Profile.UserId && history[i].MsgId is null)
                 {
@@ -607,12 +609,13 @@ public class ChatService : IDisposable
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
         if (msgId is null) return;
 
-        // Find the most recent own message without msgId across all contact chats
+        // Sealed ACKs carry no `to` field, so we scan across contacts and pick
+        // the earliest own message still missing a msgId (FIFO).
         foreach (var (chatKey, history) in Profile.ChatHistory)
         {
             // Skip non-contact chats (groups/places use : separator)
             if (chatKey.Contains(':')) continue;
-            for (int i = history.Count - 1; i >= 0; i--)
+            for (int i = 0; i < history.Count; i++)
             {
                 if (history[i].From == Profile.UserId && history[i].MsgId is null)
                 {

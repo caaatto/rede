@@ -307,7 +307,8 @@ public class GroupService : IDisposable
             {
                 if (Profile.ChatHistory.TryGetValue(groupId, out var history) && history.Count > 0)
                 {
-                    for (int i = history.Count - 1; i >= 0; i--)
+                    // FIFO: server echoes in send order, pair with earliest own message missing a msgId
+                    for (int i = 0; i < history.Count; i++)
                     {
                         if (history[i].From == Profile.UserId && history[i].MsgId is null)
                         {
