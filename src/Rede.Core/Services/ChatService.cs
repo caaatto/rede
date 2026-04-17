@@ -217,12 +217,7 @@ public class ChatService : IDisposable
             {
                 _pendingAck.Enqueue((targetId, persistedMsg, false));
             }
-            DebugLog($"SendMessage persisted own msg to {targetId}, enqueued for ACK (pending={_pendingAck.Count})");
             OnMessageSent?.Invoke(targetId, text, ttl);
-        }
-        else if (sentAny)
-        {
-            DebugLog($"SendMessage control-msg skipped persist targetId={targetId}");
         }
 
         // Fetch pre-key bundles for devices without sessions
@@ -348,17 +343,12 @@ public class ChatService : IDisposable
         if (plaintext is null) return;
 
         // Check for control messages (group key distribution, reactions)
-        if (TryHandleControlMessage(plaintext, from))
-        {
-            DebugLog($"HandleMessage: control msg from {from} (handled)");
-            return;
-        }
+        if (TryHandleControlMessage(plaintext, from)) return;
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var ttl = ProtocolSerializer.GetInt(msg, "ttl");
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
-        DebugLog($"HandleMessage: from={from} msgId={msgId ?? "null"} text.len={sanitized.Length}");
 
         // Store chat history (debounced)
         _store.AddChatMessage(Profile, from, new ChatMessage
@@ -406,11 +396,7 @@ public class ChatService : IDisposable
         if (plaintext is null) return;
 
         // Check for control messages (group key distribution, reactions)
-        if (TryHandleControlMessage(plaintext, from))
-        {
-            DebugLog($"HandleSealedMessage: control msg from {from} (handled)");
-            return;
-        }
+        if (TryHandleControlMessage(plaintext, from)) return;
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTime.Now;
@@ -419,7 +405,6 @@ public class ChatService : IDisposable
         // leaves stored messages with MsgId = null, so reactions/edit/delete
         // can never find the target.
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
-        DebugLog($"HandleSealedMessage: from={from} outerMsgId={msgId ?? "null"} text.len={sanitized.Length}");
 
         _store.AddChatMessage(Profile, from, new ChatMessage
         {
@@ -617,7 +602,6 @@ public class ChatService : IDisposable
     {
         if (Profile is null || Passphrase is null) return;
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
-        DebugLog($"{(sealed_ ? "HandleSealedMessageAck" : "HandleMessageAck")}: msgId={msgId ?? "null"}");
         if (msgId is null) return;
 
         // Pair this ACK with the head of the pending-ACK FIFO — WS delivers ACKs
@@ -627,34 +611,13 @@ public class ChatService : IDisposable
         (string ChatKey, ChatMessage Msg, bool Sealed) entry;
         lock (_pendingAckLock)
         {
-            if (_pendingAck.Count == 0)
-            {
-                DebugLog($"  ACK with empty pending queue — dropping");
-                return;
-            }
+            if (_pendingAck.Count == 0) return;
             entry = _pendingAck.Dequeue();
         }
 
         entry.Msg.MsgId = msgId;
-        DebugLog($"  assigned to pending head: chat={entry.ChatKey}, remaining={_pendingAck.Count}");
         _store.SaveChatHistoryDebounced(Profile, Passphrase);
         OnOwnMessageIdAssigned?.Invoke(entry.ChatKey, msgId);
-    }
-
-    private static readonly object _debugLogLock = new();
-    private static void DebugLog(string line)
-    {
-        try
-        {
-            var path = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".rede", "debug.log");
-            lock (_debugLogLock)
-            {
-                System.IO.File.AppendAllText(path, $"[{DateTime.Now:HH:mm:ss.fff}] {line}\n");
-            }
-        }
-        catch { }
     }
 
     private void HandlePrekeyBundle(JsonObject msg)

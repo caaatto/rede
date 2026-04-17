@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.18.38-beta";
+    private const string CurrentVersion = "2.18.39-beta";
 
     /// <summary>
     /// Path to a file that records the last successfully installed release tag.
