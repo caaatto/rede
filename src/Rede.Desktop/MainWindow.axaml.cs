@@ -814,18 +814,13 @@ public partial class MainWindow : Window
 
         _chat.OnOwnMessageIdAssigned += (contactId, msgId) => Dispatcher.UIThread.Post(() =>
         {
-            if (_mainVm.SelectedConversation is ContactItemViewModel sel && sel.UserId == contactId)
-            {
-                // FIFO: pair with earliest own message still missing a msgId
-                for (int i = 0; i < _mainVm.Messages.Count; i++)
-                {
-                    if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
-                    {
-                        _mainVm.Messages[i].MsgId = msgId;
-                        break;
-                    }
-                }
-            }
+            // Dequeue head of the UI FIFO. Queue is cleared on chat switch, so an ACK
+            // for a different chat finds an empty queue and is a no-op (the stored
+            // ChatHistory is already stamped by the backend FIFO — reopening the chat
+            // will render the correct MsgId).
+            if (_mainVm.PendingAckVms.Count == 0) return;
+            var vm = _mainVm.PendingAckVms.Dequeue();
+            vm.MsgId = msgId;
         });
 
         _chat.OnReactionUpdated += (chatId, msgId, emoji, reactions) => Dispatcher.UIThread.Post(() =>
@@ -979,15 +974,9 @@ public partial class MainWindow : Window
 
         _groups.OnOwnMessageIdAssigned += (groupId, msgId) => Dispatcher.UIThread.Post(() =>
         {
-            // FIFO: pair with earliest own message still missing a msgId
-            for (int i = 0; i < _mainVm.Messages.Count; i++)
-            {
-                if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
-                {
-                    _mainVm.Messages[i].MsgId = msgId;
-                    break;
-                }
-            }
+            if (_mainVm.PendingAckVms.Count == 0) return;
+            var vm = _mainVm.PendingAckVms.Dequeue();
+            vm.MsgId = msgId;
         });
 
         _groups.OnGroupsChanged += () => Dispatcher.UIThread.Post(RefreshGroups);
@@ -1039,15 +1028,9 @@ public partial class MainWindow : Window
 
         _places.OnOwnMessageIdAssigned += (chatKey, msgId) => Dispatcher.UIThread.Post(() =>
         {
-            // FIFO: pair with earliest own message still missing a msgId
-            for (int i = 0; i < _mainVm.Messages.Count; i++)
-            {
-                if (_mainVm.Messages[i].IsOwn && _mainVm.Messages[i].MsgId is null)
-                {
-                    _mainVm.Messages[i].MsgId = msgId;
-                    break;
-                }
-            }
+            if (_mainVm.PendingAckVms.Count == 0) return;
+            var vm = _mainVm.PendingAckVms.Dequeue();
+            vm.MsgId = msgId;
         });
 
         _places.OnPlacesChanged += () => Dispatcher.UIThread.Post(RefreshPlaces);

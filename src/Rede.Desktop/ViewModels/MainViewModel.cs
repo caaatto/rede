@@ -206,14 +206,16 @@ public partial class MainViewModel : ViewModelBase
         CancelReply();
 
         // Add message to UI immediately (optimistic)
-        Messages.Add(new ChatMessageViewModel
+        var optimisticVm = new ChatMessageViewModel
         {
             Text = text,
             IsOwn = true,
             Timestamp = DateTime.Now,
             ReplyToPreview = replyPreview,
             ReplyToAuthor = replyAuthor,
-        });
+        };
+        Messages.Add(optimisticVm);
+        PendingAckVms.Enqueue(optimisticVm);
 
         // Actual send logic will be wired via service layer
         OnMessageSend?.Invoke(text, replyMsgId, replyPreview, replyAuthor);
@@ -229,6 +231,7 @@ public partial class MainViewModel : ViewModelBase
     private void LoadChatHistory(string chatId)
     {
         Messages.Clear();
+        PendingAckVms.Clear();
         OnChatHistoryRequested?.Invoke(chatId);
     }
 
@@ -347,6 +350,11 @@ public partial class MainViewModel : ViewModelBase
     public event Action<string, string[]>? OnCommandExecuted;
     public event Action<string>? OnChatHistoryRequested;
     public event Action<string>? OnMemberListRequested;
+
+    // FIFO of VMs awaiting their server-assigned MsgId. Mirrors the backend _pendingAck
+    // queue so the UI stamps the correct VM on ACK — scanning Messages for "first own
+    // null-MsgId" collides with legacy orphan entries loaded from history.
+    public readonly Queue<ChatMessageViewModel> PendingAckVms = new();
 
     public void InviteContactToGroup(string groupId, string userId)
     {
