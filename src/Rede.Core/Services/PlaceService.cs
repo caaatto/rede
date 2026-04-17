@@ -1285,7 +1285,24 @@ public class PlaceService : IDisposable
         };
         _store.AddChatMessage(Profile, chatKey, persistedMsg, Passphrase);
         lock (_pendingAckLock) { _pendingAck.Enqueue((chatKey, persistedMsg)); }
+        DebugLog($"SendChannelMessage persisted+enqueued chatKey={chatKey} pending={_pendingAck.Count}");
         OnChannelMessageSent?.Invoke(chatKey, text, ttl);
+    }
+
+    private static readonly object _debugLogLock = new();
+    private static void DebugLog(string line)
+    {
+        try
+        {
+            var path = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".rede", "debug.log");
+            lock (_debugLogLock)
+            {
+                System.IO.File.AppendAllText(path, $"[{DateTime.Now:HH:mm:ss.fff}] [plc] {line}\n");
+            }
+        }
+        catch { }
     }
 
     public IReadOnlyDictionary<string, Place>? GetPlaces() => Profile?.Places;
@@ -1294,6 +1311,7 @@ public class PlaceService : IDisposable
     public void SendReaction(string placeId, string channelId, string msgId, string emoji, bool add)
     {
         if (Profile is null || Passphrase is null) return;
+        DebugLog($"SendReaction ENTRY placeId={placeId} channelId={channelId} msgId={msgId} emoji={emoji} add={add}");
         var controlText = MessageEnvelope.EncodeReaction(msgId, emoji, add);
         SendControlMessage(placeId, channelId, controlText);
         ApplyReaction(ChatKey(placeId, channelId), msgId, emoji, Profile.UserId, add);
@@ -1629,6 +1647,7 @@ public class PlaceService : IDisposable
             // Pair with the head of the pending-ACK FIFO — WS delivers echoes in send order.
             // Scanning ChatHistory for "first own null-MsgId" is unreliable (pre-fix orphans).
             var ownMsgId = ProtocolSerializer.GetString(msg, "msgId");
+            DebugLog($"HandlePlaceMessage OWN echo placeId={placeId} chan={channelId} msgId={ownMsgId ?? "null"}");
             if (ownMsgId is null) return;
 
             (string ChatKey, ChatMessage Msg) entry;
@@ -1636,10 +1655,15 @@ public class PlaceService : IDisposable
             {
                 // Echoes for control messages (reactions/edits/deletes) arrive with no
                 // matching queue entry since we don't persist/enqueue those — drop silently.
-                if (_pendingAck.Count == 0) return;
+                if (_pendingAck.Count == 0)
+                {
+                    DebugLog($"  echo with empty pending queue — dropping (likely control msg echo)");
+                    return;
+                }
                 entry = _pendingAck.Dequeue();
             }
             entry.Msg.MsgId = ownMsgId;
+            DebugLog($"  assigned to pending head: chatKey={entry.ChatKey}, remaining={_pendingAck.Count}");
             _store.SaveChatHistoryDebounced(Profile, Passphrase);
             OnOwnMessageIdAssigned?.Invoke(entry.ChatKey, ownMsgId);
             return;
