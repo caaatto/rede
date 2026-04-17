@@ -1214,6 +1214,76 @@ public partial class MainView : UserControl
         var fg = Brush.Parse("#e0e0e8");
         var dim = Brush.Parse("#6b7280");
 
+        // — Reactions at the top: horizontal quick bar + expandable categories —
+        if (msg.MsgId is not null)
+        {
+            var quickEmojis = new[] { "👍", "❤️", "😂", "🔥", "👀" };
+            var emojiBar = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+            };
+            foreach (var emoji in quickEmojis)
+            {
+                var capturedEmoji = emoji;
+                var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
+                var isOwn = existing is not null && existing.IsOwn;
+                var tb = new TextBlock
+                {
+                    Text = emoji,
+                    FontSize = 22,
+                    Cursor = new Cursor(StandardCursorType.Hand),
+                    Opacity = isOwn ? 0.45 : 1.0,
+                    Padding = new Thickness(6, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                tb.PointerPressed += (_, pe) =>
+                {
+                    pe.Handled = true;
+                    vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
+                    menu.Close();
+                };
+                emojiBar.Children.Add(tb);
+            }
+
+            var barItem = new MenuItem { Header = emojiBar, Padding = new Thickness(4, 2) };
+            barItem.Click += (_, ce) => ce.Handled = true;
+            menu.Items.Add(barItem);
+
+            var categories = new (string Name, string[] Emojis)[]
+            {
+                ("😀 Smileys", new[] { "😀", "😁", "😅", "🤣", "😊", "😇", "😍", "🥰", "😘", "😎", "🤩", "🤔", "🤨", "😏", "🙄", "😬", "😢", "😭", "😤", "😡", "🥺", "😱", "🤯", "😴", "🤮", "🥳", "😈", "🤡" }),
+                ("👋 Gestures", new[] { "👍", "👎", "👏", "🙌", "🤝", "🙏", "💪", "✌️", "🤞", "👌", "✋", "👋", "🤙", "✊", "👊", "☝️", "🫡", "🫶" }),
+                ("❤️ Hearts", new[] { "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💔", "❣️", "💕", "💖", "💝" }),
+                ("⭐ Symbols", new[] { "✨", "⭐", "💯", "💥", "💫", "💤", "💬", "👀", "✅", "❌", "⚠️", "🚀", "🎉", "🏆", "💎", "🔔", "📌", "🎯", "🔥", "💀", "☠️", "🤖", "👽", "👻", "💩" }),
+                ("🐾 Animals", new[] { "🐶", "🐱", "🐭", "🐰", "🦊", "🐻", "🐼", "🐸", "🐵", "🙈", "🙉", "🙊", "🐧", "🦄", "🐍", "🦋", "🐝", "🐢" }),
+                ("🍕 Food", new[] { "🍎", "🍕", "🍔", "🌮", "🍟", "🍿", "🍩", "🍪", "🎂", "🍰", "☕", "🍺", "🍷", "🧃", "🍫" }),
+            };
+
+            var moreItem = new MenuItem { Header = "More reactions ▸", Foreground = dim };
+            foreach (var (catName, catEmojis) in categories)
+            {
+                var catItem = new MenuItem { Header = catName, Foreground = fg };
+                foreach (var emoji in catEmojis)
+                {
+                    var capturedEmoji = emoji;
+                    var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
+                    var isOwn = existing is not null && existing.IsOwn;
+                    var emojiItem = new MenuItem
+                    {
+                        Header = isOwn ? $"{emoji} ✕" : emoji,
+                        Foreground = fg,
+                        FontSize = 18,
+                    };
+                    emojiItem.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
+                    catItem.Items.Add(emojiItem);
+                }
+                moreItem.Items.Add(catItem);
+            }
+            menu.Items.Add(moreItem);
+            menu.Items.Add(new Separator());
+        }
+
         // — Edit Message (own only) —
         if (msg.IsOwn && msg.MsgId is not null)
         {
@@ -1366,91 +1436,6 @@ public partial class MainView : UserControl
                     await clipboard.SetTextAsync(msg.MsgId);
             };
             menu.Items.Add(idItem);
-        }
-
-        // — Reactions row at the bottom: horizontal emoji chain + categories submenu —
-        if (msg.MsgId is not null)
-        {
-            menu.Items.Add(new Separator());
-
-            var quickEmojis = new[] { "👍", "❤️", "😂", "🔥", "👀" };
-            var emojiBar = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 6,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-            };
-            foreach (var emoji in quickEmojis)
-            {
-                var capturedEmoji = emoji;
-                var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
-                var isOwn = existing is not null && existing.IsOwn;
-                var tb = new TextBlock
-                {
-                    Text = emoji,
-                    FontSize = 22,
-                    Cursor = new Cursor(StandardCursorType.Hand),
-                    Opacity = isOwn ? 0.45 : 1.0,
-                    Padding = new Thickness(6, 2),
-                    VerticalAlignment = VerticalAlignment.Center,
-                };
-                tb.PointerPressed += (_, pe) =>
-                {
-                    pe.Handled = true;
-                    vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
-                    menu.Close();
-                };
-                emojiBar.Children.Add(tb);
-            }
-
-            // "+" opens the full categories picker
-            var moreButton = new TextBlock
-            {
-                Text = "＋",
-                FontSize = 20,
-                Foreground = dim,
-                Cursor = new Cursor(StandardCursorType.Hand),
-                Padding = new Thickness(6, 2),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            emojiBar.Children.Add(moreButton);
-
-            var barItem = new MenuItem { Header = emojiBar, Padding = new Thickness(4, 2) };
-            // Swallow the row's own click — children handle their own events.
-            barItem.Click += (_, ce) => ce.Handled = true;
-            menu.Items.Add(barItem);
-
-            var categories = new (string Name, string[] Emojis)[]
-            {
-                ("😀 Smileys", new[] { "😀", "😁", "😅", "🤣", "😊", "😇", "😍", "🥰", "😘", "😎", "🤩", "🤔", "🤨", "😏", "🙄", "😬", "😢", "😭", "😤", "😡", "🥺", "😱", "🤯", "😴", "🤮", "🥳", "😈", "🤡" }),
-                ("👋 Gestures", new[] { "👍", "👎", "👏", "🙌", "🤝", "🙏", "💪", "✌️", "🤞", "👌", "✋", "👋", "🤙", "✊", "👊", "☝️", "🫡", "🫶" }),
-                ("❤️ Hearts", new[] { "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💔", "❣️", "💕", "💖", "💝" }),
-                ("⭐ Symbols", new[] { "✨", "⭐", "💯", "💥", "💫", "💤", "💬", "👀", "✅", "❌", "⚠️", "🚀", "🎉", "🏆", "💎", "🔔", "📌", "🎯", "🔥", "💀", "☠️", "🤖", "👽", "👻", "💩" }),
-                ("🐾 Animals", new[] { "🐶", "🐱", "🐭", "🐰", "🦊", "🐻", "🐼", "🐸", "🐵", "🙈", "🙉", "🙊", "🐧", "🦄", "🐍", "🦋", "🐝", "🐢" }),
-                ("🍕 Food", new[] { "🍎", "🍕", "🍔", "🌮", "🍟", "🍿", "🍩", "🍪", "🎂", "🍰", "☕", "🍺", "🍷", "🧃", "🍫" }),
-            };
-
-            var moreItem = new MenuItem { Header = "More reactions…", Foreground = dim };
-            foreach (var (catName, catEmojis) in categories)
-            {
-                var catItem = new MenuItem { Header = catName, Foreground = fg };
-                foreach (var emoji in catEmojis)
-                {
-                    var capturedEmoji = emoji;
-                    var existing = msg.Reactions.FirstOrDefault(r => r.Emoji == capturedEmoji);
-                    var isOwn = existing is not null && existing.IsOwn;
-                    var emojiItem = new MenuItem
-                    {
-                        Header = isOwn ? $"{emoji} ✕" : emoji,
-                        Foreground = fg,
-                        FontSize = 18,
-                    };
-                    emojiItem.Click += (_, _) => vm.RequestReaction(msg.MsgId!, capturedEmoji, !isOwn);
-                    catItem.Items.Add(emojiItem);
-                }
-                moreItem.Items.Add(catItem);
-            }
-            menu.Items.Add(moreItem);
         }
 
         if (menu.Items.Count == 0) return;

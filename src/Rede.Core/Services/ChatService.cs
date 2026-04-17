@@ -388,7 +388,11 @@ public class ChatService : IDisposable
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTime.Now;
-        var msgId = ProtocolSerializer.GetString(innerObj, "msgId");
+        // The server stamps msgId on the outer sealed envelope — the inner
+        // (sender-built) payload never carries one. Reading it from innerObj
+        // leaves stored messages with MsgId = null, so reactions/edit/delete
+        // can never find the target.
+        var msgId = ProtocolSerializer.GetString(msg, "msgId");
 
         _store.AddChatMessage(Profile, from, new ChatMessage
         {
