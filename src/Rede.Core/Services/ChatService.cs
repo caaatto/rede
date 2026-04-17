@@ -205,7 +205,12 @@ public class ChatService : IDisposable
             {
                 From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
             }, Passphrase);
+            DebugLog($"SendMessage persisted own msg to {targetId}, MsgId=null, text.len={text.Length}, ctrl={text.Contains("\"__rede_ctrl\"")}");
             OnMessageSent?.Invoke(targetId, text, ttl);
+        }
+        else if (sentAny)
+        {
+            DebugLog($"SendMessage control-msg skipped persist targetId={targetId}");
         }
 
         // Fetch pre-key bundles for devices without sessions
@@ -331,12 +336,17 @@ public class ChatService : IDisposable
         if (plaintext is null) return;
 
         // Check for control messages (group key distribution, reactions)
-        if (TryHandleControlMessage(plaintext, from)) return;
+        if (TryHandleControlMessage(plaintext, from))
+        {
+            DebugLog($"HandleMessage: control msg from {from} (handled)");
+            return;
+        }
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var ttl = ProtocolSerializer.GetInt(msg, "ttl");
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
+        DebugLog($"HandleMessage: from={from} msgId={msgId ?? "null"} text.len={sanitized.Length}");
 
         // Store chat history (debounced)
         _store.AddChatMessage(Profile, from, new ChatMessage
@@ -384,7 +394,11 @@ public class ChatService : IDisposable
         if (plaintext is null) return;
 
         // Check for control messages (group key distribution, reactions)
-        if (TryHandleControlMessage(plaintext, from)) return;
+        if (TryHandleControlMessage(plaintext, from))
+        {
+            DebugLog($"HandleSealedMessage: control msg from {from} (handled)");
+            return;
+        }
 
         var sanitized = EscapeContent(plaintext);
         var ts = DateTime.Now;
@@ -393,6 +407,7 @@ public class ChatService : IDisposable
         // leaves stored messages with MsgId = null, so reactions/edit/delete
         // can never find the target.
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
+        DebugLog($"HandleSealedMessage: from={from} outerMsgId={msgId ?? "null"} text.len={sanitized.Length}");
 
         _store.AddChatMessage(Profile, from, new ChatMessage
         {
@@ -588,11 +603,13 @@ public class ChatService : IDisposable
         if (Profile is null || Passphrase is null) return;
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
         var to = ProtocolSerializer.GetString(msg, "to");
+        DebugLog($"HandleMessageAck: msgId={msgId ?? "null"} to={to ?? "null"}");
         if (msgId is null || to is null) return;
 
         // ACKs arrive in send order (FIFO on the WS connection), so assign to
         // the earliest own message still missing a msgId. Running backwards
         // would pair ACK_1 with msg_2 when two messages are sent in quick succession.
+        bool assigned = false;
         if (Profile.ChatHistory.TryGetValue(to, out var history) && history.Count > 0)
         {
             for (int i = 0; i < history.Count; i++)
@@ -600,10 +617,14 @@ public class ChatService : IDisposable
                 if (history[i].From == Profile.UserId && history[i].MsgId is null)
                 {
                     history[i].MsgId = msgId;
+                    assigned = true;
+                    DebugLog($"  assigned to history[{i}] in chat={to}");
                     break;
                 }
             }
         }
+        if (!assigned) DebugLog($"  no null-msgId own message found in history[{to}]");
+        if (assigned) _store.SaveChatHistoryDebounced(Profile, Passphrase);
         OnOwnMessageIdAssigned?.Invoke(to, msgId);
     }
     private void HandleSealedMessageAck(JsonObject msg)
@@ -611,6 +632,7 @@ public class ChatService : IDisposable
         // Sealed sender ACK also carries msgId — extract it
         if (Profile is null || Passphrase is null) return;
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
+        DebugLog($"HandleSealedMessageAck: msgId={msgId ?? "null"}");
         if (msgId is null) return;
 
         // Sealed ACKs carry no `to` field, so we scan across contacts and pick
@@ -624,11 +646,30 @@ public class ChatService : IDisposable
                 if (history[i].From == Profile.UserId && history[i].MsgId is null)
                 {
                     history[i].MsgId = msgId;
+                    DebugLog($"  assigned to history[{i}] in chat={chatKey}");
+                    _store.SaveChatHistoryDebounced(Profile, Passphrase);
                     OnOwnMessageIdAssigned?.Invoke(chatKey, msgId);
                     return;
                 }
             }
         }
+        DebugLog($"  no null-msgId own message found in any DM chat");
+    }
+
+    private static readonly object _debugLogLock = new();
+    private static void DebugLog(string line)
+    {
+        try
+        {
+            var path = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".rede", "debug.log");
+            lock (_debugLogLock)
+            {
+                System.IO.File.AppendAllText(path, $"[{DateTime.Now:HH:mm:ss.fff}] {line}\n");
+            }
+        }
+        catch { }
     }
 
     private void HandlePrekeyBundle(JsonObject msg)
