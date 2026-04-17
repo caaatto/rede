@@ -1214,6 +1214,17 @@ public partial class MainView : UserControl
         var fg = Brush.Parse("#e0e0e8");
         var dim = Brush.Parse("#6b7280");
 
+        // TEMP diagnostic: always show stored MsgId so we can see why reactions are missing
+        var diagItem = new MenuItem
+        {
+            Header = $"[DBG] MsgId: {msg.MsgId ?? "null"} | From: {msg.From} | IsOwn: {msg.IsOwn}",
+            Foreground = dim,
+            IsEnabled = false,
+            FontSize = 11,
+        };
+        menu.Items.Add(diagItem);
+        menu.Items.Add(new Separator());
+
         // — Reactions at the top: horizontal quick bar + expandable categories —
         if (msg.MsgId is not null)
         {
