@@ -328,6 +328,30 @@
 - ProfileEncryption Legacy-HMAC Triple-scrypt — Bis zu 3 scrypt-Derivationen bei Legacy-Profilen. Akzeptiert: betrifft nur Migration von sehr alten Profilen.
 - SecureTextBox IME-Kompatibilität — Kein IME-Support (CJK-Input). Feature-Gap, kein Security-Issue.
 
+## Security Audit (2026-04-17, Runde 13) — Findings
+
+Fokus auf Änderungen seit Runde 12 (2026-04-06): FIFO ACK-Queue (v2.18.31–v2.18.39), Reaktionen/Edits/Deletes, RNNoise-Install, Passphrase-Change, pkexec-Update.
+
+### High (Client v2)
+[x] H1: **`_pendingAck` Multi-Device Misalignment** — `ChatService.SendMessage()` enqueued **einmal** pro Nachricht, aber `SendToDevice()` ruft `_conn.Send(MESSAGE)` einmal **pro Device** auf. Server ACKt jede MESSAGE einzeln (server/index.js:945). Für einen Kontakt mit N Devices kommt also N×ACK, aber nur 1 Enqueue — der 2. ACK dequeuet den Eintrag der **nächsten** Nachricht und stempelt ihr die falsche `msgId` zu. Folgen: Reaktionen/Edits/Deletes gehen an falsche Nachricht, Receiver-Side der FIFO sieht andere msgId als Sender. Fix: entweder pro Device-Send enqueuen, oder ACKs server-seitig pro Device bündeln, oder Tracking-Token im MESSAGE-Payload mitsenden.
+[x] H2: **Control-Message Echo klaut Queue-Head** — `ChatService` / `GroupService` / `PlaceService` senden Control-Messages (Reactions/Edits/Deletes) ohne Enqueue, aber Server ACKt/echoet sie trotzdem. Wenn im `_pendingAck` eine reguläre Nachricht wartet, dequeuet der Control-ACK sie irrtümlich → falsche MsgId gestempelt. Race ist rennbar durch: (1) reguläre Text-Nachricht senden, (2) sofort auf älteren Msg reagieren — bevor ACK1 eintrifft klaut ACK2 den Eintrag. Fix: Control-Sends mit einem Sentinel enqueuen (`Msg=null` Marker) oder Control-ACKs serverseitig mit Flag markieren.
+[x] H3: **RNNoise Native-Lib ohne Signaturverifikation** — `MainWindow.axaml.cs:2452` lädt `librnnoise.so` / `rnnoise.dll` direkt von GitHub-Release-URL via `HttpClient.GetByteArrayAsync()` und schreibt die Bytes nach `~/.rede/libs/`. Danach wird das Binary via `NativeLibrary.TryLoad()` in den Client-Prozess geladen — **ohne Ed25519-Signatur-Check, ohne SHA256-Hash-Check, ohne Größen-Check**. Ein kompromittiertes Release-Asset oder MITM-Angriff auf `api.github.com` resultiert in Remote Code Execution im REDE-Prozess mit allen Crypto-Keys und dem Mikrofon-Zugriff. `UpdateService` macht für den App-Binary genau das richtige (Ed25519 + SHA256SUMS) — dieselbe Kette muss hier greifen. Fix: Ed25519-Sig-Asset (`librnnoise.so.sig`) + `SHA256SUMS` prüfen; Build entsprechend erweitern (`scripts/sign-release.sh` läuft bereits über Ed25519-Keypair).
+
+### Medium (Client v2)
+[x] M1: **`_pendingAck` unbounded** — Weder `ChatService._pendingAck` noch `GroupService._pendingAck` noch `PlaceService._pendingAck` haben einen Cap (kontrastiert mit `_pendingOutgoing` = 100). Bei langem Server-Timeout oder stecken gebliebenen ACKs wächst die Queue monoton und hält harte Referenzen auf `ChatMessage`-Instanzen. Fix: Cap bei 500, ältester Eintrag droppen (mit Log).
+[x] M2: **FIFO nicht auf Reconnect geleert** — Weder `_pendingAck` (Core-Layer) noch `PendingAckVms` (UI-Layer in MainViewModel) werden bei Verbindungsabbruch/Reconnect geleert. Nachrichten vor dem Disconnect, die keinen ACK bekommen haben, verbleiben in der Queue; die ersten N ACKs nach Reconnect dequeuen sie — Folge: msgId-Stamp-Misalignment für alle Nachrichten nach dem Reconnect. Fix: `Clear()` im `RedeConnection.OnDisconnected`-Handler für alle drei Services.
+[x] M3: **pkexec Shell-Injection via `Environment.ProcessPath`** — `UpdateService.cs:340` baut den Update-Shell-Befehl via String-Interpolation mit Single-Quoting: `mv -f '{currentExe}' '{currentExe}.old' && mv -f '{tempNew}' '{currentExe}'`. Enthält `Environment.ProcessPath` einen Single-Quote (legal auf Linux-Filesystemen), bricht das Quoting auf; weil pkexec mit root-Rechten läuft, wird die Injection als root ausgeführt. `tempNew` ist via `Guid` sicher, `currentExe` nicht. Angriffsvoraussetzung: Angreifer kann REDE an Pfad mit `'` installieren (z.B. AppImage-Loader in kontrolliertem Home). Fix: Pfade via `--` + argv statt Shell-Interpolation übergeben, z.B. Polkit-Policy mit festem Action-Name.
+
+### Low (Client v2)
+[ ] L1: **MarkdownTextBlock Strikethrough-Regex** — `~~([^~]+?)~~` ist durch den `RegexTimeout = 100ms` (MarkdownTextBlock.cs:27) und `MaxRenderLength = 8192` bereits eingegrenzt. Kein ReDoS-Risiko in Praxis, aber `[^~]+?` + umschließende Literale könnten bei pathologischem Input (`~~~~~~~~~…` mit 8k Zeichen) die 100ms knapp reißen — unkritisch da `RegexMatchTimeoutException` im try/catch landet und fallback auf Plain-Run rendert.
+
+### Analysiert, kein Fix nötig
+- `ProfileStore.ChangePassphraseAsync` verifiziert selber nicht, aber Caller (`MainWindow.axaml.cs:2346`) prüft via `CryptographicOperations.FixedTimeEquals` gegen `_auth.Passphrase`. OK.
+- `SecureTextBox.PasteFromClipboardAsync` — Clipboard-Text als managed string sitzt kurz auf dem Heap; unvermeidlich bei Paste. Window ist µs, kein Issue.
+- `Program.cs` Single-Instance-Lock via `FileStream(FileShare.None)` — advisory lock funktioniert auf Linux und Windows. OK.
+- `ContactService.RemoveContact` — löscht Contact + Chat-History + Ratchet-States + Sender-Keys atomar im Speicher, dann `FlushAsync`. OK.
+- `UpdateService.IsValidExecutable` — Magic-Byte-Check (ELF/PE). Kein SIG-Ersatz, nur Sanity-Check vor Signatur-Verify. OK.
+
 ### Bekannte Einschränkungen (nicht gefixt)
 - Status-Broadcast O(N²) — Architekturelles Trade-off für Privacy (Server kennt keine Contact-Listen). Rate-Limited 5/min pro User (Runde 6 H5). Kein Fix ohne Subscription-Modell, das den Social Graph leaken würde.
 - ~~Sender Keys Legacy-Signatur-Fallback (ohne contextId)~~ — GEFIXT: Legacy-Fallback in `SenderKeys.cs` (C#) und `crypto.js` (JS) entfernt. Alle Clients seit v2.17.3 signieren mit contextId. Pre-v2.17.3 Nachrichten werden nicht mehr akzeptiert.

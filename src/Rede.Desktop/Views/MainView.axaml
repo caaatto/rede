@@ -360,7 +360,8 @@
         </Border>
 
         <!-- ===== CHAT AREA ===== -->
-        <DockPanel Grid.Column="1">
+        <DockPanel Grid.Column="1"
+                   DragDrop.AllowDrop="True">
 
             <!-- Chat header (extra top margin for title bar) -->
             <Border DockPanel.Dock="Top" Padding="16,12" Margin="0,30,0,0"
@@ -399,6 +400,30 @@
                             Click="CallContact_Click">
                         <Image Source="{StaticResource IconMicrophone}" Width="18" Height="18" />
                     </Button>
+                </Grid>
+            </Border>
+
+            <!-- In-chat message search bar (Ctrl+F to open, Esc to close) -->
+            <Border DockPanel.Dock="Top"
+                    Padding="12,8"
+                    Background="{DynamicResource RedeSurfaceBrush}"
+                    BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                    BorderThickness="0,0,0,1"
+                    IsVisible="{Binding IsMessageSearchVisible}">
+                <Grid ColumnDefinitions="*,8,Auto">
+                    <TextBox Grid.Column="0"
+                             x:Name="MessageSearchBox"
+                             Text="{Binding MessageSearchQuery}"
+                             Watermark="Search this conversation..."
+                             FontSize="{StaticResource RedeSmallSize}"
+                             Padding="10,6"
+                             MinHeight="0"
+                             KeyDown="MessageSearchBox_KeyDown" />
+                    <Button Grid.Column="2" Content="✕"
+                            FontSize="14" Padding="8,4"
+                            Background="Transparent"
+                            Foreground="{DynamicResource RedeSecondaryBrush}"
+                            Command="{Binding CloseMessageSearchCommand}" />
                 </Grid>
             </Border>
 
@@ -469,9 +494,16 @@
                                 Click="AttachButton_Click"
                                 ToolTip.Tip="Attach file" />
                         <TextBox Grid.Column="2"
+                                 x:Name="InputBox"
                                  Text="{Binding InputText}"
                                  Watermark="Type a message or /command..."
                                  MaxLength="4096"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="40"
+                                 MaxHeight="240"
+                                 VerticalContentAlignment="Center"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  KeyDown="InputBox_KeyDown" />
                         <Button Grid.Column="4"
                                 Content="Send"
@@ -491,6 +523,22 @@
                               VerticalAlignment="Bottom">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:ChatMessageViewModel">
+                            <StackPanel Spacing="0" IsVisible="{Binding !IsSearchHidden}">
+                            <!-- Day separator (Today / Yesterday / dd MMM yyyy) -->
+                            <Grid ColumnDefinitions="*,Auto,*"
+                                  Margin="0,12,0,4"
+                                  IsVisible="{Binding ShowDateSeparator}">
+                                <Border Grid.Column="0" Height="1" VerticalAlignment="Center"
+                                        Background="{DynamicResource RedeBorderSubtleBrush}" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding DateSeparatorText}"
+                                           Margin="10,0"
+                                           FontSize="{StaticResource RedeCaptionSize}"
+                                           FontWeight="{StaticResource RedeWeightSemiBold}"
+                                           Foreground="{DynamicResource RedeTextMutedBrush}" />
+                                <Border Grid.Column="2" Height="1" VerticalAlignment="Center"
+                                        Background="{DynamicResource RedeBorderSubtleBrush}" />
+                            </Grid>
                             <Border Margin="0,2" Padding="0,4"
                                     Tag="{Binding}"
                                     PointerReleased="MessageItem_PointerReleased">
@@ -523,12 +571,12 @@
                                                 HorizontalAlignment="Left"
                                                 Margin="0,0,80,0"
                                                 IsVisible="{Binding !IsOwn}">
-                                        <!-- Sender avatar -->
+                                        <!-- Sender avatar (only on first message of a group) -->
                                         <Border Width="40" Height="40" CornerRadius="20"
                                                 Background="{Binding SenderAccentBrush}"
                                                 ClipToBounds="True"
                                                 VerticalAlignment="Top" Margin="0,20,0,0"
-                                                IsVisible="{Binding !IsSystem}">
+                                                IsVisible="{Binding ShowHeader}">
                                             <Panel>
                                                 <TextBlock Text="{Binding SenderInitial}"
                                                            FontSize="16" FontWeight="SemiBold"
@@ -542,9 +590,12 @@
                                                        IsVisible="{Binding HasSenderAvatar}" />
                                             </Panel>
                                         </Border>
+                                        <!-- Spacer so grouped bubbles stay aligned with the first one -->
+                                        <Border Width="40" Height="0"
+                                                IsVisible="{Binding !ShowHeader}" />
                                         <StackPanel Spacing="4">
                                             <StackPanel Orientation="Horizontal" Spacing="8"
-                                                        IsVisible="{Binding !IsSystem}">
+                                                        IsVisible="{Binding ShowHeader}">
                                                 <TextBlock Text="{Binding From}"
                                                            Foreground="{Binding SenderAccentBrush}"
                                                            FontWeight="{StaticResource RedeWeightSemiBold}"
@@ -775,7 +826,8 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
                                         <StackPanel Orientation="Horizontal" Spacing="6"
-                                                    HorizontalAlignment="Right">
+                                                    HorizontalAlignment="Right"
+                                                    IsVisible="{Binding ShowHeader}">
                                             <TextBlock Text="{Binding TimeString}"
                                                        Classes="muted"
                                                        FontSize="{StaticResource RedeCaptionSize}" />
@@ -783,6 +835,7 @@
                                     </StackPanel>
                                 </Grid>
                             </Border>
+                            </StackPanel>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -869,6 +922,75 @@
         </Border>
 
     </Grid>
+
+    <!-- ===== QUICK SWITCHER (Ctrl+K) ===== -->
+    <!-- Full-bounds dim layer; click anywhere outside the popup to dismiss. -->
+    <Border IsVisible="{Binding IsQuickSwitcherOpen}"
+            Background="#A0000000"
+            PointerPressed="QuickSwitcherDim_PointerPressed">
+        <Border Width="560" MinHeight="80" MaxHeight="500"
+                Margin="0,120,0,0"
+                HorizontalAlignment="Center" VerticalAlignment="Top"
+                Background="{DynamicResource RedeSurfaceBrush}"
+                BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                BoxShadow="0 8 30 0 #80000000"
+                Padding="0"
+                PointerPressed="QuickSwitcherPopup_PointerPressed">
+            <DockPanel>
+                <Border DockPanel.Dock="Top" Padding="14,12,14,10"
+                        BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,0,0,1">
+                    <TextBox x:Name="QuickSwitcherBox"
+                             Text="{Binding QuickSwitcherQuery}"
+                             Watermark="Jump to a contact, group, or channel..."
+                             FontSize="14"
+                             Padding="8,6"
+                             MinHeight="0"
+                             KeyDown="QuickSwitcherBox_KeyDown" />
+                </Border>
+                <ScrollViewer MaxHeight="380" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding QuickSwitcherResults}" Padding="6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:QuickSwitchResultViewModel">
+                                <Button Classes="ghost"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Padding="10,8"
+                                        Margin="2,1"
+                                        BorderThickness="0"
+                                        CornerRadius="6"
+                                        Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).QuickSwitcherPickCommand}"
+                                        CommandParameter="{Binding}">
+                                    <Grid ColumnDefinitions="32,10,*">
+                                        <Border Grid.Column="0" Width="32" Height="32"
+                                                CornerRadius="6"
+                                                Background="{Binding AccentBrush}">
+                                            <TextBlock Text="{Binding IconText}"
+                                                       Foreground="White"
+                                                       FontWeight="SemiBold"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="2" Spacing="2"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Title}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13" />
+                                            <TextBlock Text="{Binding Subtitle}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource RedeTextMutedBrush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+    </Border>
 
     </Panel>
 </UserControl>

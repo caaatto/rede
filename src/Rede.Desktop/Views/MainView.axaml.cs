@@ -29,6 +29,10 @@ public partial class MainView : UserControl
     {
         base.OnLoaded(e);
 
+        // Drag-drop attachments onto the chat area.
+        AddHandler(DragDrop.DragOverEvent, OnChatDragOver);
+        AddHandler(DragDrop.DropEvent, OnChatDrop);
+
         // Track scroll position for "Newest Messages" button
         MessageScroller.ScrollChanged += OnMessageScrollChanged;
 
@@ -55,12 +59,35 @@ public partial class MainView : UserControl
     {
         base.OnUnloaded(e);
         MessageScroller.ScrollChanged -= OnMessageScrollChanged;
+        RemoveHandler(DragDrop.DragOverEvent, OnChatDragOver);
+        RemoveHandler(DragDrop.DropEvent, OnChatDrop);
         // M4: Unsubscribe to prevent memory leak
         if (DataContext is MainViewModel vm && _scrollHandler is not null)
         {
             vm.Messages.CollectionChanged -= _scrollHandler;
             _scrollHandler = null;
         }
+    }
+
+    private void OnChatDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.Data.Contains(DataFormats.Files) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnChatDrop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var files = e.Data.GetFiles();
+        if (files is null) return;
+
+        var paths = files
+            .Select(f => f.TryGetLocalPath())
+            .Where(p => !string.IsNullOrEmpty(p))
+            .Cast<string>()
+            .ToArray();
+        if (paths.Length > 0) vm.RequestAttach(paths);
+        e.Handled = true;
     }
 
     private void OnMessageScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -98,10 +125,12 @@ public partial class MainView : UserControl
         }
     }
 
-    private void InputBox_KeyDown(object? sender, KeyEventArgs e)
+    private async void InputBox_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {
+            // Shift+Enter inserts a newline (let TextBox handle it via AcceptsReturn).
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
             if (DataContext is MainViewModel vm)
                 vm.SendMessageCommand.Execute(null);
             e.Handled = true;
@@ -109,9 +138,130 @@ public partial class MainView : UserControl
         else if (e.Key == Key.Escape)
         {
             if (DataContext is MainViewModel vm)
+            {
+                // Cancel reply/edit first; only fall back to sidebar toggle when nothing's queued.
+                if (vm.IsReplying) { vm.CancelReplyCommand.Execute(null); e.Handled = true; return; }
+                if (vm.IsEditing)  { vm.CancelEditCommand.Execute(null);  e.Handled = true; return; }
                 vm.ToggleSidebarCommand.Execute(null);
+            }
             e.Handled = true;
         }
+        else if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            // Intercept paste only when the clipboard holds image bytes — text paste
+            // continues to flow through the TextBox's default handler.
+            if (await TryPasteImageAsync())
+                e.Handled = true;
+        }
+    }
+
+    // Ctrl+F bar — Esc closes, Enter does nothing special (filter is live as you type).
+    private void MessageSearchBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && DataContext is MainViewModel vm)
+        {
+            vm.CloseMessageSearchCommand.Execute(null);
+            InputBox.Focus();
+            e.Handled = true;
+        }
+    }
+
+    // Open the in-chat search bar from MainWindow's global Ctrl+F handler.
+    public void FocusMessageSearch()
+    {
+        if (DataContext is not MainViewModel vm) return;
+        vm.OpenMessageSearch();
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            this.FindControl<TextBox>("MessageSearchBox")?.Focus();
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
+    }
+
+    // Quick switcher — keyboard navigation inside the popup textbox.
+    private void QuickSwitcherBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        switch (e.Key)
+        {
+            case Key.Escape:
+                vm.CloseQuickSwitcherCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case Key.Enter:
+                vm.QuickSwitcherActivate();
+                e.Handled = true;
+                break;
+            case Key.Down:
+                vm.QuickSwitcherMove(1);
+                e.Handled = true;
+                break;
+            case Key.Up:
+                vm.QuickSwitcherMove(-1);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    // Click outside the popup body dismisses the switcher.
+    private void QuickSwitcherDim_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+            vm.CloseQuickSwitcherCommand.Execute(null);
+    }
+
+    // Eat clicks inside the popup so the dim handler doesn't dismiss when interacting.
+    private void QuickSwitcherPopup_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        e.Handled = true;
+    }
+
+    public void FocusQuickSwitcher()
+    {
+        if (DataContext is not MainViewModel vm) return;
+        vm.OpenQuickSwitcher();
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            this.FindControl<TextBox>("QuickSwitcherBox")?.Focus();
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
+    }
+
+    private async System.Threading.Tasks.Task<bool> TryPasteImageAsync()
+    {
+        if (DataContext is not MainViewModel vm) return false;
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return false;
+
+        // Avalonia exposes raw bitmap data under "image/png" on Linux/X11, "PNG" on
+        // Windows, and "public.png" on macOS. Try all common identifiers.
+        string[] candidates = { "image/png", "PNG", "public.png", "image/jpeg", "image/bmp" };
+        byte[]? data = null;
+        string ext = ".png";
+        foreach (var fmt in candidates)
+        {
+            try
+            {
+                if (await clipboard.GetDataAsync(fmt) is byte[] bytes && bytes.Length > 0)
+                {
+                    data = bytes;
+                    if (fmt.Contains("jpeg", StringComparison.OrdinalIgnoreCase)) ext = ".jpg";
+                    else if (fmt.Contains("bmp", StringComparison.OrdinalIgnoreCase)) ext = ".bmp";
+                    break;
+                }
+            }
+            catch { /* format not present, try next */ }
+        }
+        if (data is null) return false;
+
+        try
+        {
+            var tmp = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                $"rede-paste-{DateTime.UtcNow:yyyyMMddHHmmssfff}{ext}");
+            await System.IO.File.WriteAllBytesAsync(tmp, data);
+            vm.RequestAttach(new[] { tmp });
+            return true;
+        }
+        catch { return false; }
     }
 
     private void AddContact_Click(object? sender, RoutedEventArgs e)

@@ -48,6 +48,14 @@ public partial class MainWindow : Window
     private string _lastTransport = "";
     private bool _isNewUser;
 
+    // Idle auto-away: switch to "away" after IdleAwayThreshold of no input/mouse,
+    // restore the prior status on the next activity. Status is sent over the wire
+    // but NOT persisted to Profile so the user's chosen status returns naturally.
+    private DateTime _lastActivityUtc = DateTime.UtcNow;
+    private string? _statusBeforeAutoAway;
+    private DispatcherTimer? _idleTimer;
+    private static readonly TimeSpan IdleAwayThreshold = TimeSpan.FromMinutes(5);
+
     public MainWindow()
     {
         InitializeComponent();
@@ -65,6 +73,66 @@ public partial class MainWindow : Window
             }
         };
         Closing += OnWindowClosing;
+
+        // Track user input/mouse activity for idle auto-away.
+        // RoutingStrategies.Tunnel | Bubble + handledEventsToo so we still see
+        // events that child controls have handled (typing in TextBox, scrolling, etc.).
+        AddHandler(InputElement.PointerMovedEvent, (_, _) => OnUserActivity(),
+            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble, true);
+        AddHandler(InputElement.KeyDownEvent, (_, _) => OnUserActivity(),
+            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble, true);
+        AddHandler(InputElement.PointerPressedEvent, (_, _) => OnUserActivity(),
+            Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble, true);
+    }
+
+    private void OnUserActivity()
+    {
+        _lastActivityUtc = DateTime.UtcNow;
+        // If we previously auto-flipped to "away", restore the user's chosen status.
+        if (_statusBeforeAutoAway is not null)
+        {
+            var restore = _statusBeforeAutoAway;
+            _statusBeforeAutoAway = null;
+            SendEphemeralStatus(restore);
+        }
+    }
+
+    private void StartIdleTimer()
+    {
+        if (_idleTimer is not null) return;
+        _idleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _idleTimer.Tick += (_, _) => OnIdleTick();
+        _idleTimer.Start();
+    }
+
+    private void OnIdleTick()
+    {
+        if (_auth?.Profile is null || _conn is null) return;
+        // Only auto-away from "online" — never override DND or invisible.
+        var current = _auth.Profile.Status ?? "online";
+        if (_statusBeforeAutoAway is not null) return; // already auto-away
+        if (current != "online") return;
+        if (DateTime.UtcNow - _lastActivityUtc < IdleAwayThreshold) return;
+
+        _statusBeforeAutoAway = current;
+        SendEphemeralStatus("away");
+    }
+
+    private void SendEphemeralStatus(string status)
+    {
+        if (_conn is null || _auth?.Profile is null) return;
+        // Update broadcast + UI but DON'T touch Profile.Status — the user's chosen
+        // status must return on activity without re-saving the profile.
+        _conn.Send(Rede.Core.Protocol.Msg.StatusUpdate, new System.Text.Json.Nodes.JsonObject
+        {
+            ["status"] = status,
+            ["customStatus"] = _auth.Profile.CustomStatus,
+        });
+        _notifications.OwnStatus = status;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _mainVm.OwnStatus = status;
+        });
     }
 
     private bool _flushingOnClose;
@@ -718,12 +786,22 @@ public partial class MainWindow : Window
         {
             _mainVm.ConnectionStatus = "Disconnected";
             _mainVm.IsConnected = false;
+            // Drop pending ACK queues — post-reconnect ACKs don't correspond to pre-disconnect
+            // sends, so stale entries would mispair and stamp wrong messages.
+            _chat?.ClearPendingAcks();
+            _groups?.ClearPendingAcks();
+            _places?.ClearPendingAcks();
+            _mainVm.PendingAckVms.Clear();
         });
 
         _conn.OnReconnecting += () => Dispatcher.UIThread.Post(() =>
         {
             _mainVm.ConnectionStatus = "Reconnecting...";
             _mainVm.IsConnected = false;
+            _chat?.ClearPendingAcks();
+            _groups?.ClearPendingAcks();
+            _places?.ClearPendingAcks();
+            _mainVm.PendingAckVms.Clear();
         });
 
         _conn.OnError += err => Dispatcher.UIThread.Post(() =>
@@ -1057,6 +1135,8 @@ public partial class MainWindow : Window
         {
             _mainVm.AddSystemMessage(msg);
         });
+
+        StartIdleTimer();
     }
 
     /// <summary>
@@ -2467,6 +2547,7 @@ public partial class MainWindow : Window
                 var apiUrl = "https://api.github.com/repos/caaatto/rede/releases";
                 var releasesJson = await http.GetStringAsync(apiUrl);
                 string? downloadUrl = null;
+                string? releaseTag = null;
                 using (var doc = System.Text.Json.JsonDocument.Parse(releasesJson))
                 {
                     foreach (var release in doc.RootElement.EnumerateArray())
@@ -2479,6 +2560,7 @@ public partial class MainWindow : Window
                                     asset.TryGetProperty("browser_download_url", out var urlProp))
                                 {
                                     downloadUrl = urlProp.GetString();
+                                    releaseTag = release.GetProperty("tag_name").GetString();
                                     break;
                                 }
                             }
@@ -2486,9 +2568,20 @@ public partial class MainWindow : Window
                         if (downloadUrl is not null) break;
                     }
                 }
-                if (downloadUrl is null)
+                if (downloadUrl is null || releaseTag is null)
                     throw new Exception($"{libFile} not found in any GitHub release — upload it with the next release");
                 var bytes = await http.GetByteArrayAsync(downloadUrl);
+
+                // RNNoise is a native library loaded into our process — a tampered blob
+                // executes arbitrary code with access to the unlocked profile + microphone.
+                // Verify Ed25519 signature + SHA256SUMS via the same path as binary updates
+                // before writing anything to disk.
+                string? verifyErr = null;
+                var verified = await Rede.Core.Services.UpdateService.VerifyReleaseAssetAsync(
+                    releaseTag, libFile, bytes, s => verifyErr = s);
+                if (!verified)
+                    throw new Exception(verifyErr ?? "Signature/hash verification failed — refusing to install.");
+
                 await File.WriteAllBytesAsync(destPath, bytes);
 
                 Rede.Core.Audio.RNNoise.TryReload();
@@ -2776,6 +2869,74 @@ public partial class MainWindow : Window
             _conn?.Dispose();
             ForceQuit();
         }
+
+        // Alt+↑/↓ — navigate channels within the currently selected place.
+        if ((e.Key == Key.Up || e.Key == Key.Down) && e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            if (NavigateChannelInPlace(e.Key == Key.Down ? 1 : -1))
+                e.Handled = true;
+        }
+
+        // Ctrl+Tab / Ctrl+Shift+Tab — cycle through all conversations.
+        if (e.Key == Key.Tab && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            var dir = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1;
+            if (CycleConversation(dir))
+                e.Handled = true;
+        }
+
+        // Ctrl+K — quick switcher overlay (Discord/Slack/Linear style).
+        if (e.Key == Key.K && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            if (RootContent.Content is Views.MainView mv)
+            {
+                mv.FocusQuickSwitcher();
+                e.Handled = true;
+            }
+        }
+
+        // Ctrl+F — in-chat message search (only when a chat is open).
+        if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            if (RootContent.Content is Views.MainView mv && _mainVm.SelectedConversation is not null)
+            {
+                mv.FocusMessageSearch();
+                e.Handled = true;
+            }
+        }
+    }
+
+    private bool NavigateChannelInPlace(int delta)
+    {
+        if (_mainVm.SelectedConversation is not ChannelItemViewModel current) return false;
+        var place = _mainVm.Places.FirstOrDefault(p => p.PlaceId == current.PlaceId);
+        if (place is null || place.Channels.Count == 0) return false;
+        var idx = -1;
+        for (int i = 0; i < place.Channels.Count; i++)
+            if (place.Channels[i].ChannelId == current.ChannelId) { idx = i; break; }
+        if (idx < 0) return false;
+        var next = (idx + delta + place.Channels.Count) % place.Channels.Count;
+        if (next == idx) return false;
+        _mainVm.SelectConversationCommand.Execute(place.Channels[next]);
+        return true;
+    }
+
+    private bool CycleConversation(int delta)
+    {
+        var all = new List<object>();
+        foreach (var c in _mainVm.Contacts) all.Add(c);
+        foreach (var g in _mainVm.Groups) all.Add(g);
+        foreach (var p in _mainVm.Places)
+            foreach (var ch in p.Channels) all.Add(ch);
+        if (all.Count == 0) return false;
+
+        var cur = _mainVm.SelectedConversation;
+        var idx = cur is null ? -1 : all.IndexOf(cur);
+        var next = idx < 0
+            ? (delta > 0 ? 0 : all.Count - 1)
+            : (idx + delta + all.Count) % all.Count;
+        _mainVm.SelectConversationCommand.Execute(all[next]);
+        return true;
     }
 
     // K2: Strip file paths, stack traces, and internal details from error messages

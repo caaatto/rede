@@ -39,12 +39,24 @@ public class ChatService : IDisposable
     // H7: Queue per target — multiple messages can be pending before bundle arrives
     private readonly Dictionary<string, List<(string Text, int Ttl)>> _pendingOutgoing = new();
 
-    // ACK FIFO: every successful send pushes the target ChatMessage reference.
-    // On each msgId ACK we dequeue the head and stamp its MsgId — this is the only
-    // reliable pairing since sealed ACKs carry no `to` field and scanning ChatHistory
-    // for "first own null-MsgId" can collide with orphan legacy entries from pre-fix.
-    private readonly Queue<(string ChatKey, ChatMessage Msg, bool Sealed)> _pendingAck = new();
+    // ACK FIFO: every successful WS send (per device, including control messages) pushes
+    // one entry. On each msgId ACK we dequeue the head and stamp the referenced ChatMessage's
+    // MsgId — this is the only reliable pairing since sealed ACKs carry no `to` field and
+    // scanning ChatHistory collides with legacy orphans.
+    // Control messages push (chatKey, Msg=null) sentinels so they consume their own ACK slot
+    // and don't steal from the next user-visible message. Multi-device fan-out pushes N
+    // entries all pointing at the same ChatMessage — the first ACK stamps MsgId, subsequent
+    // ACKs are consumed but skip stamping (MsgId already set).
+    private readonly Queue<(string ChatKey, ChatMessage? Msg, bool Sealed)> _pendingAck = new();
     private readonly object _pendingAckLock = new();
+    private const int MaxPendingAck = 500;
+
+    /// <summary>Drop all pending ACK slots — called on disconnect so post-reconnect ACKs
+    /// can't mispair with stale entries from the previous session.</summary>
+    public void ClearPendingAcks()
+    {
+        lock (_pendingAckLock) _pendingAck.Clear();
+    }
 
     public event Action<string, string, string, DateTime, bool, string?>? OnMessageReceived; // from, text, chatId, timestamp, isSealed, msgId
     public event Action<string>? OnSystemMessage;
@@ -196,27 +208,33 @@ public class ChatService : IDisposable
         if (deviceIds.Count == 0 && _store.LoadRatchetState(Profile, targetId) is not null)
             haveSessions.Add(null);
 
-        // Send to devices with existing sessions
+        // Pre-create the persisted message (null for control messages so ACKs consume
+        // their own slot without stamping anything). The same reference is pushed onto
+        // _pendingAck once per successful WS send — first ACK stamps MsgId, rest are no-ops.
+        bool isControl = text.Contains("\"__rede_ctrl\"");
+        ChatMessage? persistedMsg = null;
+        if (haveSessions.Count > 0 && !isControl)
+        {
+            persistedMsg = new ChatMessage
+            {
+                From = Profile.UserId,
+                Text = text,
+                Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Ttl = ttl,
+            };
+        }
+
         bool sentAny = false;
         foreach (var devId in haveSessions)
         {
-            SendToDevice(targetId, devId, text, ttl, contact);
-            sentAny = true;
+            if (SendToDevice(targetId, devId, text, ttl, contact, persistedMsg))
+                sentAny = true;
         }
 
-        // Persist own message if sent via existing sessions (skip control messages)
-        if (sentAny && !text.Contains("\"__rede_ctrl\""))
+        // Persist once after the fan-out loop (only if at least one device actually sent).
+        if (sentAny && persistedMsg is not null)
         {
-            var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var persistedMsg = new ChatMessage
-            {
-                From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
-            };
             _store.AddChatMessage(Profile, targetId, persistedMsg, Passphrase);
-            lock (_pendingAckLock)
-            {
-                _pendingAck.Enqueue((targetId, persistedMsg, false));
-            }
             OnMessageSent?.Invoke(targetId, text, ttl);
         }
 
@@ -240,15 +258,15 @@ public class ChatService : IDisposable
         }
     }
 
-    private void SendToDevice(string targetId, string? devId, string text, int ttl, Contact contact)
+    private bool SendToDevice(string targetId, string? devId, string text, int ttl, Contact contact, ChatMessage? persistedMsg)
     {
-        if (Profile is null || Passphrase is null) return;
+        if (Profile is null || Passphrase is null) return false;
 
         var stateJson = _store.LoadRatchetState(Profile, targetId, devId);
-        if (stateJson is null) return;
+        if (stateJson is null) return false;
 
         var state = JsonSerializer.Deserialize<DoubleRatchet.RatchetState>(stateJson.Value);
-        if (state is null) return;
+        if (state is null) return false;
 
         var backup = state.DeepClone();
         var result = DoubleRatchet.Encrypt(state, text);
@@ -266,6 +284,7 @@ public class ChatService : IDisposable
 
         // Try sealed sender first
         bool sent = TrySealedSend(targetId, devId, msgPayload, ttl, contact);
+        bool wasSealed = sent;
         if (!sent)
         {
             // Fallback to normal send
@@ -281,11 +300,20 @@ public class ChatService : IDisposable
             var backupJson = JsonSerializer.SerializeToElement(backup);
             _store.SaveRatchetStateAsync(Profile, targetId, backupJson, Passphrase, devId);
             OnSystemMessage?.Invoke("Message not sent - connection lost. Ratchet state preserved.");
-            return;
+            return false;
         }
 
         var stateElement = JsonSerializer.SerializeToElement(state);
         _store.SaveRatchetStateAsync(Profile, targetId, stateElement, Passphrase, devId);
+
+        // One queue entry per WS send — each MESSAGE / SEALED_MESSAGE gets its own ACK.
+        // Cap protects against unbounded growth if ACKs never arrive (broken transport).
+        lock (_pendingAckLock)
+        {
+            if (_pendingAck.Count < MaxPendingAck)
+                _pendingAck.Enqueue((targetId, persistedMsg, wasSealed));
+        }
+        return true;
     }
 
     private bool TrySealedSend(string targetId, string? devId, JsonObject innerPayload, int ttl, Contact contact)
@@ -604,16 +632,19 @@ public class ChatService : IDisposable
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
         if (msgId is null) return;
 
-        // Pair this ACK with the head of the pending-ACK FIFO — WS delivers ACKs
-        // in send order so the head is the oldest un-ACKed outgoing message. Scanning
-        // Profile.ChatHistory for "first own null-MsgId" is unreliable because pre-fix
-        // orphans can absorb new ACKs (see pre-2.18.35 collision with legacy chats).
-        (string ChatKey, ChatMessage Msg, bool Sealed) entry;
+        // Dequeue exactly one slot per ACK. Slots are pushed 1:1 with WS sends so ACK
+        // order matches. Control-message slots have Msg=null (consume their own ACK,
+        // no stamping). Multi-device fan-out pushes N slots for the same ChatMessage —
+        // first ACK stamps MsgId, subsequent ACKs find it already set and skip.
+        (string ChatKey, ChatMessage? Msg, bool Sealed) entry;
         lock (_pendingAckLock)
         {
             if (_pendingAck.Count == 0) return;
             entry = _pendingAck.Dequeue();
         }
+
+        if (entry.Msg is null) return; // control-message sentinel — nothing to stamp
+        if (entry.Msg.MsgId is not null) return; // already stamped by an earlier device ACK
 
         entry.Msg.MsgId = msgId;
         _store.SaveChatHistoryDebounced(Profile, Passphrase);
@@ -686,6 +717,17 @@ public class ChatService : IDisposable
                 ProtocolSerializer.GetString(msg, "oneTimePreKey")
             );
         }
+
+        // Pre-create the persisted message for this initial send (control messages
+        // don't get persisted but still need per-send ACK slots in _pendingAck).
+        bool initIsControl = pending.Text.Contains("\"__rede_ctrl\"");
+        ChatMessage? initPersistedMsg = initIsControl ? null : new ChatMessage
+        {
+            From = Profile.UserId,
+            Text = pending.Text,
+            Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Ttl = pending.Ttl,
+        };
 
         int successCount = 0;
         foreach (var bundle in deviceBundles)
@@ -763,18 +805,24 @@ public class ChatService : IDisposable
             );
             if (pending.Ttl > 0) payload["ttl"] = pending.Ttl;
 
-            _conn.Send(Msg.Message, payload);
-            successCount++;
+            if (_conn.Send(Msg.Message, payload))
+            {
+                // One ACK slot per WS send — first ACK stamps MsgId on initPersistedMsg,
+                // subsequent (other devices) are consumed as no-ops.
+                lock (_pendingAckLock)
+                {
+                    if (_pendingAck.Count < MaxPendingAck)
+                        _pendingAck.Enqueue((targetUserId, initPersistedMsg, false));
+                }
+                successCount++;
+            }
         }
 
         if (successCount > 0)
         {
-            if (!pending.Text.Contains("\"__rede_ctrl\""))
+            if (initPersistedMsg is not null)
             {
-                _store.AddChatMessage(Profile, targetUserId, new ChatMessage
-                {
-                    From = Profile.UserId, Text = pending.Text, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = pending.Ttl,
-                }, Passphrase);
+                _store.AddChatMessage(Profile, targetUserId, initPersistedMsg, Passphrase);
                 OnMessageSent?.Invoke(targetUserId, pending.Text, pending.Ttl);
             }
             OnSystemMessage?.Invoke($"Secure session established ({successCount} device(s)).");

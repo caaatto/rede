@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Input;
 using Avalonia.Media;
 
 namespace Rede.Desktop.Controls;
@@ -31,7 +32,8 @@ public class MarkdownTextBlock : SelectableTextBlock
         @"(`[^`]+`)" +                          // group 1: inline code
         @"|(?<!\w)\*([^*]+?)\*(?!\w)" +          // group 2: *bold*
         @"|(?<!\w)_([^_]+?)_(?!\w)" +            // group 3: _italic_
-        @"|~~([^~]+?)~~",                        // group 4: ~~strikethrough~~
+        @"|~~([^~]+?)~~" +                       // group 4: ~~strikethrough~~
+        @"|\|\|([^|]+?)\|\|",                    // group 5: ||spoiler||
         RegexOptions.Compiled, RegexTimeout);
 
     private const int MaxRenderLength = 8192; // M10: Limit text length before regex processing
@@ -133,6 +135,36 @@ public class MarkdownTextBlock : SelectableTextBlock
                 };
                 span.Inlines?.Add(new Run(match.Groups[4].Value));
                 inlines.Add(span);
+            }
+            else if (match.Groups[5].Success)
+            {
+                // Spoiler: ||text|| — wrap text in an inline Border that reveals on click.
+                var content = match.Groups[5].Value;
+                var hiddenBg = new SolidColorBrush(Color.Parse("#2a2a3a"));
+                var revealedBg = new SolidColorBrush(Color.Parse("#26263a"));
+                var hiddenFg = hiddenBg; // matches background → text invisible
+                var revealedFg = new SolidColorBrush(Color.Parse("#e0e0e8"));
+                var run = new TextBlock
+                {
+                    Text = content,
+                    Foreground = hiddenFg,
+                };
+                var border = new Border
+                {
+                    Background = hiddenBg,
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(4, 0),
+                    Cursor = new Cursor(StandardCursorType.Hand),
+                    Child = run,
+                };
+                bool isRevealed = false;
+                border.PointerPressed += (_, _) =>
+                {
+                    isRevealed = !isRevealed;
+                    border.Background = isRevealed ? revealedBg : hiddenBg;
+                    run.Foreground = isRevealed ? revealedFg : hiddenFg;
+                };
+                inlines.Add(new InlineUIContainer(border));
             }
             lastEnd = match.Index + match.Length;
         }

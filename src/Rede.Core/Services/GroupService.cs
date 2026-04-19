@@ -17,12 +17,20 @@ public class GroupService : IDisposable
     private readonly ProfileStore _store;
     private readonly NonceTracker _nonceTracker = new(); // H3: Replay protection for group messages
 
-    // ACK FIFO: every persisted outgoing group message pushes its ChatMessage reference.
-    // Server echoes GROUP_MESSAGE back to sender with a server-assigned msgId, in send order.
-    // Pairing via FIFO is the only reliable method — scanning ChatHistory for "first own
-    // null-MsgId" collides with orphan legacy entries from pre-fix versions.
-    private readonly Queue<(string GroupId, ChatMessage Msg)> _pendingAck = new();
+    // ACK FIFO: every WS GROUP_MESSAGE send pushes one entry. Server echoes GROUP_MESSAGE
+    // back to sender with a server-assigned msgId, in send order. Control messages
+    // (reactions/edits/deletes) push (groupId, Msg=null) sentinels so their echo consumes
+    // its own slot and doesn't steal from the next user-visible message.
+    private readonly Queue<(string GroupId, ChatMessage? Msg)> _pendingAck = new();
     private readonly object _pendingAckLock = new();
+    private const int MaxPendingAck = 500;
+
+    /// <summary>Drop all pending ACK slots — called on disconnect so post-reconnect echoes
+    /// can't mispair with stale entries from the previous session.</summary>
+    public void ClearPendingAcks()
+    {
+        lock (_pendingAckLock) _pendingAck.Clear();
+    }
 
     /// <summary>Replay-protection tracker — exposed for persistence across restarts.</summary>
     public NonceTracker NonceTracker => _nonceTracker;
@@ -217,19 +225,30 @@ public class GroupService : IDisposable
         );
         if (ttl > 0) payload["ttl"] = ttl;
 
-        _conn.Send(Msg.GroupMessage, payload);
+        if (!_conn.Send(Msg.GroupMessage, payload)) return;
 
-        // Persist own group message (skip control messages)
-        if (!text.Contains("\"__rede_ctrl\""))
+        // One ACK slot per WS send. Control messages (reactions/edits/deletes) push a
+        // (groupId, null) sentinel — the echo consumes it but doesn't stamp anything.
+        // Regular messages push the persisted ChatMessage so the echo stamps its MsgId.
+        bool isControl = text.Contains("\"__rede_ctrl\"");
+        ChatMessage? persistedMsg = null;
+        if (!isControl)
         {
-            var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var persistedMsg = new ChatMessage
+            persistedMsg = new ChatMessage
             {
-                From = Profile.UserId, Text = text, Ts = ts, Ttl = ttl,
+                From = Profile.UserId,
+                Text = text,
+                Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Ttl = ttl,
             };
             _store.AddChatMessage(Profile, groupId, persistedMsg, Passphrase);
-            lock (_pendingAckLock) { _pendingAck.Enqueue((groupId, persistedMsg)); }
             OnGroupMessageSent?.Invoke(groupId, text, ttl);
+        }
+
+        lock (_pendingAckLock)
+        {
+            if (_pendingAck.Count < MaxPendingAck)
+                _pendingAck.Enqueue((groupId, persistedMsg));
         }
     }
 
@@ -309,20 +328,20 @@ public class GroupService : IDisposable
         if (groupId is null || from is null) return;
         if (from == Profile.UserId)
         {
-            // Server echoes own GROUP_MESSAGE back with a server-assigned msgId.
-            // Pair with the head of the pending-ACK FIFO — WS delivers echoes in send order.
-            // Scanning ChatHistory for "first own null-MsgId" is unreliable (pre-fix orphans).
+            // Server echoes own GROUP_MESSAGE back with a server-assigned msgId in send order.
+            // Dequeue exactly one slot per echo. Sentinel entries (Msg=null) from control
+            // messages get consumed silently; regular messages get their MsgId stamped once.
             var ownMsgId = ProtocolSerializer.GetString(msg, "msgId");
             if (ownMsgId is null) return;
 
-            (string GroupId, ChatMessage Msg) entry;
+            (string GroupId, ChatMessage? Msg) entry;
             lock (_pendingAckLock)
             {
-                // Echoes for control messages (reactions/edits/deletes) arrive with no
-                // matching queue entry since we don't persist/enqueue those — drop silently.
                 if (_pendingAck.Count == 0) return;
                 entry = _pendingAck.Dequeue();
             }
+            if (entry.Msg is null) return; // control-message sentinel
+            if (entry.Msg.MsgId is not null) return; // defensive — already stamped
             entry.Msg.MsgId = ownMsgId;
             _store.SaveChatHistoryDebounced(Profile, Passphrase);
             OnOwnMessageIdAssigned?.Invoke(entry.GroupId, ownMsgId);

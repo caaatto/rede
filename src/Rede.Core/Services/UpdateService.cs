@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.18.39-beta";
+    private const string CurrentVersion = "2.18.40-beta";
 
     /// <summary>
     /// Path to a file that records the last successfully installed release tag.
@@ -285,35 +285,8 @@ public class UpdateService
                 return false;
             }
 
-            // Ed25519 signature verification (preferred over SHA256 alone). When the
-            // release signing public key is configured, a valid .sig asset is REQUIRED.
-            // No fallback — an attacker who controls the GitHub Release cannot swap
-            // the binary without also forging an Ed25519 signature.
-            var sigResult = await VerifyReleaseSignatureAsync(release, bytes);
-            if (sigResult == false)
-            {
-                onStatus?.Invoke("Update failed: signature invalid or missing.");
+            if (!await VerifyReleaseAssetAsync(release.Tag, release.AssetName, bytes, onStatus))
                 return false;
-            }
-            // sigResult == null means signing is not configured for this build — fall
-            // through to SHA256 as a weaker mitigation.
-
-            // C2: Try to verify SHA256 hash from release checksums file
-            var hashVerified = await VerifyReleaseHashAsync(release, bytes);
-            if (hashVerified == false)
-            {
-                onStatus?.Invoke("Update failed: SHA256 hash mismatch! Download may be compromised.");
-                return false;
-            }
-            // hashVerified == null means no checksum file available. If signing is also
-            // not configured, the release is effectively unverified — refuse to install
-            // rather than silently trust the GitHub transport (TOFU cert pinning is the
-            // only remaining barrier and it's not enough for binary drops).
-            if (sigResult is null && hashVerified is null)
-            {
-                onStatus?.Invoke("Update failed: release is unsigned and has no SHA256SUMS asset. Refusing to install.");
-                return false;
-            }
 
             onStatus?.Invoke("Installing...");
 
@@ -336,14 +309,23 @@ public class UpdateService
 
                 onStatus?.Invoke("Requesting root privileges...");
 
-                // pkexec runs a shell one-liner: backup old, move new into place
-                var script = $"mv -f '{currentExe}' '{currentExe}.old' && mv -f '{tempNew}' '{currentExe}' && chmod 755 '{currentExe}'";
-                var psi = new ProcessStartInfo("pkexec", $"sh -c \"{script}\"")
+                // pkexec runs a shell one-liner: backup old, move new into place.
+                // Paths are shell-escaped so an install path containing quotes, spaces, or
+                // shell metacharacters can't inject additional commands into the root shell.
+                var script = $"mv -f {ShEscape(currentExe)} {ShEscape(currentExe + ".old")} && " +
+                             $"mv -f {ShEscape(tempNew)} {ShEscape(currentExe)} && " +
+                             $"chmod 755 {ShEscape(currentExe)}";
+                // Use ArgumentList so pkexec receives the argv we built — no Windows-argv
+                // re-parsing of a single Arguments string.
+                var psi = new ProcessStartInfo("pkexec")
                 {
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                 };
+                psi.ArgumentList.Add("sh");
+                psi.ArgumentList.Add("-c");
+                psi.ArgumentList.Add(script);
                 using var proc = Process.Start(psi);
                 if (proc is null) { File.Delete(tempNew); return false; }
                 await proc.WaitForExitAsync();
@@ -393,12 +375,44 @@ public class UpdateService
     }
 
     /// <summary>
-    /// Verify the Ed25519 detached signature of the downloaded binary against the
-    /// embedded release signing public key.
+    /// Public composed check: verify an asset downloaded from a given release tag passes
+    /// Ed25519 signature AND/OR SHA256SUMS validation. Returns true if verified, false if
+    /// verification fails. Callers that need to gate non-binary assets (e.g. rnnoise native
+    /// libs) share this logic so any downloaded blob from our GitHub releases gets the same
+    /// integrity guarantees as the main binary update path.
+    /// </summary>
+    public static async Task<bool> VerifyReleaseAssetAsync(string tag, string assetName, byte[] bytes, Action<string>? onStatus = null)
+    {
+        var sigResult = await VerifyReleaseSignatureAsync(tag, assetName, bytes);
+        if (sigResult == false)
+        {
+            onStatus?.Invoke($"Verification failed for {assetName}: signature invalid or missing.");
+            return false;
+        }
+
+        var hashVerified = await VerifyReleaseHashAsync(tag, assetName, bytes);
+        if (hashVerified == false)
+        {
+            onStatus?.Invoke($"Verification failed for {assetName}: SHA256 hash mismatch! Download may be compromised.");
+            return false;
+        }
+
+        if (sigResult is null && hashVerified is null)
+        {
+            onStatus?.Invoke($"Verification failed for {assetName}: unsigned and no SHA256SUMS asset. Refusing to use.");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Verify the Ed25519 detached signature of a release asset against the embedded
+    /// release signing public key.
     /// Returns true if verified, false if invalid/missing (hard fail),
     /// null if release signing is not configured for this build (skip).
     /// </summary>
-    private static async Task<bool?> VerifyReleaseSignatureAsync(ReleaseInfo release, byte[] bytes)
+    private static async Task<bool?> VerifyReleaseSignatureAsync(string tag, string assetName, byte[] bytes)
     {
         if (string.IsNullOrEmpty(ReleaseSigningPublicKeyB64)) return null;
 
@@ -416,11 +430,11 @@ public class UpdateService
             http.DefaultRequestHeaders.Add("User-Agent", "Rede-Desktop");
             http.Timeout = TimeSpan.FromSeconds(10);
 
-            var url = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/{release.Tag}";
+            var url = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/{tag}";
             var json = await http.GetStringAsync(url);
             var releaseDoc = JsonDocument.Parse(json);
 
-            var sigAssetName = release.AssetName + ".sig";
+            var sigAssetName = assetName + ".sig";
             string? sigUrl = null;
             foreach (var asset in releaseDoc.RootElement.GetProperty("assets").EnumerateArray())
             {
@@ -438,9 +452,6 @@ public class UpdateService
             var sig = Convert.FromBase64String(sigB64);
             if (sig.Length != 64) return false;
 
-            // Sodium.PublicKeyAuth.VerifyDetached(signature, message, publicKey)
-            // returns true iff the signature is a valid Ed25519 signature over the
-            // message bytes under the given public key.
             return Sodium.PublicKeyAuth.VerifyDetached(sig, bytes, pubKey);
         }
         catch
@@ -450,19 +461,18 @@ public class UpdateService
     }
 
     /// <summary>
-    /// C2: Verify SHA256 hash of downloaded binary against checksums file from the release.
+    /// C2: Verify SHA256 hash of a release asset against the checksums file from that release.
     /// Returns true if verified, false if mismatch, null if no checksum file available.
     /// </summary>
-    private static async Task<bool?> VerifyReleaseHashAsync(ReleaseInfo release, byte[] bytes)
+    private static async Task<bool?> VerifyReleaseHashAsync(string tag, string assetName, byte[] bytes)
     {
         try
         {
-            // Look for SHA256SUMS asset in the same release
             using var http = new HttpClient();
             http.DefaultRequestHeaders.Add("User-Agent", "Rede-Desktop");
             http.Timeout = TimeSpan.FromSeconds(10);
 
-            var url = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/{release.Tag}";
+            var url = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/{tag}";
             var json = await http.GetStringAsync(url);
             var releaseDoc = JsonDocument.Parse(json);
 
@@ -486,7 +496,7 @@ public class UpdateService
             foreach (var line in checksums.Split('\n'))
             {
                 var parts = line.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 2 && parts[1].Trim('*') == release.AssetName)
+                if (parts.Length >= 2 && parts[1].Trim('*') == assetName)
                 {
                     return string.Equals(parts[0], actualHash, StringComparison.OrdinalIgnoreCase);
                 }
@@ -499,6 +509,13 @@ public class UpdateService
             return null; // Can't verify — proceed with caution
         }
     }
+
+    /// <summary>
+    /// Escape a string for safe inclusion inside a POSIX shell single-quoted segment.
+    /// Wraps the value in 'single quotes' and replaces any internal quote with '\''.
+    /// Output is safe to concatenate directly into a sh -c script.
+    /// </summary>
+    private static string ShEscape(string s) => "'" + s.Replace("'", "'\\''") + "'";
 
     /// <summary>
     /// Check if the given path requires root to write (e.g. /usr/bin, /usr/local/bin).

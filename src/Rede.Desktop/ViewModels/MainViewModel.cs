@@ -115,9 +115,172 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _isMemberListVisible;
     [ObservableProperty] private ObservableCollection<PlaceMemberViewModel> _memberList = new();
 
+    // Quick switcher (Ctrl+K) — fuzzy-style overlay across all conversations.
+    [ObservableProperty] private bool _isQuickSwitcherOpen;
+    [ObservableProperty] private string _quickSwitcherQuery = "";
+    [ObservableProperty] private ObservableCollection<QuickSwitchResultViewModel> _quickSwitcherResults = new();
+    [ObservableProperty] private int _quickSwitcherSelectedIndex;
+
+    partial void OnQuickSwitcherQueryChanged(string value) => RebuildQuickSwitcherResults();
+
+    public void OpenQuickSwitcher()
+    {
+        QuickSwitcherQuery = "";
+        QuickSwitcherSelectedIndex = 0;
+        RebuildQuickSwitcherResults();
+        IsQuickSwitcherOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseQuickSwitcher() => IsQuickSwitcherOpen = false;
+
+    public void QuickSwitcherActivate()
+    {
+        if (!IsQuickSwitcherOpen || QuickSwitcherResults.Count == 0) { IsQuickSwitcherOpen = false; return; }
+        var idx = Math.Clamp(QuickSwitcherSelectedIndex, 0, QuickSwitcherResults.Count - 1);
+        var pick = QuickSwitcherResults[idx];
+        IsQuickSwitcherOpen = false;
+        SelectConversationCommand.Execute(pick.Item);
+    }
+
+    public void QuickSwitcherMove(int delta)
+    {
+        if (QuickSwitcherResults.Count == 0) return;
+        var n = QuickSwitcherResults.Count;
+        QuickSwitcherSelectedIndex = ((QuickSwitcherSelectedIndex + delta) % n + n) % n;
+    }
+
+    [RelayCommand]
+    private void QuickSwitcherPick(QuickSwitchResultViewModel? result)
+    {
+        if (result is null) return;
+        IsQuickSwitcherOpen = false;
+        SelectConversationCommand.Execute(result.Item);
+    }
+
+    private void RebuildQuickSwitcherResults()
+    {
+        var q = (QuickSwitcherQuery ?? "").Trim().ToLowerInvariant();
+        QuickSwitcherResults.Clear();
+
+        bool Match(string s) => q.Length == 0 || (s ?? "").ToLowerInvariant().Contains(q);
+
+        foreach (var c in Contacts)
+        {
+            if (!Match(c.DisplayName)) continue;
+            QuickSwitcherResults.Add(new QuickSwitchResultViewModel
+            {
+                Item = c,
+                Title = c.DisplayName,
+                Subtitle = "Direct message",
+                IconText = string.IsNullOrEmpty(c.DisplayName) ? "?" : c.DisplayName[..1].ToUpperInvariant(),
+                AccentColor = c.AccentColor,
+            });
+        }
+        foreach (var g in Groups)
+        {
+            if (!Match(g.Name)) continue;
+            QuickSwitcherResults.Add(new QuickSwitchResultViewModel
+            {
+                Item = g,
+                Title = g.Name,
+                Subtitle = "Group",
+                IconText = "#",
+                AccentColor = "#2dd4bf",
+            });
+        }
+        foreach (var p in Places)
+        {
+            foreach (var ch in p.Channels)
+            {
+                if (!Match(ch.Name) && !Match(p.Name)) continue;
+                QuickSwitcherResults.Add(new QuickSwitchResultViewModel
+                {
+                    Item = ch,
+                    Title = $"#{ch.Name}",
+                    Subtitle = p.Name,
+                    IconText = "#",
+                    AccentColor = p.AccentColor,
+                });
+            }
+        }
+
+        if (QuickSwitcherSelectedIndex >= QuickSwitcherResults.Count)
+            QuickSwitcherSelectedIndex = Math.Max(0, QuickSwitcherResults.Count - 1);
+    }
+
+    // In-chat message search (Ctrl+F) — filters currently loaded messages by substring.
+    [ObservableProperty] private bool _isMessageSearchVisible;
+    [ObservableProperty] private string _messageSearchQuery = "";
+
+    partial void OnMessageSearchQueryChanged(string value) => ApplyMessageSearch();
+
+    public void OpenMessageSearch()
+    {
+        IsMessageSearchVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseMessageSearch()
+    {
+        MessageSearchQuery = "";
+        IsMessageSearchVisible = false;
+        ApplyMessageSearch();
+    }
+
+    private void ApplyMessageSearch()
+    {
+        var q = (MessageSearchQuery ?? "").Trim().ToLowerInvariant();
+        var hasQuery = q.Length > 0 && IsMessageSearchVisible;
+        foreach (var m in Messages)
+            m.IsSearchHidden = hasQuery && !((m.Text ?? "").ToLowerInvariant().Contains(q));
+    }
+
     public MainViewModel()
     {
         _currentView = this;
+        Messages.CollectionChanged += (_, _) => { RecomputeMessageGrouping(); ApplyMessageSearch(); };
+    }
+
+    /// <summary>
+    /// Stamp ShowHeader / ShowDateSeparator on every message based on its
+    /// neighbor. Cheap (single pass) and runs whenever the collection mutates.
+    /// </summary>
+    private void RecomputeMessageGrouping()
+    {
+        const int groupingWindowSec = 300; // 5 minutes
+        ChatMessageViewModel? prev = null;
+        foreach (var msg in Messages)
+        {
+            // Date separator: first message ever, or different calendar day.
+            var newDay = prev is null || prev.Timestamp.Date != msg.Timestamp.Date;
+            msg.ShowDateSeparator = newDay && !msg.IsSystem && !msg.IsSecurityAlert;
+            if (msg.ShowDateSeparator)
+                msg.DateSeparatorText = FormatDaySeparator(msg.Timestamp);
+
+            // Compact mode: same sender, same day, within window — no header.
+            var sameSender =
+                prev is not null
+                && !msg.IsSystem && !msg.IsSecurityAlert
+                && !prev.IsSystem && !prev.IsSecurityAlert
+                && prev.IsOwn == msg.IsOwn
+                && prev.From == msg.From
+                && !newDay
+                && (msg.Timestamp - prev.Timestamp).TotalSeconds <= groupingWindowSec;
+            msg.ShowHeader = !sameSender;
+
+            prev = msg;
+        }
+    }
+
+    private static string FormatDaySeparator(DateTime ts)
+    {
+        var today = DateTime.Now.Date;
+        var d = ts.Date;
+        if (d == today) return "Today";
+        if (d == today.AddDays(-1)) return "Yesterday";
+        if ((today - d).TotalDays < 7) return ts.ToString("dddd"); // weekday name
+        return ts.ToString("d MMM yyyy");
     }
 
     [RelayCommand]
@@ -129,6 +292,14 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void SelectConversation(object? item)
     {
+        // Reset in-chat search whenever the conversation changes — a stale filter
+        // from the previous conversation would silently hide messages here.
+        if (IsMessageSearchVisible || !string.IsNullOrEmpty(MessageSearchQuery))
+        {
+            MessageSearchQuery = "";
+            IsMessageSearchVisible = false;
+        }
+
         SelectedConversation = item;
         IsPlaceSelected = false;
         ChannelTopic = "";
@@ -176,6 +347,12 @@ public partial class MainViewModel : ViewModelBase
         if (text.Length > 4096) text = text[..4096];
 
         InputText = "";
+
+        // Text macros (Discord-style): rewrite into the outgoing message body before
+        // handing off to slash-command dispatch. /me is the only one that escapes
+        // pure expansion (kept as a slash so the receiver sees the italic action).
+        if (TryExpandTextMacro(text, out var expanded))
+            text = expanded;
 
         if (text.StartsWith('/'))
         {
@@ -226,6 +403,43 @@ public partial class MainViewModel : ViewModelBase
         var parts = text[1..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return;
         OnCommandExecuted?.Invoke(parts[0], parts.Length > 1 ? parts[1..] : Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Pre-send rewrite for IRC/Discord-style text macros. Returns false if the
+    /// input is unchanged so the caller can use the original string.
+    /// </summary>
+    private bool TryExpandTextMacro(string text, out string expanded)
+    {
+        expanded = text;
+        if (!text.StartsWith('/')) return false;
+
+        var space = text.IndexOf(' ');
+        var head = (space > 0 ? text[..space] : text).ToLowerInvariant();
+        var tail = space > 0 ? text[(space + 1)..] : "";
+
+        switch (head)
+        {
+            case "/shrug":
+                expanded = string.IsNullOrEmpty(tail) ? @"¯\_(ツ)_/¯" : tail + @" ¯\_(ツ)_/¯";
+                return true;
+            case "/tableflip":
+                expanded = string.IsNullOrEmpty(tail) ? "(╯°□°）╯︵ ┻━┻" : tail + " (╯°□°）╯︵ ┻━┻";
+                return true;
+            case "/unflip":
+                expanded = string.IsNullOrEmpty(tail) ? "┬─┬ ノ( ゜-゜ノ)" : tail + " ┬─┬ ノ( ゜-゜ノ)";
+                return true;
+            case "/lenny":
+                expanded = string.IsNullOrEmpty(tail) ? "( ͡° ͜ʖ ͡°)" : tail + " ( ͡° ͜ʖ ͡°)";
+                return true;
+            case "/me":
+                // Italicized self-action, prefixed with own display name.
+                if (string.IsNullOrWhiteSpace(tail)) return false;
+                expanded = $"_* {OwnDisplayName} {tail}_";
+                return true;
+            default:
+                return false;
+        }
     }
 
     private void LoadChatHistory(string chatId)
@@ -524,6 +738,13 @@ public partial class ChatMessageViewModel : ViewModelBase
     [ObservableProperty] private DateTime _timestamp;
     [ObservableProperty] private int _ttl;
     [ObservableProperty] private bool _isSecurityAlert;
+
+    // Discord-style message grouping. When ShowHeader is false the avatar +
+    // sender name + timestamp row is hidden and the bubble sits flush with the
+    // previous one. ShowDateSeparator inserts a "— Today / Yesterday —" row.
+    [ObservableProperty] private bool _showHeader = true;
+    [ObservableProperty] private bool _showDateSeparator;
+    [ObservableProperty] private string _dateSeparatorText = "";
     [ObservableProperty] private string _senderAccentColor = "#8b5cf6";
     [ObservableProperty] private Bitmap? _senderAvatar;
     [ObservableProperty] private bool _hasSenderAvatar;
@@ -547,6 +768,10 @@ public partial class ChatMessageViewModel : ViewModelBase
     // Reactions
     [ObservableProperty] private ObservableCollection<ReactionViewModel> _reactions = new();
     [ObservableProperty] private bool _hasReactions;
+
+    // Hidden by the in-chat Ctrl+F search bar. The ItemTemplate binds Visibility
+    // to !IsSearchHidden so non-matching messages collapse without unloading.
+    [ObservableProperty] private bool _isSearchHidden;
 
     public void UpdateReactions(Dictionary<string, List<string>>? rxDict, string? ownUserId)
     {
@@ -588,4 +813,14 @@ public partial class AttachmentViewModel : ViewModelBase
     [ObservableProperty] private bool _isImage;
     [ObservableProperty] private Bitmap? _preview;
     [ObservableProperty] private bool _hasPreview;
+}
+
+public partial class QuickSwitchResultViewModel : ViewModelBase
+{
+    public object Item { get; init; } = null!;
+    [ObservableProperty] private string _title = "";
+    [ObservableProperty] private string _subtitle = "";
+    [ObservableProperty] private string _iconText = "?";
+    [ObservableProperty] private string _accentColor = "#8b5cf6";
+    public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
 }

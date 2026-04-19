@@ -20,12 +20,20 @@ public class PlaceService : IDisposable
     private readonly ProfileStore _store;
     private readonly NonceTracker _nonceTracker = new();
 
-    // ACK FIFO: every persisted outgoing channel message pushes its ChatMessage reference.
-    // Server echoes PLACE_MESSAGE back to sender with a server-assigned msgId, in send order.
-    // Pairing via FIFO is the only reliable method — scanning ChatHistory for "first own
-    // null-MsgId" collides with orphan legacy entries from pre-fix versions.
-    private readonly Queue<(string ChatKey, ChatMessage Msg)> _pendingAck = new();
+    // ACK FIFO: every WS PLACE_MESSAGE send pushes one entry. Server echoes PLACE_MESSAGE
+    // back to sender with a server-assigned msgId, in send order. Control messages
+    // (reactions/edits/deletes) push (chatKey, Msg=null) sentinels so their echo consumes
+    // its own slot and doesn't steal from the next user-visible message.
+    private readonly Queue<(string ChatKey, ChatMessage? Msg)> _pendingAck = new();
     private readonly object _pendingAckLock = new();
+    private const int MaxPendingAck = 500;
+
+    /// <summary>Drop all pending ACK slots — called on disconnect so post-reconnect echoes
+    /// can't mispair with stale entries from the previous session.</summary>
+    public void ClearPendingAcks()
+    {
+        lock (_pendingAckLock) _pendingAck.Clear();
+    }
 
     /// <summary>Replay-protection tracker — exposed for persistence across restarts.</summary>
     public NonceTracker NonceTracker => _nonceTracker;
@@ -1273,7 +1281,7 @@ public class PlaceService : IDisposable
         );
         if (ttl > 0) payload["ttl"] = ttl;
 
-        _conn.Send(Msg.PlaceMessage, payload);
+        if (!_conn.Send(Msg.PlaceMessage, payload)) return;
 
         var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var chatKey = ChatKey(placeId, channelId);
@@ -1284,7 +1292,11 @@ public class PlaceService : IDisposable
             Attachments = attachments,
         };
         _store.AddChatMessage(Profile, chatKey, persistedMsg, Passphrase);
-        lock (_pendingAckLock) { _pendingAck.Enqueue((chatKey, persistedMsg)); }
+        lock (_pendingAckLock)
+        {
+            if (_pendingAck.Count < MaxPendingAck)
+                _pendingAck.Enqueue((chatKey, persistedMsg));
+        }
         OnChannelMessageSent?.Invoke(chatKey, text, ttl);
     }
 
@@ -1367,7 +1379,15 @@ public class PlaceService : IDisposable
                 ["signature"] = result.Signature,
             })
         );
-        _conn.Send(Msg.PlaceMessage, payload);
+        if (!_conn.Send(Msg.PlaceMessage, payload)) return;
+
+        // Enqueue a Msg=null sentinel — the server echoes control messages too, and the
+        // echo must consume its own ACK slot instead of stamping the next regular message.
+        lock (_pendingAckLock)
+        {
+            if (_pendingAck.Count < MaxPendingAck)
+                _pendingAck.Enqueue((ChatKey(placeId, channelId), null));
+        }
     }
 
     private void HandleControlMessage(string ctrl, JsonObject obj, string from, string chatKey)
@@ -1625,20 +1645,20 @@ public class PlaceService : IDisposable
         if (placeId is null || channelId is null || from is null) return;
         if (from == Profile.UserId)
         {
-            // Server echoes own PLACE_MESSAGE back with a server-assigned msgId.
-            // Pair with the head of the pending-ACK FIFO — WS delivers echoes in send order.
-            // Scanning ChatHistory for "first own null-MsgId" is unreliable (pre-fix orphans).
+            // Server echoes own PLACE_MESSAGE back with a server-assigned msgId in send order.
+            // Dequeue exactly one slot per echo. Sentinel entries (Msg=null) from control
+            // messages get consumed silently; regular messages get their MsgId stamped once.
             var ownMsgId = ProtocolSerializer.GetString(msg, "msgId");
             if (ownMsgId is null) return;
 
-            (string ChatKey, ChatMessage Msg) entry;
+            (string ChatKey, ChatMessage? Msg) entry;
             lock (_pendingAckLock)
             {
-                // Echoes for control messages (reactions/edits/deletes) arrive with no
-                // matching queue entry since we don't persist/enqueue those — drop silently.
                 if (_pendingAck.Count == 0) return;
                 entry = _pendingAck.Dequeue();
             }
+            if (entry.Msg is null) return; // control-message sentinel
+            if (entry.Msg.MsgId is not null) return; // defensive — already stamped
             entry.Msg.MsgId = ownMsgId;
             _store.SaveChatHistoryDebounced(Profile, Passphrase);
             OnOwnMessageIdAssigned?.Invoke(entry.ChatKey, ownMsgId);
