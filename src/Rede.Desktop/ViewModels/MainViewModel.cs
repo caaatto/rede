@@ -89,22 +89,29 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private string _searchText = "";
 
     // Currently-active place (selected from the top rail). Null = "Home" view, where
-    // the sidebar shows contacts + groups expanded. When set, the sidebar fills with
-    // that place's channels and the contacts/groups sections collapse to a one-line
-    // header you can click to expand again.
+    // the sidebar shows contacts + groups. When set, the sidebar fills with that
+    // place's channels and contacts/groups disappear entirely until the user clicks
+    // the @ button in the top rail.
     [ObservableProperty] private PlaceItemViewModel? _activePlace;
-    [ObservableProperty] private bool _isContactsExpanded = true;
-    [ObservableProperty] private bool _isGroupsExpanded = true;
     public bool HasActivePlace => ActivePlace is not null;
+
+    // The sidebar shows either Direct-Messages (contacts + groups) or the active
+    // place's channels — never both. Either disappears when the sidebar is collapsed
+    // so nothing overflows past the 48px collapsed width.
+    public bool ShowDirectMessages => ActivePlace is null && !IsSidebarCollapsed;
+    public bool ShowPlaceChannels  => ActivePlace is not null && !IsSidebarCollapsed;
 
     partial void OnActivePlaceChanged(PlaceItemViewModel? value)
     {
         OnPropertyChanged(nameof(HasActivePlace));
-        // When entering a place, fold contacts + groups out of the way so the channel
-        // list dominates the sidebar. When leaving, restore them.
-        var inPlace = value is not null;
-        IsContactsExpanded = !inPlace;
-        IsGroupsExpanded = !inPlace;
+        OnPropertyChanged(nameof(ShowDirectMessages));
+        OnPropertyChanged(nameof(ShowPlaceChannels));
+    }
+
+    partial void OnIsSidebarCollapsedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowDirectMessages));
+        OnPropertyChanged(nameof(ShowPlaceChannels));
     }
 
     partial void OnSearchTextChanged(string value) => ApplySearchFilter();
@@ -307,12 +314,6 @@ public partial class MainViewModel : ViewModelBase
     {
         IsSidebarCollapsed = !IsSidebarCollapsed;
     }
-
-    [RelayCommand]
-    private void ToggleContacts() => IsContactsExpanded = !IsContactsExpanded;
-
-    [RelayCommand]
-    private void ToggleGroups() => IsGroupsExpanded = !IsGroupsExpanded;
 
     [RelayCommand]
     private void SelectConversation(object? item)

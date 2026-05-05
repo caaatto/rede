@@ -136,7 +136,7 @@
                         <TextBlock Text="+"
                                    FontSize="22"
                                    FontWeight="{StaticResource RedeWeightBold}"
-                                   Foreground="{DynamicResource RedeAccentTealBrush}"
+                                   Foreground="{Binding OwnAccentBrush}"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center" />
                     </Border>
@@ -151,7 +151,8 @@
                 Width="{Binding IsSidebarCollapsed, Converter={StaticResource SidebarWidthConverter}}"
                 Background="{DynamicResource RedeSurfaceBrush}"
                 BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
-                BorderThickness="0,0,1,0">
+                BorderThickness="0,0,1,0"
+                ClipToBounds="True">
             <DockPanel>
 
                 <!-- Sidebar title — shows the active place's name, or "Direct Messages"
@@ -265,10 +266,10 @@
                     <StackPanel>
 
                 <!-- ===== ACTIVE PLACE CHANNELS =====
-                     Only visible when a place is selected from the top rail. Shows the
-                     place's channels at the top of the sidebar so the place dominates
-                     the view, exactly like Discord's server-channel list. -->
-                <StackPanel IsVisible="{Binding HasActivePlace}">
+                     Only visible when a place is selected from the top rail (and the
+                     sidebar is expanded). Shows the place's channels at the top of the
+                     sidebar so the place dominates the view, exactly like Discord. -->
+                <StackPanel IsVisible="{Binding ShowPlaceChannels}">
                     <!-- Channels section header (with member count) -->
                     <Border Padding="12,10,12,6"
                             IsVisible="{Binding !IsSidebarCollapsed}">
@@ -323,24 +324,20 @@
                     </ItemsControl>
                 </StackPanel>
 
+                <!-- ===== DIRECT MESSAGES (Contacts + Groups) =====
+                     Visible only when no place is active. Selecting a place from the top
+                     rail hides this entire block; clicking the @ button restores it. -->
+                <StackPanel IsVisible="{Binding ShowDirectMessages}">
+
                 <Separator />
 
-                <!-- Contacts header (click to collapse/expand) -->
-                <Border Padding="12,8"
-                        Cursor="Hand"
-                        Background="Transparent"
-                        IsVisible="{Binding !IsSidebarCollapsed}"
-                        PointerPressed="ToggleContacts_PointerPressed">
-                    <Grid ColumnDefinitions="Auto,4,*,Auto">
-                        <TextBlock Grid.Column="0"
-                                   Text="{Binding IsContactsExpanded, Converter={StaticResource CollapseIconConverter}}"
-                                   FontSize="10"
-                                   Foreground="{DynamicResource RedeTextMutedBrush}"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Text="Contacts" Classes="secondary"
+                <!-- Contacts header -->
+                <Border Padding="12,8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="Contacts" Classes="secondary"
                                    FontWeight="{StaticResource RedeWeightSemiBold}"
                                    VerticalAlignment="Center" />
-                        <Button Grid.Column="3" Classes="ghost"
+                        <Button Grid.Column="1" Classes="ghost"
                                 Padding="4" Width="28" Height="28"
                                 ToolTip.Tip="Add contact"
                                 Click="AddContact_Click">
@@ -350,8 +347,7 @@
                 </Border>
 
                 <!-- Contact list -->
-                    <ItemsControl ItemsSource="{Binding Contacts}"
-                                  IsVisible="{Binding IsContactsExpanded}">
+                    <ItemsControl ItemsSource="{Binding Contacts}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:ContactItemViewModel">
                                 <Grid ColumnDefinitions="3,*"
@@ -419,22 +415,13 @@
 
                 <Separator />
 
-                <!-- Groups header (click to collapse/expand) -->
-                <Border Padding="12,8"
-                        Cursor="Hand"
-                        Background="Transparent"
-                        IsVisible="{Binding !IsSidebarCollapsed}"
-                        PointerPressed="ToggleGroups_PointerPressed">
-                    <Grid ColumnDefinitions="Auto,4,*,Auto">
-                        <TextBlock Grid.Column="0"
-                                   Text="{Binding IsGroupsExpanded, Converter={StaticResource CollapseIconConverter}}"
-                                   FontSize="10"
-                                   Foreground="{DynamicResource RedeTextMutedBrush}"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Text="Groups" Classes="secondary"
+                <!-- Groups header -->
+                <Border Padding="12,8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="Groups" Classes="secondary"
                                    FontWeight="{StaticResource RedeWeightSemiBold}"
                                    VerticalAlignment="Center" />
-                        <Button Grid.Column="3" Classes="ghost"
+                        <Button Grid.Column="1" Classes="ghost"
                                 Padding="4" Width="28" Height="28"
                                 ToolTip.Tip="Create group"
                                 Click="CreateGroup_Click">
@@ -444,8 +431,7 @@
                 </Border>
 
                 <!-- Group list -->
-                    <ItemsControl ItemsSource="{Binding Groups}"
-                                  IsVisible="{Binding IsGroupsExpanded}">
+                    <ItemsControl ItemsSource="{Binding Groups}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:GroupItemViewModel">
                                 <Grid ColumnDefinitions="3,*"
@@ -483,6 +469,8 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+
+                </StackPanel>
 
                     </StackPanel>
                 </ScrollViewer>

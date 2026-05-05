@@ -641,17 +641,6 @@ public partial class MainView : UserControl
         vm.ActivePlace = null;
     }
 
-    private void ToggleContacts_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is MainViewModel vm) vm.IsContactsExpanded = !vm.IsContactsExpanded;
-        e.Handled = true;
-    }
-
-    private void ToggleGroups_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is MainViewModel vm) vm.IsGroupsExpanded = !vm.IsGroupsExpanded;
-        e.Handled = true;
-    }
 
     private void Channel_Click(object? sender, RoutedEventArgs e)
     {
