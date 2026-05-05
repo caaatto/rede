@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.WebView.Desktop;
+using Rede.Core.Services;
 using System;
 using System.IO;
 
@@ -18,6 +19,19 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Info flags handled before single-instance lock so they still work when
+        // a REDE GUI is already running.
+        if (Array.Exists(args, IsVersionFlag))
+        {
+            Console.WriteLine($"REDE v{UpdateService.Version}");
+            return;
+        }
+        if (Array.Exists(args, IsHelpFlag))
+        {
+            PrintHelp();
+            return;
+        }
+
         // Single-instance enforcement: only one REDE process at a time.
         // Use a file lock in ~/.rede/ (cross-platform, works with self-contained binaries).
         if (!AcquireSingleInstanceLock())
@@ -79,5 +93,29 @@ class Program
             _lockFile = null;
         }
         catch { }
+    }
+
+    private static bool IsVersionFlag(string a) =>
+        a.Equals("--version", StringComparison.OrdinalIgnoreCase) ||
+        a.Equals("--v", StringComparison.OrdinalIgnoreCase) ||
+        a.Equals("-v", StringComparison.OrdinalIgnoreCase) ||
+        a.Equals("-V", StringComparison.Ordinal);
+
+    private static bool IsHelpFlag(string a) =>
+        a.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
+        a.Equals("-h", StringComparison.OrdinalIgnoreCase) ||
+        a.Equals("/?", StringComparison.Ordinal);
+
+    private static void PrintHelp()
+    {
+        Console.WriteLine($"REDE v{UpdateService.Version}");
+        Console.WriteLine("Secure end-to-end encrypted messenger.");
+        Console.WriteLine();
+        Console.WriteLine("Usage: REDE [options]");
+        Console.WriteLine();
+        Console.WriteLine("Options:");
+        Console.WriteLine("  --version, -v       Print version and exit");
+        Console.WriteLine("  --help, -h          Show this help");
+        Console.WriteLine("  --minimized, -m     Start hidden in the system tray");
     }
 }

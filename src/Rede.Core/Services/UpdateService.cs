@@ -11,7 +11,10 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    private const string CurrentVersion = "2.18.42-beta";
+    internal const string CurrentVersion = "2.18.43-beta";
+
+    /// <summary>The version this build identifies as (e.g. for `REDE --version`).</summary>
+    public static string Version => CurrentVersion;
 
     /// <summary>
     /// Path to a file that records the last successfully installed release tag.
@@ -518,24 +521,39 @@ public class UpdateService
     private static string ShEscape(string s) => "'" + s.Replace("'", "'\\''") + "'";
 
     /// <summary>
-    /// Check if the given path requires root to write (e.g. /usr/bin, /usr/local/bin).
+    /// Check if installing to <paramref name="path"/> requires root (e.g. /usr/bin,
+    /// /usr/local/bin, /opt/...). Replacing the binary works via rename, which
+    /// needs write+execute on the *directory* — file write permission alone isn't
+    /// enough, and the previous version of this check missed that distinction so
+    /// updates silently took the no-elevation path and then failed at File.Move.
     /// </summary>
     private static bool NeedsRootPrivileges(string path)
     {
         try
         {
-            // Try to open the file for writing — if it throws UnauthorizedAccess, we need elevation
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return true;
+            var dir = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(dir)) return false;
+
+            // Probe the directory by creating (and deleting) a tiny throwaway file.
+            // This is the canonical "can I add/remove entries here?" check on POSIX.
+            var probe = Path.Combine(dir, $".rede-write-probe-{Guid.NewGuid():N}");
+            try
+            {
+                using (var _ = File.Create(probe)) { }
+                File.Delete(probe);
+                return false;
+            }
+            catch (UnauthorizedAccessException) { return true; }
+            catch (IOException ex) when (ex.HResult == unchecked((int)0x80070005)) { return true; }
         }
         catch
         {
+            // If the probe failed for some other reason (read-only fs, etc.) we err on
+            // the safe side and try without elevation — the move will surface the
+            // actual error instead of us silently demanding pkexec.
             return false;
         }
+        return false;
     }
 
     private static bool IsValidExecutable(byte[] bytes)
