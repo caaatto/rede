@@ -531,6 +531,27 @@ public partial class MainViewModel : ViewModelBase
         Messages.Add(msg);
     }
 
+    /// <summary>
+    /// Restamp avatar/initial/accent on every already-rendered message from a
+    /// given sender. AddIncomingMessage / LoadChatHistoryForConversation snapshot
+    /// the contact's profile at message-creation time, so a later profile change
+    /// only shows up on the sidebar — already-visible message bubbles keep the
+    /// stale avatar (or "?" placeholder) until this is called.
+    /// </summary>
+    public void RefreshMessagesFromSender(string senderId, string? accentColor,
+        string? initial, Bitmap? avatar, bool hasAvatar)
+    {
+        foreach (var m in Messages)
+        {
+            if (m.IsOwn || m.IsSystem || m.IsSecurityAlert) continue;
+            if (m.From != senderId) continue;
+            if (accentColor is not null) m.SenderAccentColor = accentColor;
+            if (initial is not null) m.SenderInitial = initial;
+            m.SenderAvatar = avatar;
+            m.HasSenderAvatar = hasAvatar;
+        }
+    }
+
     public void AddSystemMessage(string text)
     {
         // L1: Truncate very long system messages

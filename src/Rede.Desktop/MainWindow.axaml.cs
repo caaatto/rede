@@ -935,7 +935,23 @@ public partial class MainWindow : Window
                     contact.AvatarMimeType = avatarMimeType;
                 }
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
-                Dispatcher.UIThread.Post(RefreshContacts);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    RefreshContacts();
+                    // Restamp the sender's avatar/initial/accent on already-
+                    // rendered chat messages — without this, the sidebar
+                    // updates but message bubbles keep the snapshot from
+                    // when AddIncomingMessage / LoadChatHistory ran.
+                    if (_contactIndex.TryGetValue(senderId, out var cvm))
+                    {
+                        _mainVm.RefreshMessagesFromSender(
+                            senderId,
+                            cvm.AccentColor,
+                            cvm.Initial,
+                            cvm.AvatarImage,
+                            cvm.HasAvatar);
+                    }
+                });
             }
         };
 
