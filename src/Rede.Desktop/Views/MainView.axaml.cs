@@ -1394,7 +1394,25 @@ public partial class MainView : UserControl
     {
         if (e.InitialPressMouseButton != MouseButton.Left) return;
         if (sender is not Border border || border.Tag is not AttachmentViewModel att) return;
-        // Download will be handled by MainWindow via event
+        if (DataContext is not MainViewModel vm) return;
+        // For images we already have the decrypted bitmap loaded — show it
+        // in a centered lightbox like Discord/WhatsApp. For other files,
+        // MainWindow handles download via a separate code path.
+        if (att.HasPreview && att.Preview is not null)
+            vm.OpenLightbox(att.Preview);
+    }
+
+    private void Lightbox_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+            vm.CloseLightboxCommand.Execute(null);
+    }
+
+    // Eat clicks on the image itself so the dim-layer dismiss handler doesn't
+    // fire when the user clicks on the picture (only background clicks close).
+    private void LightboxImage_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        e.Handled = true;
     }
 
     private void MessageItem_PointerReleased(object? sender, PointerReleasedEventArgs e)

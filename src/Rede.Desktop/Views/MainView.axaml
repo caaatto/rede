@@ -774,7 +774,7 @@
                                             <Border Background="{DynamicResource RedeSurfaceBrush}"
                                                     CornerRadius="4,12,12,12"
                                                     Padding="14,10"
-                                                    IsVisible="{Binding !IsSystem}">
+                                                    IsVisible="{Binding ShowTextBubble}">
                                                 <StackPanel Spacing="4">
                                                     <TextBlock Text="[message deleted]"
                                                                FontStyle="Italic"
@@ -804,26 +804,38 @@
                                                           IsVisible="{Binding HasAttachments}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Border CornerRadius="6" Padding="8,6" Margin="0,4,0,0"
-                                                                Background="{DynamicResource RedeSurfaceBrush}"
-                                                                BorderBrush="{DynamicResource RedeBorderBrush}"
-                                                                BorderThickness="1"
-                                                                Cursor="Hand"
-                                                                Tag="{Binding}"
-                                                                PointerReleased="AttachmentItem_Click">
-                                                            <StackPanel Spacing="4">
+                                                        <Panel Margin="0,4,0,0">
+                                                            <!-- Inline image: clean, no chip framing -->
+                                                            <Border CornerRadius="10"
+                                                                    ClipToBounds="True"
+                                                                    HorizontalAlignment="Left"
+                                                                    Cursor="Hand"
+                                                                    Tag="{Binding}"
+                                                                    PointerReleased="AttachmentItem_Click"
+                                                                    IsVisible="{Binding HasPreview}">
                                                                 <Image Source="{Binding Preview}"
-                                                                       IsVisible="{Binding HasPreview}"
-                                                                       MaxWidth="300" MaxHeight="200"
+                                                                       MaxWidth="380" MaxHeight="320"
                                                                        Stretch="Uniform" />
-                                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                            </Border>
+                                                            <!-- File chip (non-image attachments) -->
+                                                            <Border CornerRadius="6" Padding="10,8"
+                                                                    Background="{DynamicResource RedeSurfaceBrush}"
+                                                                    BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    Cursor="Hand"
+                                                                    Tag="{Binding}"
+                                                                    PointerReleased="AttachmentItem_Click"
+                                                                    IsVisible="{Binding !HasPreview}">
+                                                                <StackPanel Orientation="Horizontal" Spacing="8">
                                                                     <TextBlock Text="{Binding Name}" FontSize="13"
-                                                                               Foreground="{DynamicResource RedeAccentBrush}" />
+                                                                               Foreground="{DynamicResource RedeAccentBrush}"
+                                                                               VerticalAlignment="Center" />
                                                                     <TextBlock Text="{Binding SizeDisplay}" FontSize="12"
-                                                                               Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                                               Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                                               VerticalAlignment="Center" />
                                                                 </StackPanel>
-                                                            </StackPanel>
-                                                        </Border>
+                                                            </Border>
+                                                        </Panel>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
@@ -881,7 +893,8 @@
                                         </Border>
                                         <Border Background="{DynamicResource RedeSurfaceActiveBrush}"
                                                 CornerRadius="12,4,12,12"
-                                                Padding="14,10">
+                                                Padding="14,10"
+                                                IsVisible="{Binding ShowTextBubble}">
                                             <StackPanel Spacing="4">
                                                 <TextBlock Text="[message deleted]"
                                                            FontStyle="Italic"
@@ -912,26 +925,38 @@
                                                       HorizontalAlignment="Right">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border CornerRadius="6" Padding="8,6" Margin="0,4,0,0"
-                                                            Background="{DynamicResource RedeSurfaceActiveBrush}"
-                                                            BorderBrush="{DynamicResource RedeBorderBrush}"
-                                                            BorderThickness="1"
-                                                            Cursor="Hand"
-                                                            Tag="{Binding}"
-                                                            PointerReleased="AttachmentItem_Click">
-                                                        <StackPanel Spacing="4">
+                                                    <Panel Margin="0,4,0,0" HorizontalAlignment="Right">
+                                                        <!-- Inline image: clean, no chip framing -->
+                                                        <Border CornerRadius="10"
+                                                                ClipToBounds="True"
+                                                                HorizontalAlignment="Right"
+                                                                Cursor="Hand"
+                                                                Tag="{Binding}"
+                                                                PointerReleased="AttachmentItem_Click"
+                                                                IsVisible="{Binding HasPreview}">
                                                             <Image Source="{Binding Preview}"
-                                                                   IsVisible="{Binding HasPreview}"
-                                                                   MaxWidth="300" MaxHeight="200"
+                                                                   MaxWidth="380" MaxHeight="320"
                                                                    Stretch="Uniform" />
-                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        </Border>
+                                                        <!-- File chip (non-image attachments) -->
+                                                        <Border CornerRadius="6" Padding="10,8"
+                                                                Background="{DynamicResource RedeSurfaceActiveBrush}"
+                                                                BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                                BorderThickness="1"
+                                                                Cursor="Hand"
+                                                                Tag="{Binding}"
+                                                                PointerReleased="AttachmentItem_Click"
+                                                                IsVisible="{Binding !HasPreview}">
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
                                                                 <TextBlock Text="{Binding Name}" FontSize="13"
-                                                                           Foreground="{DynamicResource RedeAccentBrush}" />
+                                                                           Foreground="{DynamicResource RedeAccentBrush}"
+                                                                           VerticalAlignment="Center" />
                                                                 <TextBlock Text="{Binding SizeDisplay}" FontSize="12"
-                                                                           Foreground="{DynamicResource RedeSecondaryBrush}" />
+                                                                           Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                                           VerticalAlignment="Center" />
                                                             </StackPanel>
-                                                        </StackPanel>
-                                                    </Border>
+                                                        </Border>
+                                                    </Panel>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
@@ -1060,6 +1085,26 @@
 
     </Grid>
     </DockPanel>
+
+    <!-- ===== IMAGE LIGHTBOX =====
+         Click on an image attachment opens a centered full-bounds preview.
+         Click outside the picture (or press Escape via the global hook) to
+         dismiss. Click on the image itself does nothing — Handled=true on
+         the inner border eats the bubbling pointer event. -->
+    <Border IsVisible="{Binding IsLightboxOpen}"
+            Background="#D0000000"
+            PointerPressed="Lightbox_PointerPressed">
+        <Border HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                CornerRadius="12"
+                ClipToBounds="True"
+                BoxShadow="0 12 50 0 #80000000"
+                PointerPressed="LightboxImage_PointerPressed">
+            <Image Source="{Binding LightboxImage}"
+                   Stretch="Uniform"
+                   MaxWidth="1600" MaxHeight="1000" />
+        </Border>
+    </Border>
 
     <!-- ===== QUICK SWITCHER (Ctrl+K) ===== -->
     <!-- Full-bounds dim layer; click anywhere outside the popup to dismiss. -->

@@ -1477,8 +1477,10 @@ public partial class MainWindow : Window
 
         if (attachments.Count == 0) return;
 
+        // Empty caption is fine — the recipient still gets the attachment list
+        // through the message envelope, and the empty text bubble is hidden in
+        // the chat view (HasText binding) so we don't show a placeholder chip.
         var text = _mainVm.InputText?.Trim() ?? "";
-        if (string.IsNullOrEmpty(text)) text = $"{attachments.Count} file(s)";
         Dispatcher.UIThread.Post(() => _mainVm.InputText = "");
 
         switch (target)
@@ -2939,6 +2941,16 @@ public partial class MainWindow : Window
 
     private async void Window_KeyDown(object? sender, KeyEventArgs e)
     {
+        // Escape closes the image lightbox first — it's a modal overlay and
+        // should swallow Escape before the chat-level handler interprets it
+        // as "close reply / collapse sidebar".
+        if (e.Key == Key.Escape && _mainVm.IsLightboxOpen)
+        {
+            _mainVm.CloseLightboxCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Q && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             // Ctrl+Q = real quit, bypass minimize-to-tray.

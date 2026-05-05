@@ -141,6 +141,26 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _isMemberListVisible;
     [ObservableProperty] private ObservableCollection<PlaceMemberViewModel> _memberList = new();
 
+    // Image lightbox — opens a full-screen centered preview when an image
+    // attachment is clicked. Bitmap is borrowed from the AttachmentViewModel,
+    // so we hold a reference until the lightbox closes.
+    [ObservableProperty] private bool _isLightboxOpen;
+    [ObservableProperty] private Bitmap? _lightboxImage;
+
+    public void OpenLightbox(Bitmap? bmp)
+    {
+        if (bmp is null) return;
+        LightboxImage = bmp;
+        IsLightboxOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseLightbox()
+    {
+        IsLightboxOpen = false;
+        LightboxImage = null;
+    }
+
     // Quick switcher (Ctrl+K) — fuzzy-style overlay across all conversations.
     [ObservableProperty] private bool _isQuickSwitcherOpen;
     [ObservableProperty] private string _quickSwitcherQuery = "";
@@ -723,7 +743,10 @@ public partial class PlaceItemViewModel : ViewModelBase
 {
     [ObservableProperty] private string _placeId = "";
     [ObservableProperty] private string _name = "";
-    [ObservableProperty] private bool _isExpanded = true;
+    // The underline pill below a place icon is bound to IsExpanded. Default
+    // to false so the marker is only drawn on the place the user has actually
+    // opened — Home/@ owns the active state until then.
+    [ObservableProperty] private bool _isExpanded;
     [ObservableProperty] private ObservableCollection<ChannelItemViewModel> _channels = new();
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private int _memberCount;
@@ -801,7 +824,10 @@ public partial class PlaceMemberViewModel : ViewModelBase
 public partial class ChatMessageViewModel : ViewModelBase
 {
     [ObservableProperty] private string _from = "";
-    [ObservableProperty] private string _text = "";
+    // ShowTextBubble depends on Text + IsDeleted, so notify on changes.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowTextBubble))]
+    private string _text = "";
     [ObservableProperty] private bool _isOwn;
     [ObservableProperty] private bool _isSystem;
     [ObservableProperty] private DateTime _timestamp;
@@ -828,7 +854,14 @@ public partial class ChatMessageViewModel : ViewModelBase
 
     // Edit + Delete
     [ObservableProperty] private bool _isEdited;
-    [ObservableProperty] private bool _isDeleted;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowTextBubble))]
+    private bool _isDeleted;
+
+    // True when the text bubble should render at all. Attachment-only messages
+    // (empty Text, not deleted) hide the bubble so the image/file chip stands
+    // alone — like Discord/WhatsApp.
+    public bool ShowTextBubble => IsDeleted || !string.IsNullOrEmpty(Text);
 
     // Attachments
     [ObservableProperty] private ObservableCollection<AttachmentViewModel> _attachments = new();
