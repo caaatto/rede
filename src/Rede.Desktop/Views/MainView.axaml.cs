@@ -24,6 +24,13 @@ public partial class MainView : UserControl
 
     private NotifyCollectionChangedEventHandler? _scrollHandler;
     private bool _isAtBottom = true;
+    // Auto-scroll snaps when the viewport is within ~50px of the end. The
+    // "Newest Messages" button uses a much larger threshold so it doesn't
+    // flash on send (extent grows for one frame before auto-scroll lands)
+    // or on tiny scroll nudges — only appears once you've scrolled roughly
+    // 15 messages back.
+    private const double AutoScrollEpsilonPx = 50;
+    private const double NewestButtonThresholdPx = 600;
 
     protected override void OnLoaded(Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -102,9 +109,9 @@ public partial class MainView : UserControl
     private void OnMessageScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         var sv = MessageScroller;
-        // Consider "at bottom" if within 50px of the end
-        _isAtBottom = sv.Offset.Y >= sv.Extent.Height - sv.Viewport.Height - 50;
-        NewestMessagesBtn.IsVisible = !_isAtBottom;
+        var distanceFromBottom = sv.Extent.Height - sv.Viewport.Height - sv.Offset.Y;
+        _isAtBottom = distanceFromBottom <= AutoScrollEpsilonPx;
+        NewestMessagesBtn.IsVisible = distanceFromBottom > NewestButtonThresholdPx;
     }
 
     private void NewestMessagesBtn_Click(object? sender, RoutedEventArgs e)
