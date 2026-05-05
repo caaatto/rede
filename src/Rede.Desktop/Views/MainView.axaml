@@ -487,7 +487,7 @@
                     Background="{DynamicResource RedeSurfaceBrush}"
                     BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                     BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="*,Auto,Auto">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto">
                     <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="2"
                                 VerticalAlignment="Center">
                         <TextBlock Text="{Binding ChatTitle}"
@@ -516,6 +516,18 @@
                                    VerticalAlignment="Center" />
                     </Button>
                     <Button Grid.Column="2"
+                            Classes="ghost"
+                            Padding="10,4"
+                            CornerRadius="4"
+                            ToolTip.Tip="Reset secure session — use after the contact reinstalled or you re-added them"
+                            IsVisible="{Binding IsContactSelected}"
+                            Click="ResyncContact_Click">
+                        <TextBlock Text="Resync"
+                                   FontSize="{StaticResource RedeSmallSize}"
+                                   FontWeight="{StaticResource RedeWeightMedium}"
+                                   VerticalAlignment="Center" />
+                    </Button>
+                    <Button Grid.Column="3"
                             Classes="ghost"
                             Padding="8,4"
                             CornerRadius="4"

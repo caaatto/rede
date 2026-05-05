@@ -873,12 +873,16 @@ public partial class MainWindow : Window
         });
 
         // Chat events
-        _chat.OnMessageReceived += (from, text, chatId, ts, isSealed, msgId) => Dispatcher.UIThread.Post(() =>
+        _chat.OnMessageReceived += (from, text, chatId, ts, isSealed, msgId, fullMsg) => Dispatcher.UIThread.Post(() =>
         {
             // Only render in chat if the matching conversation is selected;
             // message is already persisted in chat history by the service layer
             if (_mainVm.SelectedConversation is ContactItemViewModel sel && sel.UserId == from)
+            {
                 _mainVm.AddIncomingMessage(from, text, ts, msgId: msgId);
+                if (fullMsg?.Attachments is { Count: > 0 } && _mainVm.Messages.Count > 0)
+                    LoadAttachmentsForMessage(_mainVm.Messages[^1], fullMsg.Attachments);
+            }
             MarkContactUnread(from);
 
             // Desktop notification if not viewing this conversation
@@ -1043,11 +1047,15 @@ public partial class MainWindow : Window
         });
 
         // Group events
-        _groups.OnGroupMessageReceived += (groupId, from, text, ts) => Dispatcher.UIThread.Post(() =>
+        _groups.OnGroupMessageReceived += (groupId, from, text, ts, fullMsg) => Dispatcher.UIThread.Post(() =>
         {
             // Only render in chat if the matching group is selected
             if (_mainVm.SelectedConversation is GroupItemViewModel selG && selG.GroupId == groupId)
+            {
                 _mainVm.AddIncomingMessage(from, text, ts);
+                if (fullMsg?.Attachments is { Count: > 0 } && _mainVm.Messages.Count > 0)
+                    LoadAttachmentsForMessage(_mainVm.Messages[^1], fullMsg.Attachments);
+            }
             MarkGroupUnread(groupId);
 
             // Desktop notification if not viewing this group
@@ -1441,8 +1449,11 @@ public partial class MainWindow : Window
 
     private async Task HandleAttachFiles(string[] paths)
     {
-        if (_blobs is null || _places is null) return;
-        if (_mainVm.SelectedConversation is not ChannelItemViewModel channel) return;
+        if (_blobs is null) return;
+        // Snapshot the conversation up front — the user may switch chats while
+        // the upload runs and we'd otherwise send into the wrong target.
+        var target = _mainVm.SelectedConversation;
+        if (target is null) return;
 
         var attachments = new List<Rede.Core.Storage.AttachmentInfo>();
         foreach (var path in paths)
@@ -1464,14 +1475,58 @@ public partial class MainWindow : Window
             }
         }
 
-        if (attachments.Count > 0)
-        {
-            var text = _mainVm.InputText?.Trim() ?? "";
-            if (string.IsNullOrEmpty(text)) text = $"{attachments.Count} file(s)";
-            Dispatcher.UIThread.Post(() => _mainVm.InputText = "");
+        if (attachments.Count == 0) return;
 
-            _places.SendChannelMessage(channel.PlaceId, channel.ChannelId, text, _mainVm.TtlSeconds,
-                attachments: attachments);
+        var text = _mainVm.InputText?.Trim() ?? "";
+        if (string.IsNullOrEmpty(text)) text = $"{attachments.Count} file(s)";
+        Dispatcher.UIThread.Post(() => _mainVm.InputText = "");
+
+        switch (target)
+        {
+            case ChannelItemViewModel channel:
+                _places?.SendChannelMessage(channel.PlaceId, channel.ChannelId, text, _mainVm.TtlSeconds,
+                    attachments: attachments);
+                break;
+
+            case ContactItemViewModel contact:
+                // 1:1 chat — the server doesn't echo, so add an optimistic
+                // bubble for the sender and stamp the MsgId once the ACK lands.
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_mainVm.SelectedConversation is ContactItemViewModel stillSel && stillSel.UserId == contact.UserId)
+                    {
+                        var optimistic = new ChatMessageViewModel
+                        {
+                            Text = text,
+                            IsOwn = true,
+                            Timestamp = DateTime.Now,
+                        };
+                        _mainVm.Messages.Add(optimistic);
+                        _mainVm.PendingAckVms.Enqueue(optimistic);
+                        LoadAttachmentsForMessage(optimistic, attachments);
+                    }
+                });
+                _chat?.SendMessage(contact.UserId, text, _mainVm.TtlSeconds, attachments);
+                break;
+
+            case GroupItemViewModel group:
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_mainVm.SelectedConversation is GroupItemViewModel stillSel && stillSel.GroupId == group.GroupId)
+                    {
+                        var optimistic = new ChatMessageViewModel
+                        {
+                            Text = text,
+                            IsOwn = true,
+                            Timestamp = DateTime.Now,
+                        };
+                        _mainVm.Messages.Add(optimistic);
+                        _mainVm.PendingAckVms.Enqueue(optimistic);
+                        LoadAttachmentsForMessage(optimistic, attachments);
+                    }
+                });
+                _groups?.SendGroupMessage(group.GroupId, text, _mainVm.TtlSeconds, attachments);
+                break;
         }
     }
 

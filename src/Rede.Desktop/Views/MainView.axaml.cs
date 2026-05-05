@@ -141,6 +141,17 @@ public partial class MainView : UserControl
         }
     }
 
+    // Drop the saved Double Ratchet state for this contact so the next outgoing
+    // message re-runs X3DH. Needed after deleting + re-adding a contact, or when
+    // the peer reinstalled, otherwise both sides hold mismatched ratchet keys
+    // and decryption silently fails.
+    private void ResyncContact_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        if (vm.SelectedConversation is not ContactItemViewModel contact) return;
+        vm.ExecuteCommand("resync", new[] { contact.UserId });
+    }
+
     // Tunneling Enter handler — runs *before* TextBox's class handler can insert a
     // newline. Plain Enter sends; Shift+Enter falls through and the TextBox does its
     // normal newline insertion.

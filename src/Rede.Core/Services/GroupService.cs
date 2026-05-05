@@ -41,7 +41,7 @@ public class GroupService : IDisposable
     public byte[]? Passphrase { get; set; }
 
     public event Action<string>? OnSystemMessage;
-    public event Action<string, string, string, DateTime>? OnGroupMessageReceived; // groupId, from, text, ts
+    public event Action<string, string, string, DateTime, ChatMessage?>? OnGroupMessageReceived; // groupId, from, text, ts, fullMsg
     public event Action? OnGroupsChanged;
     public event Action<string, string, int>? OnGroupMessageSent; // groupId, text, ttl
     public event Action<string, string, string, Dictionary<string, List<string>>>? OnReactionUpdated; // chatKey, msgId, emoji, reactions
@@ -169,7 +169,8 @@ public class GroupService : IDisposable
         OnSystemMessage?.Invoke($"Group key rotated for \"{group.Name}\". New key sent to {sent} member(s).");
     }
 
-    public void SendGroupMessage(string groupId, string text, int ttl = 0)
+    public void SendGroupMessage(string groupId, string text, int ttl = 0,
+        List<AttachmentInfo>? attachments = null)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -178,6 +179,12 @@ public class GroupService : IDisposable
             OnSystemMessage?.Invoke("Group not found");
             return;
         }
+
+        // Use the JSON envelope on the wire when attachments are present; keep
+        // the user-visible text separate for local persistence and search.
+        var wireText = attachments is { Count: > 0 }
+            ? MessageEnvelope.Encode(text, attachments: attachments)
+            : text;
 
         // Get or create sender key state
         var skStateJson = _store.LoadSenderKeyState(Profile, groupId);
@@ -199,7 +206,7 @@ public class GroupService : IDisposable
             skState = SenderKeys.Generate();
         }
 
-        var result = SenderKeys.Encrypt(skState, text, Profile.SigningSecretKey, groupId);
+        var result = SenderKeys.Encrypt(skState, wireText, Profile.SigningSecretKey, groupId);
 
         // Save updated state (debounced — no scrypt, no Task.Run needed)
         var stateObj = new JsonObject
@@ -230,7 +237,7 @@ public class GroupService : IDisposable
         // One ACK slot per WS send. Control messages (reactions/edits/deletes) push a
         // (groupId, null) sentinel — the echo consumes it but doesn't stamp anything.
         // Regular messages push the persisted ChatMessage so the echo stamps its MsgId.
-        bool isControl = text.Contains("\"__rede_ctrl\"");
+        bool isControl = wireText.Contains("\"__rede_ctrl\"");
         ChatMessage? persistedMsg = null;
         if (!isControl)
         {
@@ -240,6 +247,7 @@ public class GroupService : IDisposable
                 Text = text,
                 Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 Ttl = ttl,
+                Attachments = attachments,
             };
             _store.AddChatMessage(Profile, groupId, persistedMsg, Passphrase);
             OnGroupMessageSent?.Invoke(groupId, text, ttl);
@@ -439,7 +447,7 @@ public class GroupService : IDisposable
         }
 
         // Decode JSON envelope (backward-compatible with plain-text messages)
-        var text = MessageEnvelope.Decode(plaintext, out var replyToMsgId, out var replyToPreview, out var replyToAuthor);
+        var text = MessageEnvelope.Decode(plaintext, out var replyToMsgId, out var replyToPreview, out var replyToAuthor, out var attachments);
 
         var sanitized = ChatService.EscapeContent(text);
         var serverMsgId = ProtocolSerializer.GetString(msg, "msgId");
@@ -453,10 +461,11 @@ public class GroupService : IDisposable
             ReplyToMsgId = replyToMsgId,
             ReplyToPreview = replyToPreview is not null ? ChatService.EscapeContent(replyToPreview) : null,
             ReplyToAuthor = replyToAuthor,
+            Attachments = attachments,
         };
 
         _store.AddChatMessage(Profile, groupId, chatMsg, Passphrase);
-        OnGroupMessageReceived?.Invoke(groupId, from, sanitized, ts);
+        OnGroupMessageReceived?.Invoke(groupId, from, sanitized, ts, chatMsg);
     }
 
     private void HandleControlMessage(string ctrl, JsonObject obj, string from, string chatKey)

@@ -37,7 +37,11 @@ public class ChatService : IDisposable
     public byte[]? Passphrase { get; set; }
 
     // H7: Queue per target — multiple messages can be pending before bundle arrives
-    private readonly Dictionary<string, List<(string Text, int Ttl)>> _pendingOutgoing = new();
+    // (WireText: envelope-or-plain string actually sent over the ratchet,
+    //  DisplayText: user-visible body for local persistence,
+    //  Attachments: AttachmentInfos to persist alongside DisplayText, may be null,
+    //  Ttl: passthrough)
+    private readonly Dictionary<string, List<(string WireText, string DisplayText, List<AttachmentInfo>? Attachments, int Ttl)>> _pendingOutgoing = new();
 
     // Tracks contacts we've already pushed our own profile to during this run.
     // Used to opportunistically resend our profile once when a contact's first
@@ -64,7 +68,7 @@ public class ChatService : IDisposable
         lock (_pendingAckLock) _pendingAck.Clear();
     }
 
-    public event Action<string, string, string, DateTime, bool, string?>? OnMessageReceived; // from, text, chatId, timestamp, isSealed, msgId
+    public event Action<string, string, string, DateTime, bool, string?, ChatMessage?>? OnMessageReceived; // from, text, chatId, timestamp, isSealed, msgId, fullMsg (for attachments etc.)
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
     public event Action<string, string>? OnOwnMessageIdAssigned; // contactId, msgId
@@ -207,7 +211,8 @@ public class ChatService : IDisposable
         OnReactionUpdated?.Invoke(chatKey, msgId, emoji, target.Reactions);
     }
 
-    public void SendMessage(string targetId, string text, int ttl = 0)
+    public void SendMessage(string targetId, string text, int ttl = 0,
+        List<AttachmentInfo>? attachments = null)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -216,6 +221,14 @@ public class ChatService : IDisposable
             OnSystemMessage?.Invoke("Contact not found");
             return;
         }
+
+        // When attachments are present we send the JSON envelope over the wire so
+        // the receiver can decode them. The envelope is also what gets ratcheted +
+        // queued in _pendingOutgoing — we keep the user-visible `text` separately
+        // for local persistence so chat history search etc. don't trip on raw JSON.
+        var wireText = attachments is { Count: > 0 }
+            ? MessageEnvelope.Encode(text, attachments: attachments)
+            : text;
 
         var devices = contact.Devices;
         var deviceIds = devices.Keys.ToList();
@@ -238,7 +251,7 @@ public class ChatService : IDisposable
         // Pre-create the persisted message (null for control messages so ACKs consume
         // their own slot without stamping anything). The same reference is pushed onto
         // _pendingAck once per successful WS send — first ACK stamps MsgId, rest are no-ops.
-        bool isControl = text.Contains("\"__rede_ctrl\"");
+        bool isControl = wireText.Contains("\"__rede_ctrl\"");
         ChatMessage? persistedMsg = null;
         if (haveSessions.Count > 0 && !isControl)
         {
@@ -248,13 +261,14 @@ public class ChatService : IDisposable
                 Text = text,
                 Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 Ttl = ttl,
+                Attachments = attachments,
             };
         }
 
         bool sentAny = false;
         foreach (var devId in haveSessions)
         {
-            if (SendToDevice(targetId, devId, text, ttl, contact, persistedMsg))
+            if (SendToDevice(targetId, devId, wireText, ttl, contact, persistedMsg))
                 sentAny = true;
         }
 
@@ -276,7 +290,7 @@ public class ChatService : IDisposable
                 OnSystemMessage?.Invoke("Too many pending messages - wait for session to establish.");
                 return;
             }
-            _pendingOutgoing[targetId].Add((text, ttl));
+            _pendingOutgoing[targetId].Add((wireText, text, attachments, ttl));
             _conn.Send(Msg.FetchPrekeyBundle, ProtocolSerializer.Payload(
                 ("targetUserId", JsonValue.Create(targetId))
             ));
@@ -400,19 +414,25 @@ public class ChatService : IDisposable
         // Check for control messages (group key distribution, reactions)
         if (TryHandleControlMessage(plaintext, from)) return;
 
-        var sanitized = EscapeContent(plaintext);
+        // Decode JSON envelope so attachments/replies sent in DMs are split out
+        // before sanitization (raw JSON would otherwise be shown as the message
+        // body and the attachments would be lost).
+        var decoded = MessageEnvelope.Decode(plaintext, out _, out _, out _, out var attachments);
+
+        var sanitized = EscapeContent(decoded);
         var ts = DateTimeOffset.FromUnixTimeMilliseconds(ProtocolSerializer.GetLong(msg, "ts")).LocalDateTime;
         var ttl = ProtocolSerializer.GetInt(msg, "ttl");
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
 
-        // Store chat history (debounced)
-        _store.AddChatMessage(Profile, from, new ChatMessage
+        var chatMsg = new ChatMessage
         {
             From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"), Ttl = ttl, MsgId = msgId,
-        }, Passphrase);
+            Attachments = attachments,
+        };
+        _store.AddChatMessage(Profile, from, chatMsg, Passphrase);
 
         EnsureProfileSentTo(from);
-        OnMessageReceived?.Invoke(from, sanitized, from, ts, false, msgId);
+        OnMessageReceived?.Invoke(from, sanitized, from, ts, false, msgId, chatMsg);
     }
 
     private void HandleSealedMessage(JsonObject msg)
@@ -454,7 +474,11 @@ public class ChatService : IDisposable
         // Check for control messages (group key distribution, reactions)
         if (TryHandleControlMessage(plaintext, from)) return;
 
-        var sanitized = EscapeContent(plaintext);
+        // See HandleMessage — decode envelope before sanitizing so attachments
+        // round-trip through sealed sender too.
+        var decoded = MessageEnvelope.Decode(plaintext, out _, out _, out _, out var attachments);
+
+        var sanitized = EscapeContent(decoded);
         var ts = DateTime.Now;
         // The server stamps msgId on the outer sealed envelope — the inner
         // (sender-built) payload never carries one. Reading it from innerObj
@@ -462,13 +486,15 @@ public class ChatService : IDisposable
         // can never find the target.
         var msgId = ProtocolSerializer.GetString(msg, "msgId");
 
-        _store.AddChatMessage(Profile, from, new ChatMessage
+        var chatMsg = new ChatMessage
         {
             From = from, Text = sanitized, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = 0, MsgId = msgId,
-        }, Passphrase);
+            Attachments = attachments,
+        };
+        _store.AddChatMessage(Profile, from, chatMsg, Passphrase);
 
         EnsureProfileSentTo(from);
-        OnMessageReceived?.Invoke(from, sanitized, from, ts, true, msgId);
+        OnMessageReceived?.Invoke(from, sanitized, from, ts, true, msgId, chatMsg);
     }
 
     private string? ReceiveRatcheted(JsonObject msg, string from)
@@ -749,13 +775,14 @@ public class ChatService : IDisposable
 
         // Pre-create the persisted message for this initial send (control messages
         // don't get persisted but still need per-send ACK slots in _pendingAck).
-        bool initIsControl = pending.Text.Contains("\"__rede_ctrl\"");
+        bool initIsControl = pending.WireText.Contains("\"__rede_ctrl\"");
         ChatMessage? initPersistedMsg = initIsControl ? null : new ChatMessage
         {
             From = Profile.UserId,
-            Text = pending.Text,
+            Text = pending.DisplayText,
             Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             Ttl = pending.Ttl,
+            Attachments = pending.Attachments,
         };
 
         int successCount = 0;
@@ -809,7 +836,7 @@ public class ChatService : IDisposable
             }
 
             var ratchetState = DoubleRatchet.InitSender(x3dhResult.SharedSecret, bundle.SignedPreKey);
-            var result = DoubleRatchet.Encrypt(ratchetState, pending.Text);
+            var result = DoubleRatchet.Encrypt(ratchetState, pending.WireText);
 
             var stateJson = JsonSerializer.SerializeToElement(ratchetState);
             _store.SaveRatchetStateAsync(Profile, targetUserId, stateJson, Passphrase, devId);
@@ -852,7 +879,7 @@ public class ChatService : IDisposable
             if (initPersistedMsg is not null)
             {
                 _store.AddChatMessage(Profile, targetUserId, initPersistedMsg, Passphrase);
-                OnMessageSent?.Invoke(targetUserId, pending.Text, pending.Ttl);
+                OnMessageSent?.Invoke(targetUserId, pending.DisplayText, pending.Ttl);
             }
             OnSystemMessage?.Invoke($"Secure session established ({successCount} device(s)).");
 
@@ -860,7 +887,7 @@ public class ChatService : IDisposable
             for (int i = 1; i < pendingList.Count; i++)
             {
                 var queued = pendingList[i];
-                SendMessage(targetUserId, queued.Text, queued.Ttl);
+                SendMessage(targetUserId, queued.DisplayText, queued.Ttl, queued.Attachments);
             }
         }
         else
