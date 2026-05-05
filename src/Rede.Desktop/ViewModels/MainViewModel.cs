@@ -326,6 +326,12 @@ public partial class MainViewModel : ViewModelBase
             IsMessageSearchVisible = false;
         }
 
+        // Clear messages *before* swapping SelectedConversation/ChatTitle, otherwise
+        // there's a render frame where the new header is shown above the previous
+        // conversation's messages — looks like the wrong chat briefly flashes in.
+        Messages.Clear();
+        PendingAckVms.Clear();
+
         SelectedConversation = item;
         SyncSidebarSelection(item);
         IsPlaceSelected = false;
@@ -838,6 +844,10 @@ public partial class ChatMessageViewModel : ViewModelBase
     public bool HasSenderRole => SenderRole is not null;
     public IBrush RoleBadgeBrush => ColorHelper.SafeParse(RoleBadgeColor);
     public bool IsReply => ReplyToPreview is not null;
+    // True only for incoming peer messages — excludes own, system, and security
+    // alerts. The XAML uses this to gate the left-side avatar/header so system
+    // notices don't render a stub avatar with a "?" placeholder.
+    public bool IsIncoming => !IsOwn && !IsSystem && !IsSecurityAlert;
 }
 
 public partial class ReactionViewModel : ViewModelBase

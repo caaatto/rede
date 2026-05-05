@@ -694,7 +694,7 @@
                                     <StackPanel Orientation="Horizontal" Spacing="10"
                                                 HorizontalAlignment="Left"
                                                 Margin="0,0,80,0"
-                                                IsVisible="{Binding !IsOwn}">
+                                                IsVisible="{Binding IsIncoming}">
                                         <!-- Sender avatar (only on first message of a group) -->
                                         <Border Width="40" Height="40" CornerRadius="20"
                                                 Background="{Binding SenderAccentBrush}"
