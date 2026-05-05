@@ -43,11 +43,12 @@ public class ChatService : IDisposable
     //  Ttl: passthrough)
     private readonly Dictionary<string, List<(string WireText, string DisplayText, List<AttachmentInfo>? Attachments, int Ttl)>> _pendingOutgoing = new();
 
-    // Tracks contacts we've already pushed our own profile to during this run.
-    // Used to opportunistically resend our profile once when a contact's first
-    // message arrives — covers the asymmetric add case where their first profile
-    // message reached us before we'd added them and thus got dropped.
-    private readonly HashSet<string> _profileSentThisSession = new();
+    // Tracks the profile fingerprint we last successfully queued to each contact
+    // this session. EnsureProfileSentTo re-sends only when the fingerprint
+    // changed — so an avatar/accent edit in Settings propagates on the next
+    // chat interaction (incoming OR outgoing) even if BroadcastProfile happened
+    // while the contact was offline or before the ratchet existed.
+    private readonly Dictionary<string, string> _profileSentFingerprint = new();
 
     // ACK FIFO: every successful WS send (per device, including control messages) pushes
     // one entry. On each msgId ACK we dequeue the head and stamp the referenced ChatMessage's
@@ -110,8 +111,11 @@ public class ChatService : IDisposable
         var text = BuildProfilePayload(accentColor, avatarData, avatarMimeType);
         if (text is null) return;
 
+        var fp = ComputeProfileFingerprint(accentColor, avatarData, avatarMimeType);
+
         // Send to all contacts in background — avoids blocking UI with many contacts
         var contactIds = Profile.Contacts.Keys.ToList();
+        foreach (var cid in contactIds) _profileSentFingerprint[cid] = fp;
         Task.Run(() =>
         {
             foreach (var contactId in contactIds)
@@ -127,28 +131,45 @@ public class ChatService : IDisposable
         var text = BuildProfilePayload(accentColor, avatarData, avatarMimeType);
         if (text is null) return;
 
-        _profileSentThisSession.Add(contactId);
+        _profileSentFingerprint[contactId] = ComputeProfileFingerprint(accentColor, avatarData, avatarMimeType);
         Task.Run(() => SendMessage(contactId, text, 0));
     }
 
     /// <summary>
-    /// Send our profile to a contact if we haven't yet this session. Called from
-    /// the receive path so that whichever side speaks first triggers the other to
-    /// reciprocate — this is what closes the gap when adds were asymmetric and the
-    /// add-time profile message was dropped (the receiver didn't have us as a
-    /// contact yet, so ReceiveRatcheted bailed before TryHandleControlMessage).
+    /// Re-send our profile to a contact if it has changed since we last queued one
+    /// to them this session. Called from both the send and receive paths so any
+    /// chat interaction synchronises the latest avatar/accent — covers asymmetric
+    /// adds (where the add-time profile message was dropped because we weren't yet
+    /// a contact on their side) and live edits in Settings.
     /// </summary>
     private void EnsureProfileSentTo(string contactId)
     {
         if (Profile is null || Passphrase is null) return;
-        if (_profileSentThisSession.Contains(contactId)) return;
         if (Profile.AccentColor is null && Profile.AvatarData is null) return;
+
+        var currentFp = ComputeProfileFingerprint(Profile.AccentColor, Profile.AvatarData, Profile.AvatarMimeType);
+        if (_profileSentFingerprint.TryGetValue(contactId, out var lastFp) && lastFp == currentFp) return;
 
         var text = BuildProfilePayload(Profile.AccentColor, Profile.AvatarData, Profile.AvatarMimeType);
         if (text is null) return;
 
-        _profileSentThisSession.Add(contactId);
+        _profileSentFingerprint[contactId] = currentFp;
         Task.Run(() => SendMessage(contactId, text, 0));
+    }
+
+    /// <summary>
+    /// 16-char base64 SHA-256 of (accent|avatar|mime). Used to dedupe profile
+    /// re-sends — the avatar bytes themselves can be hundreds of KB so we never
+    /// keep them in this map. Empty string when no profile is set.
+    /// </summary>
+    private static string ComputeProfileFingerprint(string? accentColor, string? avatarData, string? avatarMimeType)
+    {
+        if (string.IsNullOrEmpty(accentColor) && string.IsNullOrEmpty(avatarData) && string.IsNullOrEmpty(avatarMimeType))
+            return "";
+        var s = (accentColor ?? "") + "|" + (avatarData ?? "") + "|" + (avatarMimeType ?? "");
+        var bytes = System.Text.Encoding.UTF8.GetBytes(s);
+        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+        return Convert.ToBase64String(hash, 0, 12);
     }
 
     private static string? BuildProfilePayload(string? accentColor, string? avatarData, string? avatarMimeType)
@@ -229,6 +250,12 @@ public class ChatService : IDisposable
         var wireText = attachments is { Count: > 0 }
             ? MessageEnvelope.Encode(text, attachments: attachments)
             : text;
+
+        // Profile sync — every outgoing user message catches the contact up on our
+        // latest avatar/accent if they haven't already received this fingerprint.
+        // Skipped for control messages so the recursive call doesn't loop.
+        if (!wireText.Contains("\"__rede_ctrl\""))
+            EnsureProfileSentTo(targetId);
 
         var devices = contact.Devices;
         var deviceIds = devices.Keys.ToList();

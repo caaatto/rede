@@ -190,6 +190,9 @@ Customize your profile in Settings:
 - **Avatar** - upload a PNG, JPEG, or GIF (max 256KB)
 
 Changes are previewed locally. Click **Apply** to save and share with contacts.
+Profile updates ride on the regular chat channel: an avatar/accent edit is
+broadcast to all contacts on apply, and lazily re-synced via the next chat
+message in either direction whenever the broadcast missed an offline peer.
 
 
 ## multi-device
