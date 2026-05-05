@@ -227,7 +227,10 @@ public class CallService : IDisposable
         };
 
         _connection.Send(Msg.CallReject, payload);
-        Reset("Rejected");
+        // EndCall (not Reset) — Reset only clears state and never fires
+        // OnCallEnded, so the CallView stayed visible until the user accepted
+        // and then hung up to trigger a real teardown.
+        EndCall("Rejected");
         return true;
     }
 
