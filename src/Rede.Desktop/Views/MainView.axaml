@@ -512,15 +512,20 @@
                                    MaxWidth="400"
                                    IsVisible="{Binding ChannelTopic, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     </StackPanel>
-                    <!-- Member list toggle -->
+                    <!-- Member list toggle (Discord-style "Members" text button —
+                         the previous icon used U+1D5E0 which fell back to "?" on systems
+                         without the Mathematical Alphanumeric block). -->
                     <Button Grid.Column="1"
                             Classes="ghost"
-                            Padding="8,4"
+                            Padding="10,4"
                             CornerRadius="4"
                             ToolTip.Tip="Toggle member list"
                             IsVisible="{Binding IsPlaceSelected}"
                             Click="ToggleMemberList_Click">
-                        <TextBlock Text="&#x1D5E0;" FontSize="14" />
+                        <TextBlock Text="Members"
+                                   FontSize="{StaticResource RedeSmallSize}"
+                                   FontWeight="{StaticResource RedeWeightMedium}"
+                                   VerticalAlignment="Center" />
                     </Button>
                     <Button Grid.Column="2"
                             Classes="ghost"

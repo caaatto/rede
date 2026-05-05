@@ -917,12 +917,23 @@ public partial class MainWindow : Window
             if (_auth?.Profile is null || _auth.Passphrase is null) return;
             if (_auth.Profile.Contacts.TryGetValue(senderId, out var contact))
             {
-                // Validate received profile data
-                contact.AccentColor = accentColor is not null &&
-                    System.Text.RegularExpressions.Regex.IsMatch(accentColor, @"^#[0-9a-fA-F]{6}$")
-                    ? accentColor : contact.AccentColor;
-                contact.AvatarData = avatarData is not null && avatarData.Length <= 350_000 ? avatarData : null;
-                contact.AvatarMimeType = avatarMimeType;
+                // Accent: only overwrite when the payload carries a valid hex color —
+                // a missing field means "no change", not "clear".
+                if (accentColor is not null &&
+                    System.Text.RegularExpressions.Regex.IsMatch(accentColor, @"^#[0-9a-fA-F]{6}$"))
+                {
+                    contact.AccentColor = accentColor;
+                }
+                // Avatar: only update when the payload includes one. The previous code
+                // wiped the contact's avatar whenever a profile message arrived without
+                // avatar data (e.g. when the sender just changed their accent color),
+                // which is why avatars appeared to "not propagate" — they did, then got
+                // erased by the next profile message.
+                if (avatarData is not null && avatarData.Length <= 350_000)
+                {
+                    contact.AvatarData = avatarData;
+                    contact.AvatarMimeType = avatarMimeType;
+                }
                 _store.SaveProfileDebounced(_auth.Profile, _auth.Passphrase);
                 Dispatcher.UIThread.Post(RefreshContacts);
             }

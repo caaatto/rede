@@ -39,6 +39,12 @@ public class ChatService : IDisposable
     // H7: Queue per target — multiple messages can be pending before bundle arrives
     private readonly Dictionary<string, List<(string Text, int Ttl)>> _pendingOutgoing = new();
 
+    // Tracks contacts we've already pushed our own profile to during this run.
+    // Used to opportunistically resend our profile once when a contact's first
+    // message arrives — covers the asymmetric add case where their first profile
+    // message reached us before we'd added them and thus got dropped.
+    private readonly HashSet<string> _profileSentThisSession = new();
+
     // ACK FIFO: every successful WS send (per device, including control messages) pushes
     // one entry. On each msgId ACK we dequeue the head and stamp the referenced ChatMessage's
     // MsgId — this is the only reliable pairing since sealed ACKs carry no `to` field and
@@ -117,6 +123,27 @@ public class ChatService : IDisposable
         var text = BuildProfilePayload(accentColor, avatarData, avatarMimeType);
         if (text is null) return;
 
+        _profileSentThisSession.Add(contactId);
+        Task.Run(() => SendMessage(contactId, text, 0));
+    }
+
+    /// <summary>
+    /// Send our profile to a contact if we haven't yet this session. Called from
+    /// the receive path so that whichever side speaks first triggers the other to
+    /// reciprocate — this is what closes the gap when adds were asymmetric and the
+    /// add-time profile message was dropped (the receiver didn't have us as a
+    /// contact yet, so ReceiveRatcheted bailed before TryHandleControlMessage).
+    /// </summary>
+    private void EnsureProfileSentTo(string contactId)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (_profileSentThisSession.Contains(contactId)) return;
+        if (Profile.AccentColor is null && Profile.AvatarData is null) return;
+
+        var text = BuildProfilePayload(Profile.AccentColor, Profile.AvatarData, Profile.AvatarMimeType);
+        if (text is null) return;
+
+        _profileSentThisSession.Add(contactId);
         Task.Run(() => SendMessage(contactId, text, 0));
     }
 
@@ -384,6 +411,7 @@ public class ChatService : IDisposable
             From = from, Text = sanitized, Ts = ProtocolSerializer.GetLong(msg, "ts"), Ttl = ttl, MsgId = msgId,
         }, Passphrase);
 
+        EnsureProfileSentTo(from);
         OnMessageReceived?.Invoke(from, sanitized, from, ts, false, msgId);
     }
 
@@ -439,6 +467,7 @@ public class ChatService : IDisposable
             From = from, Text = sanitized, Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Ttl = 0, MsgId = msgId,
         }, Passphrase);
 
+        EnsureProfileSentTo(from);
         OnMessageReceived?.Invoke(from, sanitized, from, ts, true, msgId);
     }
 

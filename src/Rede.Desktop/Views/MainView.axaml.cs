@@ -33,6 +33,14 @@ public partial class MainView : UserControl
         AddHandler(DragDrop.DragOverEvent, OnChatDragOver);
         AddHandler(DragDrop.DropEvent, OnChatDrop);
 
+        // Intercept Enter on the message input during the *tunneling* phase. The
+        // TextBox's built-in class handler inserts a newline (because AcceptsReturn
+        // is true, which we still want for Shift+Enter) — that handler runs before
+        // bubbling KeyDown handlers can prevent it. By tunneling we see the key
+        // first and can mark Enter handled before the TextBox ever sees it.
+        InputBox.AddHandler(KeyDownEvent, InputBox_TunnelKeyDown,
+            Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
         // Track scroll position for "Newest Messages" button
         MessageScroller.ScrollChanged += OnMessageScrollChanged;
 
@@ -61,6 +69,7 @@ public partial class MainView : UserControl
         MessageScroller.ScrollChanged -= OnMessageScrollChanged;
         RemoveHandler(DragDrop.DragOverEvent, OnChatDragOver);
         RemoveHandler(DragDrop.DropEvent, OnChatDrop);
+        InputBox.RemoveHandler(KeyDownEvent, InputBox_TunnelKeyDown);
         // M4: Unsubscribe to prevent memory leak
         if (DataContext is MainViewModel vm && _scrollHandler is not null)
         {
@@ -125,17 +134,21 @@ public partial class MainView : UserControl
         }
     }
 
+    // Tunneling Enter handler — runs *before* TextBox's class handler can insert a
+    // newline. Plain Enter sends; Shift+Enter falls through and the TextBox does its
+    // normal newline insertion.
+    private void InputBox_TunnelKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
+        if (DataContext is MainViewModel vm)
+            vm.SendMessageCommand.Execute(null);
+        e.Handled = true;
+    }
+
     private async void InputBox_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter)
-        {
-            // Shift+Enter inserts a newline (let TextBox handle it via AcceptsReturn).
-            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
-            if (DataContext is MainViewModel vm)
-                vm.SendMessageCommand.Execute(null);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
+        if (e.Key == Key.Escape)
         {
             if (DataContext is MainViewModel vm)
             {
