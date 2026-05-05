@@ -86,6 +86,22 @@
         <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
     </Style>
 
+    <!-- Sidebar item — selected (Discord-style: brighter surface, primary text,
+         hover stays put so the active row doesn't visually "twitch" on mouse-over). -->
+    <Style Selector="Button.ghost.sidebar-selected">
+        <Setter Property="Background" Value="{DynamicResource RedeSurfaceActiveBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.ghost.sidebar-selected:pointerover">
+        <Setter Property="Background" Value="{DynamicResource RedeSurfaceActiveBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource RedeTextPrimaryBrush}" />
+    </Style>
+
+    <!-- Member-list row hover — subtle surface highlight on the right-hand member panel. -->
+    <Style Selector="Border.member-row:pointerover">
+        <Setter Property="Background" Value="{DynamicResource RedeSurfaceHoverBrush}" />
+    </Style>
+
     <!-- ComboBox -->
     <Style Selector="ComboBox">
         <Setter Property="Background" Value="{DynamicResource RedeBackgroundBrush}" />

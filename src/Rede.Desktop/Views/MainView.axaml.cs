@@ -610,10 +610,34 @@ public partial class MainView : UserControl
 
     private void PlaceHeader_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button btn && btn.DataContext is PlaceItemViewModel place)
-        {
-            place.IsExpanded = !place.IsExpanded;
-        }
+        if (sender is not Button btn || btn.DataContext is not PlaceItemViewModel place) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        // Single-active-place: clicking another place deactivates the current one.
+        // Clicking the same place again deselects (returns to Home).
+        var wasActive = place.IsExpanded;
+        foreach (var p in vm.Places) p.IsExpanded = false;
+        place.IsExpanded = !wasActive;
+        vm.ActivePlace = place.IsExpanded ? place : null;
+    }
+
+    private void Home_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        foreach (var p in vm.Places) p.IsExpanded = false;
+        vm.ActivePlace = null;
+    }
+
+    private void ToggleContacts_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm) vm.IsContactsExpanded = !vm.IsContactsExpanded;
+        e.Handled = true;
+    }
+
+    private void ToggleGroups_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm) vm.IsGroupsExpanded = !vm.IsGroupsExpanded;
+        e.Handled = true;
     }
 
     private void Channel_Click(object? sender, RoutedEventArgs e)

@@ -88,6 +88,25 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private object? _selectedConversation;
     [ObservableProperty] private string _searchText = "";
 
+    // Currently-active place (selected from the top rail). Null = "Home" view, where
+    // the sidebar shows contacts + groups expanded. When set, the sidebar fills with
+    // that place's channels and the contacts/groups sections collapse to a one-line
+    // header you can click to expand again.
+    [ObservableProperty] private PlaceItemViewModel? _activePlace;
+    [ObservableProperty] private bool _isContactsExpanded = true;
+    [ObservableProperty] private bool _isGroupsExpanded = true;
+    public bool HasActivePlace => ActivePlace is not null;
+
+    partial void OnActivePlaceChanged(PlaceItemViewModel? value)
+    {
+        OnPropertyChanged(nameof(HasActivePlace));
+        // When entering a place, fold contacts + groups out of the way so the channel
+        // list dominates the sidebar. When leaving, restore them.
+        var inPlace = value is not null;
+        IsContactsExpanded = !inPlace;
+        IsGroupsExpanded = !inPlace;
+    }
+
     partial void OnSearchTextChanged(string value) => ApplySearchFilter();
 
     private void ApplySearchFilter()
@@ -290,6 +309,12 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void ToggleContacts() => IsContactsExpanded = !IsContactsExpanded;
+
+    [RelayCommand]
+    private void ToggleGroups() => IsGroupsExpanded = !IsGroupsExpanded;
+
+    [RelayCommand]
     private void SelectConversation(object? item)
     {
         // Reset in-chat search whenever the conversation changes — a stale filter
@@ -301,6 +326,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         SelectedConversation = item;
+        SyncSidebarSelection(item);
         IsPlaceSelected = false;
         ChannelTopic = "";
         if (item is ContactItemViewModel contact)
@@ -327,9 +353,21 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    // Mirror SelectedConversation onto each sidebar item's IsSelected so the
+    // active conversation can render with a Discord-style highlight.
+    private void SyncSidebarSelection(object? item)
+    {
+        foreach (var c in Contacts) c.IsSelected = ReferenceEquals(c, item);
+        foreach (var g in Groups) g.IsSelected = ReferenceEquals(g, item);
+        foreach (var p in Places)
+            foreach (var ch in p.Channels)
+                ch.IsSelected = ReferenceEquals(ch, item);
+    }
+
     public void DeselectConversation()
     {
         SelectedConversation = null;
+        SyncSidebarSelection(null);
         ChatTitle = "";
         IsContactSelected = false;
         IsPlaceSelected = false;
@@ -595,6 +633,7 @@ public partial class ContactItemViewModel : ViewModelBase
     [ObservableProperty] private string _status = "offline"; // online, away, dnd, offline
     [ObservableProperty] private string? _customStatus;
     [ObservableProperty] private bool _isMatch = true;
+    [ObservableProperty] private bool _isSelected;
 
     public string Initial => string.IsNullOrEmpty(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
     public IBrush AccentBrush => ColorHelper.SafeParse(AccentColor);
@@ -649,6 +688,7 @@ public partial class GroupItemViewModel : ViewModelBase
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private int _memberCount;
     [ObservableProperty] private bool _isMatch = true;
+    [ObservableProperty] private bool _isSelected;
 }
 
 public partial class PlaceItemViewModel : ViewModelBase
@@ -706,6 +746,7 @@ public partial class ChannelItemViewModel : ViewModelBase
     [ObservableProperty] private bool _isCreator;
     [ObservableProperty] private string? _category;
     [ObservableProperty] private string _topic = "";
+    [ObservableProperty] private bool _isSelected;
 }
 
 public partial class PlaceMemberViewModel : ViewModelBase

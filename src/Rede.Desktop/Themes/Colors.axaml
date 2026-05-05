@@ -40,6 +40,11 @@
     <SolidColorBrush x:Key="RedeAccentVioletBrush" Color="{StaticResource RedeAccentViolet}" />
     <SolidColorBrush x:Key="RedeAccentVioletDimBrush" Color="{StaticResource RedeAccentVioletDim}" />
     <SolidColorBrush x:Key="RedeAccentTealBrush" Color="{StaticResource RedeAccentTeal}" />
+    <SolidColorBrush x:Key="RedeAccentTealDimBrush" Color="{StaticResource RedeAccentTealDim}" />
+
+    <!-- Aliases used in views (resolve to the canonical accent / secondary text) -->
+    <SolidColorBrush x:Key="RedeAccentBrush" Color="{StaticResource RedeAccentViolet}" />
+    <SolidColorBrush x:Key="RedeSecondaryBrush" Color="{StaticResource RedeTextSecondary}" />
 
     <SolidColorBrush x:Key="RedeWarningBrush" Color="{StaticResource RedeWarning}" />
     <SolidColorBrush x:Key="RedeErrorBrush" Color="{StaticResource RedeError}" />

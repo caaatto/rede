@@ -6,6 +6,144 @@
              x:DataType="vm:MainViewModel">
 
     <Panel>
+    <DockPanel>
+
+        <!-- ===== TOP PLACE RAIL =====
+             Discord-style server bar, but rotated horizontal. Sits across the top of the
+             window with REDE branding on the left, a Home/DMs button, the place icons,
+             and an "add place" button. The selected place gets a Discord-style underline
+             pill below the icon. The top 36px is left empty for OS title-bar drag. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource RedeSurfaceBrush}"
+                BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="0,36,0,0" Height="64" ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+
+                <!-- Brand: logo + REDE wordmark -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10"
+                            VerticalAlignment="Center" Margin="14,0,12,0">
+                    <Image Source="avares://Rede.Desktop/Assets/icon.png"
+                           Width="28" Height="28" />
+                    <TextBlock Text="REDE"
+                               FontSize="18"
+                               FontWeight="{StaticResource RedeWeightBold}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Vertical separator -->
+                <Border Grid.Column="1" Width="1" Margin="4,16"
+                        Background="{DynamicResource RedeBorderBrush}" />
+
+                <!-- Home / DMs (deselects active place, returns to contacts/groups view) -->
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="8,0">
+                    <Button Click="Home_Click"
+                            Width="44" Height="44" Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="14"
+                            ToolTip.Tip="Home (direct messages)">
+                        <Border Width="44" Height="44"
+                                CornerRadius="14"
+                                Background="{DynamicResource RedeSurfaceActiveBrush}"
+                                ClipToBounds="True">
+                            <TextBlock Text="@"
+                                       FontSize="20"
+                                       FontWeight="{StaticResource RedeWeightSemiBold}"
+                                       Foreground="{DynamicResource RedeTextPrimaryBrush}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                    </Button>
+                    <!-- Active underline pill — visible when no place is active. -->
+                    <Border Height="3" Margin="8,2,8,0"
+                            CornerRadius="2,2,0,0"
+                            Background="{DynamicResource RedeAccentVioletBrush}"
+                            IsVisible="{Binding !HasActivePlace}" />
+                </StackPanel>
+
+                <!-- Place icons (horizontally scrollable) -->
+                <ScrollViewer Grid.Column="3"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled"
+                              Padding="4,0">
+                    <ItemsControl ItemsSource="{Binding Places}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="6" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PlaceItemViewModel">
+                                <StackPanel VerticalAlignment="Center">
+                                    <Button Width="44" Height="44" Padding="0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            CornerRadius="14"
+                                            Click="PlaceHeader_Click"
+                                            PointerPressed="Place_PointerPressed"
+                                            ToolTip.Tip="{Binding Name}">
+                                        <Border Width="44" Height="44"
+                                                Background="{Binding AccentBrush}"
+                                                CornerRadius="14"
+                                                ClipToBounds="True">
+                                            <Panel>
+                                                <TextBlock Text="{Binding Initial}"
+                                                           FontSize="17" FontWeight="SemiBold"
+                                                           Foreground="White"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding !HasIcon}" />
+                                                <Image Source="{Binding IconImage}"
+                                                       Width="44" Height="44"
+                                                       Stretch="UniformToFill"
+                                                       IsVisible="{Binding HasIcon}" />
+                                                <!-- Unread dot -->
+                                                <Ellipse Width="10" Height="10"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Top"
+                                                         Margin="0,3,3,0"
+                                                         Fill="{DynamicResource RedeAccentVioletBrush}"
+                                                         Stroke="{DynamicResource RedeSurfaceBrush}"
+                                                         StrokeThickness="2"
+                                                         IsVisible="{Binding HasUnread}" />
+                                            </Panel>
+                                        </Border>
+                                    </Button>
+                                    <!-- Active indicator — Discord-style underline pill. -->
+                                    <Border Height="3" Margin="8,2,8,0"
+                                            CornerRadius="2,2,0,0"
+                                            Background="{DynamicResource RedeAccentVioletBrush}"
+                                            IsVisible="{Binding IsExpanded}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <!-- Add place -->
+                <Button Grid.Column="4"
+                        Click="CreatePlace_Click"
+                        Width="44" Height="44" Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        CornerRadius="14"
+                        Margin="6,0,14,0"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Create place">
+                    <Border Width="44" Height="44"
+                            Background="{DynamicResource RedeSurfaceActiveBrush}"
+                            CornerRadius="14">
+                        <TextBlock Text="+"
+                                   FontSize="22"
+                                   FontWeight="{StaticResource RedeWeightBold}"
+                                   Foreground="{DynamicResource RedeAccentTealBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                </Button>
+            </Grid>
+        </Border>
+
     <Grid ColumnDefinitions="Auto,*,Auto">
 
         <!-- ===== SIDEBAR ===== -->
@@ -16,22 +154,23 @@
                 BorderThickness="0,0,1,0">
             <DockPanel>
 
-                <!-- Brand header — logo + REDE wordmark (inside titlebar area) -->
-                <Border DockPanel.Dock="Top" Height="44" Padding="14,8,8,6"
-                        Background="{DynamicResource RedeSurfaceBrush}">
-                    <Grid ColumnDefinitions="Auto,10,*,Auto">
-                        <Image Grid.Column="0"
-                               Source="avares://Rede.Desktop/Assets/icon.png"
-                               Width="28" Height="28"
-                               VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2"
-                                   Text="REDE"
-                                   VerticalAlignment="Center"
-                                   FontSize="18"
-                                   FontWeight="{StaticResource RedeWeightBold}"
+                <!-- Sidebar title — shows the active place's name, or "Direct Messages"
+                     in Home mode. Right-click on a place title triggers the place
+                     context menu (invite / settings / leave / etc.). -->
+                <Border DockPanel.Dock="Top" Padding="14,10"
+                        Background="{DynamicResource RedeSurfaceBrush}"
+                        BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
+                        BorderThickness="0,0,0,1">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding ActivePlace.Name, FallbackValue='Direct Messages', TargetNullValue='Direct Messages'}"
+                                   FontSize="{StaticResource RedeBodySize}"
+                                   FontWeight="{StaticResource RedeWeightSemiBold}"
                                    Foreground="{DynamicResource RedeTextPrimaryBrush}"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
                                    IsVisible="{Binding !IsSidebarCollapsed}" />
-                        <Button Grid.Column="3" Classes="ghost"
+                        <Button Grid.Column="1" Classes="ghost"
                                 Command="{Binding ToggleSidebarCommand}"
                                 Padding="4" Margin="0"
                                 Width="28" Height="28"
@@ -125,16 +264,83 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
 
+                <!-- ===== ACTIVE PLACE CHANNELS =====
+                     Only visible when a place is selected from the top rail. Shows the
+                     place's channels at the top of the sidebar so the place dominates
+                     the view, exactly like Discord's server-channel list. -->
+                <StackPanel IsVisible="{Binding HasActivePlace}">
+                    <!-- Channels section header (with member count) -->
+                    <Border Padding="12,10,12,6"
+                            IsVisible="{Binding !IsSidebarCollapsed}">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Text="Channels" Classes="secondary"
+                                       FontWeight="{StaticResource RedeWeightSemiBold}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding ActivePlace.MemberCount, StringFormat='{}{0} members'}"
+                                       Classes="muted"
+                                       FontSize="{StaticResource RedeCaptionSize}"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Channels list -->
+                    <ItemsControl ItemsSource="{Binding ActivePlace.Channels}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ChannelItemViewModel">
+                                <Grid ColumnDefinitions="3,*">
+                                    <Border Grid.Column="0"
+                                            Width="3"
+                                            Margin="0,4"
+                                            CornerRadius="0,2,2,0"
+                                            Background="{DynamicResource RedeAccentVioletBrush}"
+                                            IsVisible="{Binding IsSelected}" />
+                                    <Button Grid.Column="1"
+                                            Classes="ghost"
+                                            Classes.sidebar-selected="{Binding IsSelected}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Padding="12,6"
+                                            Margin="2,0"
+                                            BorderThickness="0"
+                                            CornerRadius="4"
+                                            Click="Channel_Click"
+                                            PointerPressed="Channel_PointerPressed">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0">
+                                                <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
+                                                <Run Text="{Binding Name}" />
+                                            </TextBlock>
+                                            <Ellipse Grid.Column="1" Width="8" Height="8"
+                                                     Fill="{DynamicResource RedeAccentVioletBrush}"
+                                                     VerticalAlignment="Center"
+                                                     IsVisible="{Binding HasUnread}" />
+                                        </Grid>
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
                 <Separator />
 
-                <!-- Contacts header -->
+                <!-- Contacts header (click to collapse/expand) -->
                 <Border Padding="12,8"
-                        IsVisible="{Binding !IsSidebarCollapsed}">
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="Contacts" Classes="secondary"
+                        Cursor="Hand"
+                        Background="Transparent"
+                        IsVisible="{Binding !IsSidebarCollapsed}"
+                        PointerPressed="ToggleContacts_PointerPressed">
+                    <Grid ColumnDefinitions="Auto,4,*,Auto">
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding IsContactsExpanded, Converter={StaticResource CollapseIconConverter}}"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource RedeTextMutedBrush}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="Contacts" Classes="secondary"
                                    FontWeight="{StaticResource RedeWeightSemiBold}"
                                    VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Classes="ghost"
+                        <Button Grid.Column="3" Classes="ghost"
                                 Padding="4" Width="28" Height="28"
                                 ToolTip.Tip="Add contact"
                                 Click="AddContact_Click">
@@ -144,71 +350,91 @@
                 </Border>
 
                 <!-- Contact list -->
-                    <ItemsControl ItemsSource="{Binding Contacts}">
+                    <ItemsControl ItemsSource="{Binding Contacts}"
+                                  IsVisible="{Binding IsContactsExpanded}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:ContactItemViewModel">
-                                <Button Classes="ghost"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Left"
-                                        Padding="12,8"
-                                        Margin="2,1"
-                                        BorderThickness="0"
-                                        CornerRadius="4"
-                                        IsVisible="{Binding IsMatch}"
-                                        Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
-                                        CommandParameter="{Binding}"
-                                        PointerPressed="Contact_PointerPressed">
-                                    <Grid ColumnDefinitions="Auto,8,*,Auto">
-                                        <!-- Avatar circle -->
-                                        <Panel Grid.Column="0" Width="36" Height="36">
-                                            <Border Width="36" Height="36" CornerRadius="18"
-                                                    Background="{Binding AccentBrush}"
-                                                    ClipToBounds="True">
-                                                <Panel>
-                                                    <TextBlock Text="{Binding Initial}"
-                                                               FontSize="14" FontWeight="SemiBold"
-                                                               Foreground="White"
-                                                               HorizontalAlignment="Center"
-                                                               VerticalAlignment="Center"
-                                                               IsVisible="{Binding !HasAvatar}" />
-                                                    <Image Source="{Binding AvatarImage}"
-                                                           Width="36" Height="36"
-                                                           Stretch="UniformToFill"
-                                                           IsVisible="{Binding HasAvatar}" />
-                                                </Panel>
-                                            </Border>
-                                            <!-- Status indicator -->
-                                            <Ellipse Width="10" Height="10"
-                                                     HorizontalAlignment="Right"
-                                                     VerticalAlignment="Bottom"
-                                                     Fill="{Binding StatusBrush}"
-                                                     ToolTip.Tip="{Binding StatusTooltip}" />
-                                        </Panel>
-                                        <!-- Name -->
-                                        <TextBlock Grid.Column="2" Text="{Binding DisplayName}"
-                                                   VerticalAlignment="Center"
-                                                   IsVisible="{Binding !$parent[Border].((vm:MainViewModel)DataContext).IsSidebarCollapsed, FallbackValue=True}" />
-                                        <!-- Unread dot -->
-                                        <Ellipse Grid.Column="3" Width="8" Height="8"
-                                                 Fill="{DynamicResource RedeAccentVioletBrush}"
-                                                 VerticalAlignment="Center"
-                                                 IsVisible="{Binding HasUnread}" />
-                                    </Grid>
-                                </Button>
+                                <Grid ColumnDefinitions="3,*"
+                                      IsVisible="{Binding IsMatch}">
+                                    <!-- Selected indicator (Discord-style left accent bar) -->
+                                    <Border Grid.Column="0"
+                                            Width="3"
+                                            Margin="0,6"
+                                            CornerRadius="0,2,2,0"
+                                            Background="{DynamicResource RedeAccentVioletBrush}"
+                                            IsVisible="{Binding IsSelected}" />
+                                    <Button Grid.Column="1"
+                                            Classes="ghost"
+                                            Classes.sidebar-selected="{Binding IsSelected}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Padding="12,8"
+                                            Margin="2,1"
+                                            BorderThickness="0"
+                                            CornerRadius="4"
+                                            Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
+                                            CommandParameter="{Binding}"
+                                            PointerPressed="Contact_PointerPressed">
+                                        <Grid ColumnDefinitions="Auto,8,*,Auto">
+                                            <!-- Avatar circle -->
+                                            <Panel Grid.Column="0" Width="36" Height="36">
+                                                <Border Width="36" Height="36" CornerRadius="18"
+                                                        Background="{Binding AccentBrush}"
+                                                        ClipToBounds="True">
+                                                    <Panel>
+                                                        <TextBlock Text="{Binding Initial}"
+                                                                   FontSize="14" FontWeight="SemiBold"
+                                                                   Foreground="White"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   IsVisible="{Binding !HasAvatar}" />
+                                                        <Image Source="{Binding AvatarImage}"
+                                                               Width="36" Height="36"
+                                                               Stretch="UniformToFill"
+                                                               IsVisible="{Binding HasAvatar}" />
+                                                    </Panel>
+                                                </Border>
+                                                <!-- Status indicator -->
+                                                <Ellipse Width="10" Height="10"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Bottom"
+                                                         Fill="{Binding StatusBrush}"
+                                                         ToolTip.Tip="{Binding StatusTooltip}" />
+                                            </Panel>
+                                            <!-- Name -->
+                                            <TextBlock Grid.Column="2" Text="{Binding DisplayName}"
+                                                       VerticalAlignment="Center"
+                                                       IsVisible="{Binding !$parent[ItemsControl].((vm:MainViewModel)DataContext).IsSidebarCollapsed, FallbackValue=True}" />
+                                            <!-- Unread dot -->
+                                            <Ellipse Grid.Column="3" Width="8" Height="8"
+                                                     Fill="{DynamicResource RedeAccentVioletBrush}"
+                                                     VerticalAlignment="Center"
+                                                     IsVisible="{Binding HasUnread}" />
+                                        </Grid>
+                                    </Button>
+                                </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
                 <Separator />
 
-                <!-- Groups header -->
+                <!-- Groups header (click to collapse/expand) -->
                 <Border Padding="12,8"
-                        IsVisible="{Binding !IsSidebarCollapsed}">
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="Groups" Classes="secondary"
+                        Cursor="Hand"
+                        Background="Transparent"
+                        IsVisible="{Binding !IsSidebarCollapsed}"
+                        PointerPressed="ToggleGroups_PointerPressed">
+                    <Grid ColumnDefinitions="Auto,4,*,Auto">
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding IsGroupsExpanded, Converter={StaticResource CollapseIconConverter}}"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource RedeTextMutedBrush}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="Groups" Classes="secondary"
                                    FontWeight="{StaticResource RedeWeightSemiBold}"
                                    VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Classes="ghost"
+                        <Button Grid.Column="3" Classes="ghost"
                                 Padding="4" Width="28" Height="28"
                                 ToolTip.Tip="Create group"
                                 Click="CreateGroup_Click">
@@ -218,137 +444,42 @@
                 </Border>
 
                 <!-- Group list -->
-                    <ItemsControl ItemsSource="{Binding Groups}">
+                    <ItemsControl ItemsSource="{Binding Groups}"
+                                  IsVisible="{Binding IsGroupsExpanded}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:GroupItemViewModel">
-                                <Button Classes="ghost"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Left"
-                                        Padding="12,8"
-                                        Margin="2,1"
-                                        BorderThickness="0"
-                                        CornerRadius="4"
-                                        IsVisible="{Binding IsMatch}"
-                                        Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
-                                        CommandParameter="{Binding}"
-                                        PointerPressed="Group_PointerPressed">
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock Grid.Column="0">
-                                            <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
-                                            <Run Text="{Binding Name}" />
-                                        </TextBlock>
-                                        <Ellipse Grid.Column="1" Width="8" Height="8"
-                                                 Fill="{DynamicResource RedeAccentVioletBrush}"
-                                                 VerticalAlignment="Center"
-                                                 IsVisible="{Binding HasUnread}" />
-                                    </Grid>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                <Separator />
-
-                <!-- Places header -->
-                <Border Padding="12,8"
-                        IsVisible="{Binding !IsSidebarCollapsed}">
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="Places" Classes="secondary"
-                                   FontWeight="{StaticResource RedeWeightSemiBold}"
-                                   VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Classes="ghost"
-                                Padding="4" Width="28" Height="28"
-                                ToolTip.Tip="Create place"
-                                Click="CreatePlace_Click">
-                            <TextBlock Text="+" FontSize="16" HorizontalAlignment="Center" />
-                        </Button>
-                    </Grid>
-                </Border>
-
-                <!-- Place list with nested channels -->
-                    <ItemsControl ItemsSource="{Binding Places}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:PlaceItemViewModel">
-                                <StackPanel IsVisible="{Binding IsMatch}">
-                                    <!-- Place header -->
-                                    <Button Classes="ghost"
+                                <Grid ColumnDefinitions="3,*"
+                                      IsVisible="{Binding IsMatch}">
+                                    <Border Grid.Column="0"
+                                            Width="3"
+                                            Margin="0,6"
+                                            CornerRadius="0,2,2,0"
+                                            Background="{DynamicResource RedeAccentVioletBrush}"
+                                            IsVisible="{Binding IsSelected}" />
+                                    <Button Grid.Column="1"
+                                            Classes="ghost"
+                                            Classes.sidebar-selected="{Binding IsSelected}"
                                             HorizontalAlignment="Stretch"
                                             HorizontalContentAlignment="Left"
-                                            Padding="12,6"
+                                            Padding="12,8"
                                             Margin="2,1"
                                             BorderThickness="0"
                                             CornerRadius="4"
-                                            Click="PlaceHeader_Click"
-                                            PointerPressed="Place_PointerPressed">
-                                        <Grid ColumnDefinitions="Auto,6,Auto,4,*,Auto,Auto">
-                                            <!-- Place icon -->
-                                            <Border Grid.Column="0" Width="32" Height="32" CornerRadius="8"
-                                                    Background="{Binding AccentBrush}"
-                                                    ClipToBounds="True" VerticalAlignment="Center">
-                                                <Panel>
-                                                    <TextBlock Text="{Binding Initial}"
-                                                               FontSize="14" FontWeight="SemiBold"
-                                                               Foreground="White"
-                                                               HorizontalAlignment="Center"
-                                                               VerticalAlignment="Center"
-                                                               IsVisible="{Binding !HasIcon}" />
-                                                    <Image Source="{Binding IconImage}"
-                                                           Width="32" Height="32"
-                                                           Stretch="UniformToFill"
-                                                           IsVisible="{Binding HasIcon}" />
-                                                </Panel>
-                                            </Border>
-                                            <TextBlock Grid.Column="2"
-                                                       Text="{Binding IsExpanded, Converter={StaticResource CollapseIconConverter}}"
-                                                       FontSize="10"
-                                                       Foreground="{DynamicResource RedeTextMutedBrush}"
-                                                       VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="4"
-                                                       FontWeight="{StaticResource RedeWeightMedium}">
+                                            Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectConversationCommand}"
+                                            CommandParameter="{Binding}"
+                                            PointerPressed="Group_PointerPressed">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0">
+                                                <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
                                                 <Run Text="{Binding Name}" />
                                             </TextBlock>
-                                            <TextBlock Grid.Column="5"
-                                                       Text="{Binding MemberCount, StringFormat={}{0}}"
-                                                       Classes="muted"
-                                                       FontSize="{StaticResource RedeCaptionSize}"
-                                                       VerticalAlignment="Center"
-                                                       Margin="6,0,0,0" />
-                                            <Ellipse Grid.Column="6" Width="8" Height="8"
+                                            <Ellipse Grid.Column="1" Width="8" Height="8"
                                                      Fill="{DynamicResource RedeAccentVioletBrush}"
                                                      VerticalAlignment="Center"
-                                                     Margin="4,0,0,0"
                                                      IsVisible="{Binding HasUnread}" />
                                         </Grid>
                                     </Button>
-                                    <!-- Channels (visible when expanded) — grouped by category -->
-                                    <ItemsControl ItemsSource="{Binding Channels}"
-                                                  IsVisible="{Binding IsExpanded}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:ChannelItemViewModel">
-                                                <Button Classes="ghost"
-                                                        HorizontalAlignment="Stretch"
-                                                        HorizontalContentAlignment="Left"
-                                                        Padding="24,6,12,6"
-                                                        Margin="2,0"
-                                                        BorderThickness="0"
-                                                        CornerRadius="4"
-                                                        Click="Channel_Click"
-                                                        PointerPressed="Channel_PointerPressed">
-                                                    <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Grid.Column="0">
-                                                            <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
-                                                            <Run Text="{Binding Name}" />
-                                                        </TextBlock>
-                                                        <Ellipse Grid.Column="1" Width="8" Height="8"
-                                                                 Fill="{DynamicResource RedeAccentVioletBrush}"
-                                                                 VerticalAlignment="Center"
-                                                                 IsVisible="{Binding HasUnread}" />
-                                                    </Grid>
-                                                </Button>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
+                                </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -363,8 +494,8 @@
         <DockPanel Grid.Column="1"
                    DragDrop.AllowDrop="True">
 
-            <!-- Chat header (extra top margin for title bar) -->
-            <Border DockPanel.Dock="Top" Padding="16,12" Margin="0,30,0,0"
+            <!-- Chat header — sits below the top place rail. -->
+            <Border DockPanel.Dock="Top" Padding="16,12"
                     Background="{DynamicResource RedeSurfaceBrush}"
                     BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                     BorderThickness="0,0,0,1">
@@ -869,7 +1000,6 @@
                 BorderThickness="1,0,0,0"
                 IsVisible="{Binding IsMemberListVisible}">
             <DockPanel>
-                <Border DockPanel.Dock="Top" Height="30" Background="Transparent" IsHitTestVisible="False" />
                 <Border DockPanel.Dock="Top" Padding="12,8"
                         BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                         BorderThickness="0,0,0,1">
@@ -880,7 +1010,9 @@
                     <ItemsControl ItemsSource="{Binding MemberList}" Padding="4">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:PlaceMemberViewModel">
-                                <Border Padding="8,4" Margin="0,1" CornerRadius="4"
+                                <Border Classes="member-row"
+                                        Padding="8,4" Margin="0,1" CornerRadius="4"
+                                        Cursor="Hand"
                                         PointerPressed="Member_PointerPressed">
                                     <Grid ColumnDefinitions="Auto,8,*,Auto">
                                         <!-- Avatar -->
@@ -922,6 +1054,7 @@
         </Border>
 
     </Grid>
+    </DockPanel>
 
     <!-- ===== QUICK SWITCHER (Ctrl+K) ===== -->
     <!-- Full-bounds dim layer; click anywhere outside the popup to dismiss. -->
