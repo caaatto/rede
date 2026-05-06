@@ -63,7 +63,7 @@ Double-click `REDE.exe`.
 
 ## features
 
-- **End-to-end encryption** - X3DH + Double Ratchet (Signal Protocol), XSalsa20-Poly1305
+- **End-to-end encryption** - PQXDH (X25519 + ML-KEM-768 hybrid post-quantum) + Double Ratchet, XSalsa20-Poly1305. Quantum-resistant against "harvest now, decrypt later" attacks.
 - **Sealed sender** - the server can't see who sent a message
 - **Groups** - Sender Keys for group PFS, Ed25519 signed
 - **Places** - Discord-like servers with channels, customizable profile (icon, accent color). All metadata is E2EE
@@ -227,12 +227,13 @@ There is no recovery mechanism - do not lose your passphrase.
 
 ## security
 
+- Post-quantum hybrid handshake: PQXDH (X25519 + ML-KEM-768) per Signal spec — defends against "harvest now, decrypt later" attacks even if quantum computers break X25519
 - Forward secrecy: past messages stay safe if current keys are compromised
 - Post-compromise security: new key exchange heals after compromise
 - TOFU pinning: server certificate and signing key pinned on first contact
-- No legacy fallback: modern crypto required, no downgrades
+- Backward-compatible PQ fallback: peers without PQ keys still get classical X3DH (security regression flagged in logs)
 - Server signatures: all server responses signed with Ed25519
-- Voice E2EE: SRTP keys never leave the Double Ratchet session
+- Voice E2EE: SRTP keys never leave the Double Ratchet session (inherits PQ protection from session bootstrap)
 
 
 ## license

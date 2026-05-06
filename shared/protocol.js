@@ -13,7 +13,14 @@ const MSG = {
   AUTH_OK: 'auth_ok',
   AUTH_FAIL: 'auth_fail',
 
-  // Pre-Key Management (X3DH)
+  // Pre-Key Management (X3DH / PQXDH)
+  // UPLOAD_PREKEYS payload: { signedPreKey, signedPreKeySig, oneTimePreKeys[],
+  //                           pqSignedPreKey?, pqSignedPreKeySig?, pqOneTimePreKeys?[] }
+  // PREKEY_BUNDLE payload (per device): { identityKey, signingKey, signedPreKey,
+  //                           signedPreKeySig, oneTimePreKey?,
+  //                           pqSignedPreKey?, pqSignedPreKeySig?, pqOneTimePreKey? }
+  // PQ fields are ML-KEM-768 (FIPS 203): pub 1184 B, ciphertext 1088 B (base64).
+  // PQ fields are optional — peers without them fall back to classical X3DH.
   UPLOAD_PREKEYS: 'upload_prekeys',
   UPLOAD_PREKEYS_OK: 'upload_prekeys_ok',
   FETCH_PREKEY_BUNDLE: 'fetch_prekey_bundle',
@@ -25,6 +32,9 @@ const MSG = {
   KEY_EXCHANGE_OK: 'key_exchange_ok',
 
   // 1:1 Messages (now with Double Ratchet headers)
+  // MESSAGE x3dh subobject (initial): { identityKey, ephemeralKey, usedOTPKPub?,
+  //                                     pqCt?, usedPQOTPKPub? }
+  //   pqCt = ML-KEM-768 ciphertext (1088 B base64), present iff sender did PQXDH.
   MESSAGE: 'message',
   MESSAGE_ACK: 'message_ack',
 

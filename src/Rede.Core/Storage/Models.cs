@@ -74,6 +74,22 @@ public class Profile
     [JsonPropertyName("previousSignedPreKeys")]
     public List<ArchivedSignedPreKey>? PreviousSignedPreKeys { get; set; }
 
+    // PQXDH (post-quantum hybrid handshake) — ML-KEM-768 keys.
+    // Nullable for migration: legacy profiles without these fields fall back to classical X3DH.
+    // PQ identity is implicit — the signed pre-key is signed by the existing Ed25519 signing key.
+    [JsonPropertyName("pqSignedPreKey")]
+    public KeyPairData? PqSignedPreKey { get; set; }
+
+    [JsonPropertyName("pqSignedPreKeySig")]
+    [JsonConverter(typeof(Base64BytesJsonConverter))]
+    public byte[]? PqSignedPreKeySig { get; set; }
+
+    [JsonPropertyName("pqOneTimePreKeys")]
+    public List<OneTimePreKey>? PqOneTimePreKeys { get; set; }
+
+    [JsonPropertyName("nextPqPreKeyId")]
+    public int NextPqPreKeyId { get; set; }
+
     [JsonPropertyName("ownDevices")]
     public Dictionary<string, DeviceKeys>? OwnDevices { get; set; }
 
@@ -191,6 +207,11 @@ public class Profile
         if (PreviousSignedPreKeys is not null)
             foreach (var old in PreviousSignedPreKeys)
                 System.Security.Cryptography.CryptographicOperations.ZeroMemory(old.SecretKey);
+        if (PqSignedPreKey is not null)
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(PqSignedPreKey.SecretKey);
+        if (PqOneTimePreKeys is not null)
+            foreach (var otpk in PqOneTimePreKeys)
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(otpk.SecretKey);
         foreach (var group in Groups.Values)
             System.Security.Cryptography.CryptographicOperations.ZeroMemory(group.Key);
         foreach (var place in Places.Values)

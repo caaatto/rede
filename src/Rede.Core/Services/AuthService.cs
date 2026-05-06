@@ -304,7 +304,7 @@ public class AuthService : IDisposable
 
         var bundle = X3dh.GeneratePreKeyBundle(Profile.SigningSecretKey);
 
-        // Store private keys
+        // Classical signed pre-key
         Profile.SignedPreKey = new KeyPairData
         {
             PublicKey = bundle.PrivateKeys.SignedPreKey.PublicKey,
@@ -324,17 +324,56 @@ public class AuthService : IDisposable
         }
         Profile.NextPreKeyId = startId + bundle.PrivateKeys.OneTimePreKeys.Count;
 
+        // PQ signed pre-key + one-time keys (PQXDH)
+        if (bundle.PrivateKeys.PqSignedPreKey is not null && bundle.PrivateKeys.PqOneTimePreKeys is not null)
+        {
+            Profile.PqSignedPreKey = new KeyPairData
+            {
+                PublicKey = bundle.PrivateKeys.PqSignedPreKey.PublicKey,
+                SecretKey = bundle.PrivateKeys.PqSignedPreKey.SecretKey,
+            };
+            Profile.PqSignedPreKeySig = bundle.PublicBundle.PqSignedPreKeySig is not null
+                ? Convert.FromBase64String(bundle.PublicBundle.PqSignedPreKeySig)
+                : null;
+
+            Profile.PqOneTimePreKeys ??= new List<OneTimePreKey>();
+            var pqStartId = Profile.NextPqPreKeyId;
+            foreach (var (otpk, i) in bundle.PrivateKeys.PqOneTimePreKeys.Select((v, i) => (v, i)))
+            {
+                Profile.PqOneTimePreKeys.Add(new OneTimePreKey
+                {
+                    Id = pqStartId + i,
+                    PublicKey = otpk.PublicKey,
+                    SecretKey = otpk.SecretKey,
+                });
+            }
+            Profile.NextPqPreKeyId = pqStartId + bundle.PrivateKeys.PqOneTimePreKeys.Count;
+        }
+
         _store.SaveProfileDebounced(Profile, Passphrase);
 
-        // Upload public bundle
+        // Upload public bundle (classical + PQ)
         var otpkArray = new JsonArray();
         foreach (var otpk in bundle.PublicBundle.OneTimePreKeys)
             otpkArray.Add(JsonValue.Create(otpk.Key));
 
-        _conn.Send(Msg.UploadPrekeys, ProtocolSerializer.Payload(
+        var uploadPayload = ProtocolSerializer.Payload(
             ("signedPreKey", JsonValue.Create(bundle.PublicBundle.SignedPreKey)),
             ("signedPreKeySig", JsonValue.Create(bundle.PublicBundle.SignedPreKeySig)),
             ("oneTimePreKeys", otpkArray)
-        ));
+        );
+
+        if (bundle.PublicBundle.PqSignedPreKey is not null && bundle.PublicBundle.PqSignedPreKeySig is not null
+            && bundle.PublicBundle.PqOneTimePreKeys is not null)
+        {
+            var pqOtpkArray = new JsonArray();
+            foreach (var pqOtpk in bundle.PublicBundle.PqOneTimePreKeys)
+                pqOtpkArray.Add(JsonValue.Create(pqOtpk.Key));
+            uploadPayload["pqSignedPreKey"] = JsonValue.Create(bundle.PublicBundle.PqSignedPreKey);
+            uploadPayload["pqSignedPreKeySig"] = JsonValue.Create(bundle.PublicBundle.PqSignedPreKeySig);
+            uploadPayload["pqOneTimePreKeys"] = pqOtpkArray;
+        }
+
+        _conn.Send(Msg.UploadPrekeys, uploadPayload);
     }
 }
