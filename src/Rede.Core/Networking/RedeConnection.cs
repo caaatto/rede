@@ -145,26 +145,46 @@ public class RedeConnection : IDisposable
         _cts = new CancellationTokenSource();
         _ws = new ClientWebSocket();
 
-        // TLS cert validation via TOFU pinning
+        // TLS cert validation: CA-trusted chain OR TOFU pin (whichever passes).
+        //
+        // The real identity anchor is the Ed25519 server signing key, TOFU-pinned per
+        // profile and verified on every signed message in ReceiveLoop. The TLS cert
+        // pin is a redundant secondary check that used to break clients on every
+        // Let's Encrypt renewal (~60 days). We now accept either:
+        //   (a) standard CA validation passes (errors == None) — silent re-pin to new fp,
+        //   (b) the pinned fingerprint matches (covers self-signed / non-CA setups).
+        // A change is only blocked when CA validation ALSO fails (true cert drift /
+        // self-signed-rotated-without-notice / MITM).
         bool TofuValidation(object sender, X509Certificate? cert, X509Chain? chain, SslPolicyErrors errors)
         {
-            // M7: Only accept null cert for non-TLS connections (not for wss:// even through proxy)
             if (cert is null)
                 return !_serverUrl.StartsWith("wss://");
             var fp = cert.GetCertHashString(HashAlgorithmName.SHA256);
+            bool caValid = errors == SslPolicyErrors.None;
+
             if (_pinnedCertFingerprint is null)
             {
                 _pinnedCertFingerprint = fp;
                 SavePinnedCert(fp);
-                OnError?.Invoke("[TOFU] First connection - certificate pinned. Verify with server admin!");
+                OnError?.Invoke(caValid
+                    ? "[TOFU] First connection - CA-trusted certificate pinned."
+                    : "[TOFU] First connection - certificate pinned. Verify with server admin!");
                 return true;
             }
-            if (_pinnedCertFingerprint != fp)
+            if (_pinnedCertFingerprint == fp) return true;
+
+            // Pin mismatch — accept if a public CA still vouches for this cert
+            // (e.g. Let's Encrypt renewal) and silently re-pin. The Ed25519 signing
+            // key check on the next signed message will reject any real impersonator.
+            if (caValid)
             {
-                OnError?.Invoke($"[SECURITY] Server certificate CHANGED! Possible MITM. Connection blocked. Delete ~/.rede/.cert_pin to re-pin.");
-                return false;
+                _pinnedCertFingerprint = fp;
+                SavePinnedCert(fp);
+                OnError?.Invoke("[TOFU] Server certificate rotated (CA-validated). Re-pinned.");
+                return true;
             }
-            return true;
+            OnError?.Invoke("[SECURITY] Server certificate CHANGED and is not CA-trusted. Possible MITM. Connection blocked. Delete ~/.rede/.cert_pin to re-pin.");
+            return false;
         }
 
         if (_serverUrl.StartsWith("wss://"))
