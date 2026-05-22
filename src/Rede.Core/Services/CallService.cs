@@ -121,8 +121,14 @@ public class CallService : IDisposable
         // Generate SRTP key material
         (_srtpMasterKey, _srtpMasterSalt) = SrtpCrypto.GenerateKeyMaterial();
 
-        // Encrypt SRTP params via Double Ratchet (find first device with a session)
-        JsonObject? srtpParamsEncrypted = null;
+        // Encrypt the SRTP key material via Double Ratchet for EVERY device the
+        // contact has a session with. The server fans CALL_OFFER out to all of
+        // the callee's devices — if we only encrypted for one, the call would
+        // only connect when the callee happened to answer on that exact device,
+        // and every other device would fail to decrypt. The per-device entries
+        // are nested under `srtpParams.perDevice`; the first one is also lifted
+        // to the top level so an older callee build still finds a single entry.
+        var perDevice = new JsonArray();
         foreach (var devId in contact.Devices.Keys)
         {
             var stateJson = _store.LoadRatchetState(Profile, targetUserId, devId);
@@ -131,7 +137,6 @@ public class CallService : IDisposable
             var ratchetState = JsonSerializer.Deserialize<DoubleRatchet.RatchetState>(stateJson.Value);
             if (ratchetState is null) continue;
 
-            var backup = ratchetState.DeepClone();
             var srtpPlaintext = JsonSerializer.Serialize(new
             {
                 srtpKey = Convert.ToBase64String(_srtpMasterKey),
@@ -140,7 +145,7 @@ public class CallService : IDisposable
 
             var result = DoubleRatchet.Encrypt(ratchetState, srtpPlaintext);
 
-            srtpParamsEncrypted = new JsonObject
+            perDevice.Add(new JsonObject
             {
                 ["encrypted"] = result.Ciphertext,
                 ["nonce"] = result.Nonce,
@@ -151,15 +156,14 @@ public class CallService : IDisposable
                     ["n"] = result.Header.N,
                 },
                 ["toDeviceId"] = devId,
-            };
+            });
 
-            // Save updated ratchet state (debounced)
+            // Save updated ratchet state (debounced) — each device's ratchet advanced.
             var stateElement = JsonSerializer.SerializeToElement(ratchetState);
             _store.SaveRatchetStateAsync(Profile, targetUserId, stateElement, Passphrase, devId);
-            break;
         }
 
-        if (srtpParamsEncrypted is null)
+        if (perDevice.Count == 0)
         {
             _state = CallState.Idle;
             _callId = null;
@@ -167,6 +171,18 @@ public class CallService : IDisposable
             OnError?.Invoke("No secure session with this contact. Exchange messages first.");
             return false;
         }
+
+        // Top-level fields = first device (legacy single-device callees);
+        // `perDevice` carries all of them for multi-device callees.
+        var firstEntry = (JsonObject)perDevice[0]!;
+        var srtpParamsEncrypted = new JsonObject
+        {
+            ["encrypted"] = firstEntry["encrypted"]!.GetValue<string>(),
+            ["nonce"] = firstEntry["nonce"]!.GetValue<string>(),
+            ["header"] = (JsonObject)firstEntry["header"]!.DeepClone(),
+            ["toDeviceId"] = firstEntry["toDeviceId"]!.GetValue<string>(),
+            ["perDevice"] = perDevice,
+        };
 
         var payload = new JsonObject
         {
@@ -311,6 +327,42 @@ public class CallService : IDisposable
         byte[]? srtpSalt = null;
 
         var srtpParams = msg["srtpParams"]?.AsObject();
+
+        // Multi-device: the caller encrypts the SRTP key once per callee device.
+        // Pick the entry meant for THIS device out of srtpParams.perDevice. A
+        // device that has no entry simply isn't the target — it must stay
+        // completely silent. If it auto-rejected with crypto_error instead, that
+        // reject would race the real CALL_ANSWER and tear the call down on the
+        // caller's side (caller dropped, callee connected — the reported bug).
+        var ownDeviceId = Profile?.DeviceId;
+        var perDevice = srtpParams?["perDevice"]?.AsArray();
+        if (perDevice is not null)
+        {
+            JsonObject? mine = null;
+            foreach (var node in perDevice)
+            {
+                if (node is JsonObject entry
+                    && entry["toDeviceId"]?.GetValue<string>() == ownDeviceId)
+                {
+                    mine = entry;
+                    break;
+                }
+            }
+            if (mine is null) return; // Offer carries no entry for this device.
+            srtpParams = mine;
+        }
+        else
+        {
+            // Legacy single-device offer — ignore silently if it targets another device.
+            var legacyTarget = srtpParams?["toDeviceId"]?.GetValue<string>();
+            if (!string.IsNullOrEmpty(legacyTarget)
+                && !string.IsNullOrEmpty(ownDeviceId)
+                && legacyTarget != ownDeviceId)
+            {
+                return;
+            }
+        }
+
         if (srtpParams is not null && Profile is not null && Passphrase is not null && incomingFrom is not null)
         {
             var encrypted = srtpParams["encrypted"]?.GetValue<string>();
@@ -419,6 +471,11 @@ public class CallService : IDisposable
     {
         var callId = msg["callId"]?.GetValue<string>();
         if (callId != _callId) return;
+        // A reject is only meaningful while we're still waiting for an answer.
+        // The callee's devices ring in parallel; once one has answered and we're
+        // Connected, a late reject from a *different* device of the callee (the
+        // user dismissing the stale ring) must not tear down the live call.
+        if (_state != CallState.Offering) return;
         EndCall("Call rejected");
     }
 
@@ -426,6 +483,7 @@ public class CallService : IDisposable
     {
         var callId = msg["callId"]?.GetValue<string>();
         if (callId != _callId) return;
+        if (_state != CallState.Offering) return;
         EndCall("User is busy");
     }
 
