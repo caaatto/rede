@@ -50,6 +50,15 @@ public class ChatService : IDisposable
     // while the contact was offline or before the ratchet existed.
     private readonly Dictionary<string, string> _profileSentFingerprint = new();
 
+    // Contacts we've already reciprocated a profile to this session. Receiving a
+    // peer's profile is a strong signal they just added us — and their add-time
+    // copy of *our* profile may have been dropped (it arrived before we were a
+    // contact on their side, so ReceiveRatcheted discarded it). So when a profile
+    // arrives we send ours straight back, ONCE, bypassing the fingerprint dedup
+    // (which would otherwise treat the dropped add-time send as "already done").
+    // The once-per-session cap stops the two sides ping-ponging forever.
+    private readonly HashSet<string> _profileReciprocated = new();
+
     // ACK FIFO: every successful WS send (per device, including control messages) pushes
     // one entry. On each msgId ACK we dequeue the head and stamp the referenced ChatMessage's
     // MsgId — this is the only reliable pairing since sealed ACKs carry no `to` field and
@@ -154,6 +163,29 @@ public class ChatService : IDisposable
         if (text is null) return;
 
         _profileSentFingerprint[contactId] = currentFp;
+        Task.Run(() => SendMessage(contactId, text, 0));
+    }
+
+    /// <summary>
+    /// Send our profile back to a contact who just sent us theirs — once per
+    /// session, regardless of the fingerprint dedup. This is what fixes the
+    /// "second adder never gets the first adder's avatar" case: the first
+    /// adder's add-time profile message was dropped (we weren't a contact yet),
+    /// but EnsureProfileSentTo would still skip a re-send because the dropped
+    /// attempt left a matching fingerprint behind. Receiving their profile is
+    /// our cue to force ours through.
+    /// </summary>
+    private void ReciprocateProfileTo(string contactId)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (Profile.AccentColor is null && Profile.AvatarData is null) return;
+        if (!_profileReciprocated.Add(contactId)) return; // already reciprocated this session
+
+        var text = BuildProfilePayload(Profile.AccentColor, Profile.AvatarData, Profile.AvatarMimeType);
+        if (text is null) return;
+
+        _profileSentFingerprint[contactId] =
+            ComputeProfileFingerprint(Profile.AccentColor, Profile.AvatarData, Profile.AvatarMimeType);
         Task.Run(() => SendMessage(contactId, text, 0));
     }
 
@@ -1074,6 +1106,9 @@ public class ChatService : IDisposable
                 var avatarData = root.TryGetProperty("avatarData", out var ad) ? ad.GetString() : null;
                 var avatarMimeType = root.TryGetProperty("avatarMimeType", out var am) ? am.GetString() : null;
                 OnProfileReceived?.Invoke(from, accentColor, avatarData, avatarMimeType);
+                // Send our profile straight back — covers the asymmetric-add case
+                // where our add-time profile message was dropped on their side.
+                ReciprocateProfileTo(from);
                 return true;
             }
 
