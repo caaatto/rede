@@ -916,9 +916,31 @@ public partial class AttachmentViewModel : ViewModelBase
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private string _blobId = "";
     [ObservableProperty] private string _sizeDisplay = "";
-    [ObservableProperty] private bool _isImage;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLoadingPlaceholder))]
+    [NotifyPropertyChangedFor(nameof(ShowFileChip))]
+    private bool _isImage;
+
     [ObservableProperty] private Bitmap? _preview;
-    [ObservableProperty] private bool _hasPreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLoadingPlaceholder))]
+    private bool _hasPreview;
+
+    // Set when an image attachment's blob fetch/decode fails — falls back to
+    // the plain file chip instead of an endless "loading" placeholder.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLoadingPlaceholder))]
+    [NotifyPropertyChangedFor(nameof(ShowFileChip))]
+    private bool _loadFailed;
+
+    // An image whose preview hasn't arrived yet — show a sized placeholder so the
+    // bubble doesn't flash the file chip and then jump when the image swaps in.
+    public bool ShowLoadingPlaceholder => IsImage && !HasPreview && !LoadFailed;
+
+    // The plain file chip — non-image attachments, or images that failed to load.
+    public bool ShowFileChip => !IsImage || LoadFailed;
 }
 
 public partial class QuickSwitchResultViewModel : ViewModelBase

@@ -2359,7 +2359,9 @@ public partial class MainWindow : Window
             };
             msgVm.Attachments.Add(attVm);
 
-            // Lazy-load image preview
+            // Lazy-load image preview. Both the blob fetch AND the bitmap decode
+            // run off the UI thread — decoding a multi-MB image on the UI thread
+            // froze the chat for a noticeable beat. Only the assignment is posted.
             if (attVm.IsImage && _blobs is not null)
             {
                 var blobService = _blobs;
@@ -2367,16 +2369,28 @@ public partial class MainWindow : Window
                 _ = Task.Run(async () =>
                 {
                     var data = await blobService.FetchAsync(attInfo);
-                    if (data is null) return;
-                    Dispatcher.UIThread.Post(() =>
+                    Avalonia.Media.Imaging.Bitmap? bmp = null;
+                    if (data is not null)
                     {
                         try
                         {
                             using var ms = new System.IO.MemoryStream(data);
-                            attVm.Preview = new Avalonia.Media.Imaging.Bitmap(ms);
+                            bmp = new Avalonia.Media.Imaging.Bitmap(ms);
+                        }
+                        catch { bmp = null; }
+                    }
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (bmp is not null)
+                        {
+                            attVm.Preview = bmp;
                             attVm.HasPreview = true;
                         }
-                        catch { }
+                        else
+                        {
+                            // Fetch or decode failed — drop back to the file chip.
+                            attVm.LoadFailed = true;
+                        }
                     });
                 });
             }

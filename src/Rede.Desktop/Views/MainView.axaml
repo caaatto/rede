@@ -805,7 +805,9 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <Panel Margin="0,4,0,0">
-                                                            <!-- Inline image: clean, no chip framing -->
+                                                            <!-- Inline image: clean, no chip framing. DownOnly so a
+                                                                 small image keeps its natural size instead of being
+                                                                 upscaled into a blurry block. -->
                                                             <Border CornerRadius="10"
                                                                     ClipToBounds="True"
                                                                     HorizontalAlignment="Left"
@@ -815,9 +817,25 @@
                                                                     IsVisible="{Binding HasPreview}">
                                                                 <Image Source="{Binding Preview}"
                                                                        MaxWidth="380" MaxHeight="320"
-                                                                       Stretch="Uniform" />
+                                                                       Stretch="Uniform"
+                                                                       StretchDirection="DownOnly" />
                                                             </Border>
-                                                            <!-- File chip (non-image attachments) -->
+                                                            <!-- Loading placeholder for an image whose blob is still
+                                                                 being fetched/decoded — avoids the file-chip flash. -->
+                                                            <Border CornerRadius="10"
+                                                                    Width="220" Height="150"
+                                                                    HorizontalAlignment="Left"
+                                                                    Background="{DynamicResource RedeSurfaceBrush}"
+                                                                    BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    IsVisible="{Binding ShowLoadingPlaceholder}">
+                                                                <TextBlock Text="Loading image…"
+                                                                           Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                                           FontSize="12"
+                                                                           HorizontalAlignment="Center"
+                                                                           VerticalAlignment="Center" />
+                                                            </Border>
+                                                            <!-- File chip (non-image attachments, or failed images) -->
                                                             <Border CornerRadius="6" Padding="10,8"
                                                                     Background="{DynamicResource RedeSurfaceBrush}"
                                                                     BorderBrush="{DynamicResource RedeBorderBrush}"
@@ -825,7 +843,7 @@
                                                                     Cursor="Hand"
                                                                     Tag="{Binding}"
                                                                     PointerReleased="AttachmentItem_Click"
-                                                                    IsVisible="{Binding !HasPreview}">
+                                                                    IsVisible="{Binding ShowFileChip}">
                                                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                                                     <TextBlock Text="{Binding Name}" FontSize="13"
                                                                                Foreground="{DynamicResource RedeAccentBrush}"
@@ -926,7 +944,8 @@
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
                                                     <Panel Margin="0,4,0,0" HorizontalAlignment="Right">
-                                                        <!-- Inline image: clean, no chip framing -->
+                                                        <!-- Inline image: clean, no chip framing. DownOnly so small
+                                                             images aren't upscaled into a blurry block. -->
                                                         <Border CornerRadius="10"
                                                                 ClipToBounds="True"
                                                                 HorizontalAlignment="Right"
@@ -936,9 +955,24 @@
                                                                 IsVisible="{Binding HasPreview}">
                                                             <Image Source="{Binding Preview}"
                                                                    MaxWidth="380" MaxHeight="320"
-                                                                   Stretch="Uniform" />
+                                                                   Stretch="Uniform"
+                                                                   StretchDirection="DownOnly" />
                                                         </Border>
-                                                        <!-- File chip (non-image attachments) -->
+                                                        <!-- Loading placeholder while the image blob loads -->
+                                                        <Border CornerRadius="10"
+                                                                Width="220" Height="150"
+                                                                HorizontalAlignment="Right"
+                                                                Background="{DynamicResource RedeSurfaceActiveBrush}"
+                                                                BorderBrush="{DynamicResource RedeBorderBrush}"
+                                                                BorderThickness="1"
+                                                                IsVisible="{Binding ShowLoadingPlaceholder}">
+                                                            <TextBlock Text="Loading image…"
+                                                                       Foreground="{DynamicResource RedeSecondaryBrush}"
+                                                                       FontSize="12"
+                                                                       HorizontalAlignment="Center"
+                                                                       VerticalAlignment="Center" />
+                                                        </Border>
+                                                        <!-- File chip (non-image attachments, or failed images) -->
                                                         <Border CornerRadius="6" Padding="10,8"
                                                                 Background="{DynamicResource RedeSurfaceActiveBrush}"
                                                                 BorderBrush="{DynamicResource RedeBorderBrush}"
@@ -946,7 +980,7 @@
                                                                 Cursor="Hand"
                                                                 Tag="{Binding}"
                                                                 PointerReleased="AttachmentItem_Click"
-                                                                IsVisible="{Binding !HasPreview}">
+                                                                IsVisible="{Binding ShowFileChip}">
                                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                                 <TextBlock Text="{Binding Name}" FontSize="13"
                                                                            Foreground="{DynamicResource RedeAccentBrush}"
