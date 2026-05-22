@@ -13,5 +13,19 @@
         ExtendClientAreaTitleBarHeightHint="36"
         KeyDown="Window_KeyDown">
 
-    <ContentControl x:Name="RootContent" />
+    <Panel>
+        <ContentControl x:Name="RootContent" />
+        <!-- Title-bar drag strip. The window is chromeless
+             (ExtendClientAreaToDecorationsHint) so the top 36px has no OS drag
+             region — this transparent strip provides it. It sits above the
+             content but below the OS caption buttons, and all interactive
+             content (place rail icons, etc.) lives at y>=36 so nothing is
+             blocked. Double-click toggles maximize, like a real title bar. -->
+        <Border x:Name="TitleBarDragStrip"
+                VerticalAlignment="Top"
+                Height="36"
+                Background="Transparent"
+                PointerPressed="TitleBarDrag_PointerPressed"
+                DoubleTapped="TitleBarDrag_DoubleTapped" />
+    </Panel>
 </Window>

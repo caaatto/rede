@@ -85,6 +85,20 @@ public partial class MainWindow : Window
             Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble, true);
     }
 
+    // Title-bar drag strip — the window is chromeless so we move it ourselves.
+    private void TitleBarDrag_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            BeginMoveDrag(e);
+    }
+
+    private void TitleBarDrag_DoubleTapped(object? sender, TappedEventArgs e)
+    {
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+    }
+
     private void OnUserActivity()
     {
         _lastActivityUtc = DateTime.UtcNow;
