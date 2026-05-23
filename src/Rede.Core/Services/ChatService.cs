@@ -204,11 +204,23 @@ public class ChatService : IDisposable
         return Convert.ToBase64String(hash, 0, 12);
     }
 
+    // Wire cap for the avatar base64 inside ratcheted profile messages. Must stay
+    // <= the largest MessagePadding bucket (16382) minus envelope overhead.
+    // Kept in sync with SettingsViewModel.MaxAvatarBase64.
+    private const int MaxAvatarBase64OnWire = 12 * 1024;
+
     private static string? BuildProfilePayload(string? accentColor, string? avatarData, string? avatarMimeType)
     {
-        // M12: Validate avatar size before broadcasting
-        if (avatarData is not null && avatarData.Length > 350_000) // ~256KB decoded = ~350KB base64
-            return null;
+        // Drop oversize avatars instead of returning null — DoubleRatchet.Encrypt
+        // would later throw on the padding step. Profiles with only an accent still
+        // ship; profiles with neither field do not.
+        if (avatarData is not null && avatarData.Length > MaxAvatarBase64OnWire)
+        {
+            avatarData = null;
+            avatarMimeType = null;
+        }
+
+        if (accentColor is null && avatarData is null) return null;
 
         var payload = new System.Text.Json.Nodes.JsonObject
         {

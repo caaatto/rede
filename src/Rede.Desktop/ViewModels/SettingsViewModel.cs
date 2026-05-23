@@ -177,19 +177,70 @@ public partial class SettingsViewModel : ViewModelBase
         ProfileDirty = false;
     }
 
+    // Max base64 length for AvatarData on the wire. Profile control messages are
+    // ratcheted, and DoubleRatchet.Encrypt pads to fixed buckets capped at 16382
+    // bytes of plaintext (MessagePadding). The JSON envelope around the avatar
+    // (__rede_ctrl, accentColor, mime, field names) eats ~100 bytes, so we cap
+    // the base64 payload at 12 KB to leave comfortable headroom.
+    public const int MaxAvatarBase64 = 12 * 1024;
+    private const int MaxAvatarRawBytes = MaxAvatarBase64 * 3 / 4; // 9216
+
     public void SetAvatarFromBytes(byte[] data, string mimeType)
     {
         if (data.Length > 256 * 1024) return;
 
-        AvatarData = Convert.ToBase64String(data);
-        AvatarMimeType = mimeType;
+        byte[] finalBytes = data;
+        string finalMime = mimeType;
 
-        using var ms = new MemoryStream(data);
+        if (data.Length > MaxAvatarRawBytes)
+        {
+            // Re-encode at decreasing dimensions until the PNG fits the wire cap.
+            // Returns null if even the smallest size won't fit (extremely unlikely
+            // for real photos).
+            var compressed = TryCompressAvatar(data);
+            if (compressed is null) return;
+            finalBytes = compressed;
+            finalMime = "image/png";
+        }
+
+        AvatarData = Convert.ToBase64String(finalBytes);
+        AvatarMimeType = finalMime;
+
+        using var ms = new MemoryStream(finalBytes);
         var oldBmp = AvatarImage;
         AvatarImage = new Bitmap(ms);
         HasAvatar = true;
         oldBmp?.Dispose(); // M4: Dispose previous bitmap
         ProfileDirty = true;
+    }
+
+    private static byte[]? TryCompressAvatar(byte[] sourceBytes)
+    {
+        try
+        {
+            using var srcMs = new MemoryStream(sourceBytes);
+            using var srcBmp = new Bitmap(srcMs);
+
+            // Avalonia's Bitmap.Save writes PNG. PNGs of small photo-style content
+            // typically land between 4-12 KB at 64-96 px; we step down until we fit.
+            int[] sizes = { 96, 64, 48, 32 };
+            foreach (var size in sizes)
+            {
+                using var scaled = srcBmp.CreateScaledBitmap(
+                    new Avalonia.PixelSize(size, size),
+                    BitmapInterpolationMode.HighQuality);
+                using var outMs = new MemoryStream();
+                scaled.Save(outMs);
+                var bytes = outMs.ToArray();
+                if (bytes.Length <= MaxAvatarRawBytes)
+                    return bytes;
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public void LoadAvatarFromBase64(string? base64, string? mimeType)
