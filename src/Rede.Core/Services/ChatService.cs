@@ -627,7 +627,11 @@ public class ChatService : IDisposable
             try { usedOtpkPub = Convert.FromBase64String(usedOtpkPubB64); }
             catch { usedOtpkPub = null; }
         }
+        // Resolve the OTPK without consuming it yet — if the decrypt below fails
+        // (spurious X3DH initial, crossed resync, padding mismatch) the OTPK is
+        // still usable by a later attempt. Only removed on successful decrypt.
         byte[]? otpkSecret = null;
+        int? consumedOtpkIndex = null;
         if (usedOtpkPub is not null)
         {
             var idx = Profile.OneTimePreKeys.FindIndex(k =>
@@ -636,8 +640,7 @@ public class ChatService : IDisposable
             if (idx >= 0)
             {
                 otpkSecret = Profile.OneTimePreKeys[idx].SecretKey;
-                Profile.OneTimePreKeys.RemoveAt(idx);
-                _store.SaveProfileDebounced(Profile, Passphrase);
+                consumedOtpkIndex = idx;
             }
         }
 
@@ -732,13 +735,24 @@ public class ChatService : IDisposable
                 var plaintext = DoubleRatchet.Decrypt(ratchetState, header, encrypted, nonce);
                 if (plaintext is not null)
                 {
-                    // Consume the PQ-OTPK only on success — same lifecycle as classical OTPK.
+                    // Consume one-time pre-keys (classical + PQ) only on a successful
+                    // decrypt — keeps them available across spurious X3DH initials
+                    // (e.g. crossed resyncs).
+                    bool profileDirty = false;
+                    if (consumedOtpkIndex is not null
+                        && consumedOtpkIndex.Value < Profile.OneTimePreKeys.Count)
+                    {
+                        Profile.OneTimePreKeys.RemoveAt(consumedOtpkIndex.Value);
+                        profileDirty = true;
+                    }
                     if (consumedPqOtpkIndex is not null && Profile.PqOneTimePreKeys is not null
                         && consumedPqOtpkIndex.Value < Profile.PqOneTimePreKeys.Count)
                     {
                         Profile.PqOneTimePreKeys.RemoveAt(consumedPqOtpkIndex.Value);
-                        _store.SaveProfileDebounced(Profile, Passphrase);
+                        profileDirty = true;
                     }
+                    if (profileDirty)
+                        _store.SaveProfileDebounced(Profile, Passphrase);
                     var stateJson = JsonSerializer.SerializeToElement(ratchetState);
                     _store.SaveRatchetStateAsync(Profile, from, stateJson, Passphrase, fromDeviceId);
                     return plaintext;
