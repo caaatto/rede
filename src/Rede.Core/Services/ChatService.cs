@@ -753,8 +753,35 @@ public class ChatService : IDisposable
                     }
                     if (profileDirty)
                         _store.SaveProfileDebounced(Profile, Passphrase);
-                    var stateJson = JsonSerializer.SerializeToElement(ratchetState);
-                    _store.SaveRatchetStateAsync(Profile, from, stateJson, Passphrase, fromDeviceId);
+
+                    // Session-collision tiebreaker. If we already have a ratchet
+                    // state saved for this peer/device, both sides ran X3DH as
+                    // initiator at the same time (crossed /resync, or both peers
+                    // adding each other simultaneously). Without intervention each
+                    // side would overwrite its own initiator state with the
+                    // responder state derived here — the X3DH initials themselves
+                    // still decrypt, but every follow-up message lands on a
+                    // different chain than the peer expects and silently fails.
+                    //
+                    // We converge deterministically by comparing user IDs:
+                    //   self.UserId <  from → we're the "lower" side. Keep our own
+                    //                          initiator state; the responder state
+                    //                          we just derived is used only to
+                    //                          decrypt this single message and is
+                    //                          then dropped. The peer (higher id)
+                    //                          adopts our chain.
+                    //   self.UserId >  from → we're the "higher" side. Drop our
+                    //                          initiator state and adopt the
+                    //                          responder state. The peer (lower id)
+                    //                          keeps theirs; we converge on theirs.
+                    // Same id between distinct users is not possible.
+                    bool hasExistingState = _store.LoadRatchetState(Profile, from, fromDeviceId) is not null;
+                    bool weAreLower = string.CompareOrdinal(Profile.UserId, from) < 0;
+                    if (!hasExistingState || !weAreLower)
+                    {
+                        var stateJson = JsonSerializer.SerializeToElement(ratchetState);
+                        _store.SaveRatchetStateAsync(Profile, from, stateJson, Passphrase, fromDeviceId);
+                    }
                     return plaintext;
                 }
             }
