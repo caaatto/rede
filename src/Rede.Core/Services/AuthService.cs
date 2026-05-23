@@ -304,6 +304,26 @@ public class AuthService : IDisposable
 
         var bundle = X3dh.GeneratePreKeyBundle(Profile.SigningSecretKey);
 
+        // Archive the outgoing SPK(s) before rotating. Peers may have fetched our
+        // previous bundle and be about to send an X3DH initial that targets the
+        // *old* SPK — without an archive copy of the secret we'd be unable to
+        // decrypt it, which surfaces as "X3DH key agreement failed." We keep a
+        // small bounded history to cap profile growth.
+        const int SpkArchiveLimit = 5;
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (Profile.SignedPreKey is not null && Profile.SignedPreKey.SecretKey.Length > 0)
+        {
+            Profile.PreviousSignedPreKeys ??= new List<ArchivedSignedPreKey>();
+            Profile.PreviousSignedPreKeys.Add(new ArchivedSignedPreKey
+            {
+                PublicKey = Profile.SignedPreKey.PublicKey,
+                SecretKey = Profile.SignedPreKey.SecretKey,
+                ArchivedAt = nowMs,
+            });
+            while (Profile.PreviousSignedPreKeys.Count > SpkArchiveLimit)
+                Profile.PreviousSignedPreKeys.RemoveAt(0);
+        }
+
         // Classical signed pre-key
         Profile.SignedPreKey = new KeyPairData
         {
@@ -327,6 +347,22 @@ public class AuthService : IDisposable
         // PQ signed pre-key + one-time keys (PQXDH)
         if (bundle.PrivateKeys.PqSignedPreKey is not null && bundle.PrivateKeys.PqOneTimePreKeys is not null)
         {
+            // Archive the outgoing PQ SPK with the same lifecycle as the classical
+            // archive above, so PQXDH initials that targeted the previous PQ SPK
+            // can still be decapsulated.
+            if (Profile.PqSignedPreKey is not null && Profile.PqSignedPreKey.SecretKey.Length > 0)
+            {
+                Profile.PreviousPqSignedPreKeys ??= new List<ArchivedSignedPreKey>();
+                Profile.PreviousPqSignedPreKeys.Add(new ArchivedSignedPreKey
+                {
+                    PublicKey = Profile.PqSignedPreKey.PublicKey,
+                    SecretKey = Profile.PqSignedPreKey.SecretKey,
+                    ArchivedAt = nowMs,
+                });
+                while (Profile.PreviousPqSignedPreKeys.Count > SpkArchiveLimit)
+                    Profile.PreviousPqSignedPreKeys.RemoveAt(0);
+            }
+
             Profile.PqSignedPreKey = new KeyPairData
             {
                 PublicKey = bundle.PrivateKeys.PqSignedPreKey.PublicKey,

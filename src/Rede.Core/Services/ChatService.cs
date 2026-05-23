@@ -648,8 +648,12 @@ public class ChatService : IDisposable
         // If usedPQOTPKPub is set, sender used a PQ one-time pre-key — find and consume it.
         // If pqCt is present but no usedPQOTPKPub, sender fell back to PQ-SPK — use stored PQ-SPK secret.
         byte[]? pqCiphertext = null;
-        byte[]? pqKemSecret = null;
         int? consumedPqOtpkIndex = null;
+        // pqKemSecretCandidates: every PQ private key worth trying.
+        //   - If the initiator targeted a PQ-OPK that we still hold, just that one.
+        //   - Otherwise: current PQ SPK + archived PQ SPKs (rotation-safe).
+        //   - Empty if no pqCiphertext (classical X3DH).
+        var pqKemSecretCandidates = new List<byte[]>();
         var pqCtB64 = x3dh["pqCt"]?.GetValue<string>();
         if (pqCtB64 is not null)
         {
@@ -670,14 +674,23 @@ public class ChatService : IDisposable
                     System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(k.PublicKey, usedPqOtpkPub));
                 if (idx >= 0)
                 {
-                    pqKemSecret = Profile.PqOneTimePreKeys[idx].SecretKey;
+                    pqKemSecretCandidates.Add(Profile.PqOneTimePreKeys[idx].SecretKey);
                     consumedPqOtpkIndex = idx;
                 }
             }
-            // Fallback: PQ-SPK
-            if (pqKemSecret is null && Profile.PqSignedPreKey is not null)
-                pqKemSecret = Profile.PqSignedPreKey.SecretKey;
-            if (pqKemSecret is null)
+            // Fallback: current PQ-SPK, then archived PQ-SPKs (peer may have fetched
+            // a bundle that referenced our previous PQ SPK before we rotated).
+            if (pqKemSecretCandidates.Count == 0)
+            {
+                if (Profile.PqSignedPreKey is not null)
+                    pqKemSecretCandidates.Add(Profile.PqSignedPreKey.SecretKey);
+                if (Profile.PreviousPqSignedPreKeys is not null)
+                {
+                    foreach (var old in Profile.PreviousPqSignedPreKeys)
+                        pqKemSecretCandidates.Add(old.SecretKey);
+                }
+            }
+            if (pqKemSecretCandidates.Count == 0)
             {
                 OnSystemMessage?.Invoke("[SECURITY] PQXDH ciphertext received but no matching PQ key found — message dropped.");
                 return null;
@@ -702,9 +715,17 @@ public class ChatService : IDisposable
         if (usedOtpkPub is not null) otpkAttempts.Add(otpkSecret);
         otpkAttempts.Add(null);
 
+        // If pqCiphertext is null we still need one iteration with pqKemSecret=null
+        // so the outer foreach has something to walk; same shape the code used
+        // before pqKemSecretCandidates was introduced.
+        var pqLoopValues = pqCiphertext is null
+            ? new List<byte[]?> { null }
+            : pqKemSecretCandidates.Cast<byte[]?>().ToList();
+
         foreach (var otpk in otpkAttempts)
         {
             foreach (var spk in spkCandidates)
+            foreach (var pqKemSecret in pqLoopValues)
             {
                 var x3dhResult = X3dh.Respond(
                     Profile.SecretKey, spk.SecretKey, otpk, identityKey, ephemeralKey,

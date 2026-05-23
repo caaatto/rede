@@ -87,6 +87,12 @@ public class Profile
     [JsonPropertyName("pqOneTimePreKeys")]
     public List<OneTimePreKey>? PqOneTimePreKeys { get; set; }
 
+    // Archived previous PQ signed pre-keys — same role as PreviousSignedPreKeys
+    // but for the ML-KEM-768 SPK. Allows decrypting PQXDH initials that targeted
+    // the previous PQ SPK after we rotated. Bounded to a small history window.
+    [JsonPropertyName("previousPqSignedPreKeys")]
+    public List<ArchivedSignedPreKey>? PreviousPqSignedPreKeys { get; set; }
+
     [JsonPropertyName("nextPqPreKeyId")]
     public int NextPqPreKeyId { get; set; }
 
