@@ -163,7 +163,46 @@ public class CallService : IDisposable
             _store.SaveRatchetStateAsync(Profile, targetUserId, stateElement, Passphrase, devId);
         }
 
+        // Legacy fallback path. ChatService.SendMessageAsync transparently sends
+        // sealed messages through a no-deviceId ratchet state when the contact's
+        // Devices map is empty; without the same path here, a contact who can
+        // chat fine still can't be called ("No secure session"). We send the
+        // SRTP key encrypted under the legacy ratchet at the top level, with no
+        // perDevice array — that's exactly the legacy single-device branch the
+        // receiver already handles in HandleCallOffer.
+        JsonObject? legacySrtpParams = null;
         if (perDevice.Count == 0)
+        {
+            var legacyStateJson = _store.LoadRatchetState(Profile, targetUserId, null);
+            if (legacyStateJson is not null)
+            {
+                var legacyState = JsonSerializer.Deserialize<DoubleRatchet.RatchetState>(legacyStateJson.Value);
+                if (legacyState is not null)
+                {
+                    var srtpPlaintext = JsonSerializer.Serialize(new
+                    {
+                        srtpKey = Convert.ToBase64String(_srtpMasterKey),
+                        srtpSalt = Convert.ToBase64String(_srtpMasterSalt),
+                    });
+                    var result = DoubleRatchet.Encrypt(legacyState, srtpPlaintext);
+                    legacySrtpParams = new JsonObject
+                    {
+                        ["encrypted"] = result.Ciphertext,
+                        ["nonce"] = result.Nonce,
+                        ["header"] = new JsonObject
+                        {
+                            ["dh"] = result.Header.Dh,
+                            ["pn"] = result.Header.Pn,
+                            ["n"] = result.Header.N,
+                        },
+                    };
+                    var legacyStateElement = JsonSerializer.SerializeToElement(legacyState);
+                    _store.SaveRatchetStateAsync(Profile, targetUserId, legacyStateElement, Passphrase, null);
+                }
+            }
+        }
+
+        if (perDevice.Count == 0 && legacySrtpParams is null)
         {
             _state = CallState.Idle;
             _callId = null;
@@ -174,15 +213,25 @@ public class CallService : IDisposable
 
         // Top-level fields = first device (legacy single-device callees);
         // `perDevice` carries all of them for multi-device callees.
-        var firstEntry = (JsonObject)perDevice[0]!;
-        var srtpParamsEncrypted = new JsonObject
+        // Legacy fallback: when Devices map is empty we already filled
+        // legacySrtpParams (single-device, no perDevice) — send that as-is.
+        JsonObject srtpParamsEncrypted;
+        if (legacySrtpParams is not null)
         {
-            ["encrypted"] = firstEntry["encrypted"]!.GetValue<string>(),
-            ["nonce"] = firstEntry["nonce"]!.GetValue<string>(),
-            ["header"] = (JsonObject)firstEntry["header"]!.DeepClone(),
-            ["toDeviceId"] = firstEntry["toDeviceId"]!.GetValue<string>(),
-            ["perDevice"] = perDevice,
-        };
+            srtpParamsEncrypted = legacySrtpParams;
+        }
+        else
+        {
+            var firstEntry = (JsonObject)perDevice[0]!;
+            srtpParamsEncrypted = new JsonObject
+            {
+                ["encrypted"] = firstEntry["encrypted"]!.GetValue<string>(),
+                ["nonce"] = firstEntry["nonce"]!.GetValue<string>(),
+                ["header"] = (JsonObject)firstEntry["header"]!.DeepClone(),
+                ["toDeviceId"] = firstEntry["toDeviceId"]!.GetValue<string>(),
+                ["perDevice"] = perDevice,
+            };
+        }
 
         var payload = new JsonObject
         {
