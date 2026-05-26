@@ -402,6 +402,15 @@ public class RedeConnection : IDisposable
                         continue;
                     }
 
+                    // Surface generic server ERRORs that no service registered for — otherwise
+                    // every "Target device not found", "Duplicate nonce" etc. is dropped silently.
+                    if (type == Msg.Error && !_handlers.ContainsKey(type))
+                    {
+                        var errText = ProtocolSerializer.GetString(msg, "error") ?? "Unknown server error";
+                        OnError?.Invoke($"[Server] {errText}");
+                        continue;
+                    }
+
                     if (type is not null && _handlers.TryGetValue(type, out var handler))
                     {
                         try { handler(msg); }
