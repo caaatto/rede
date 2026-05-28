@@ -205,8 +205,8 @@ public partial class MainView : UserControl
             header.IsCollapsed = !header.IsCollapsed;
     }
 
-    // Right-click a category header (admins) -> delete category. Channels in it fall back to
-    // uncategorized (handled server-side in PlaceService.RemoveCategory).
+    // Right-click a category header (admins) -> create a channel directly in this category, or
+    // delete the category (its channels fall back to uncategorized, per PlaceService.RemoveCategory).
     private void CategoryHeader_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
@@ -217,6 +217,43 @@ public partial class MainView : UserControl
         if (placeVm?.IsAdmin != true && placeVm?.IsCreator != true) return;
 
         var menu = new ContextMenu();
+
+        var createItem = new MenuItem { Header = "Create channel here...", Foreground = Brush.Parse("#e0e0e8") };
+        createItem.Click += (_, _) =>
+        {
+            var input = new TextBox
+            {
+                Watermark = "Channel name",
+                Width = 200,
+                MaxLength = 64,
+                Background = Brush.Parse("#12121a"),
+                Foreground = Brush.Parse("#e0e0e8"),
+                BorderBrush = Brush.Parse("#1e1e2e"),
+            };
+            var createBtn = new Button
+            {
+                Content = "Create",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            var panel = new StackPanel { Spacing = 4, Width = 210, Children = { input, createBtn } };
+            var flyout = new Flyout { Content = panel, Placement = PlacementMode.BottomEdgeAlignedLeft };
+            void Submit()
+            {
+                var name = input.Text?.Trim();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    vm.ExecuteCommand("pchannelnew", new[] { header.PlaceId, header.Name, name });
+                    flyout.Hide();
+                }
+            }
+            createBtn.Click += (_, _) => Submit();
+            input.KeyDown += (_, ke) => { if (ke.Key == Key.Enter) { Submit(); ke.Handled = true; } };
+            flyout.ShowAt(btn);
+        };
+        menu.Items.Add(createItem);
+
         var deleteItem = new MenuItem { Header = "Delete category", Foreground = Brush.Parse("#f87171") };
         deleteItem.Click += (_, _) => vm.ExecuteCommand("pcategoryrm", new[] { header.PlaceId, header.Name });
         menu.Items.Add(deleteItem);

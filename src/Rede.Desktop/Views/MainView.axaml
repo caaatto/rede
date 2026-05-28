@@ -300,6 +300,7 @@
                                         Margin="2,4,2,0"
                                         BorderThickness="0"
                                         Background="Transparent"
+                                        DragDrop.AllowDrop="True"
                                         Click="CategoryHeader_Click"
                                         PointerPressed="CategoryHeader_PointerPressed">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
@@ -330,6 +331,7 @@
                                             Margin="2,0"
                                             BorderThickness="0"
                                             CornerRadius="4"
+                                            DragDrop.AllowDrop="True"
                                             Click="Channel_Click"
                                             PointerPressed="Channel_PointerPressed"
                                             PointerMoved="Channel_PointerMoved">

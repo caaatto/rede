@@ -1694,6 +1694,13 @@ public partial class MainWindow : Window
                     _mainVm.AddSystemMessage("Place not found.");
                 break;
 
+            // GUI-only: create a channel directly inside a category. args: placeId, category, name.
+            // placeId/category are passed as discrete elements so spaces are preserved.
+            case "pchannelnew" when args.Length >= 3:
+                _places?.CreateChannel(args[0], string.Join(" ", args[2..]), _chat,
+                    string.IsNullOrEmpty(args[1]) ? null : args[1]);
+                break;
+
             case "pchannelrm" when args.Length >= 2:
                 _places?.RemoveChannel(args[0], args[1]);
                 break;

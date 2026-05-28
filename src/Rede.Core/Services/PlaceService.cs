@@ -279,7 +279,7 @@ public class PlaceService : IDisposable
         ));
     }
 
-    public void CreateChannel(string placeId, string name, ChatService? chatService = null)
+    public void CreateChannel(string placeId, string name, ChatService? chatService = null, string? category = null)
     {
         if (Profile is null || Passphrase is null) return;
 
@@ -312,9 +312,15 @@ public class PlaceService : IDisposable
             ("channelId", JsonValue.Create(channelId))
         ));
 
+        // Only honor a category that already exists on the place (created from a category
+        // header). Avoids silently materializing a category from a stale/garbage value.
+        var resolvedCategory = !string.IsNullOrEmpty(category) && place.Categories.Contains(category)
+            ? category : null;
+
         place.Channels[channelId] = new PlaceChannel
         {
             Name = name,
+            Category = resolvedCategory,
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         };
         _store.SaveProfileDebounced(Profile, Passphrase);
