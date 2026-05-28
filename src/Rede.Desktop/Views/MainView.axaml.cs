@@ -32,6 +32,12 @@ public partial class MainView : UserControl
     private const double AutoScrollEpsilonPx = 50;
     private const double NewestButtonThresholdPx = 600;
 
+    // Channel drag-to-category state. Custom clipboard format carries "placeId\u0001channelId".
+    private const string ChannelMoveFormat = "application/x-rede-channel-move";
+    private Avalonia.Point _dragStartPoint;
+    private ChannelItemViewModel? _dragChannel;
+    private bool _dragInitiated;
+
     protected override void OnLoaded(Avalonia.Interactivity.RoutedEventArgs e)
     {
         base.OnLoaded(e);
@@ -87,6 +93,12 @@ public partial class MainView : UserControl
 
     private void OnChatDragOver(object? sender, DragEventArgs e)
     {
+        if (e.Data.Contains(ChannelMoveFormat))
+        {
+            e.DragEffects = ResolveChannelDropTarget(e, out _) ? DragDropEffects.Move : DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
         e.DragEffects = e.Data.Contains(DataFormats.Files) ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
@@ -94,6 +106,20 @@ public partial class MainView : UserControl
     private void OnChatDrop(object? sender, DragEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
+
+        if (e.Data.Contains(ChannelMoveFormat))
+        {
+            if (ResolveChannelDropTarget(e, out var targetCategory)
+                && e.Data.Get(ChannelMoveFormat) is string payload)
+            {
+                var parts = payload.Split('\u0001');
+                if (parts.Length == 2)
+                    vm.ExecuteCommand("pchannelcat", new[] { parts[0], parts[1], targetCategory ?? "" });
+            }
+            e.Handled = true;
+            return;
+        }
+
         var files = e.Data.GetFiles();
         if (files is null) return;
 
@@ -103,6 +129,101 @@ public partial class MainView : UserControl
             .Cast<string>()
             .ToArray();
         if (paths.Length > 0) vm.RequestAttach(paths);
+        e.Handled = true;
+    }
+
+    // Walk from the dropped-on element up the visual tree. A category header resolves to its
+    // category; a channel row resolves to that channel's category (which may be null). Empty
+    // space inside the channel list resolves to uncategorized (null). Anything outside the
+    // channel list (e.g. the chat area) is not a valid target.
+    private bool ResolveChannelDropTarget(DragEventArgs e, out string? category)
+    {
+        category = null;
+        if (e.Source is not Visual source) return false;
+
+        bool insideChannelList = false;
+        bool categoryFound = false;
+        string? resolved = null;
+
+        foreach (var node in Enumerable.Repeat(source, 1).Concat(source.GetVisualAncestors()))
+        {
+            if (ReferenceEquals(node, PlaceChannelList)) insideChannelList = true;
+            if (!categoryFound && node is Control ctrl)
+            {
+                if (ctrl.DataContext is CategoryHeaderViewModel header)
+                {
+                    resolved = header.Name;
+                    categoryFound = true;
+                }
+                else if (ctrl.DataContext is ChannelItemViewModel ch)
+                {
+                    resolved = ch.Category;
+                    categoryFound = true;
+                }
+            }
+        }
+
+        if (categoryFound) { category = resolved; return true; }
+        if (insideChannelList) { category = null; return true; } // empty area -> uncategorized
+        return false;
+    }
+
+    // Begin a channel drag once the pointer moves past a small threshold with the left button
+    // held. Admin/owner only — others can't reorganize the place, so we never start the drag.
+    private async void Channel_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_dragChannel is null || _dragInitiated) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            _dragChannel = null;
+            return;
+        }
+        if (DataContext is not MainViewModel vm) return;
+
+        var placeVm = vm.Places.FirstOrDefault(p => p.PlaceId == _dragChannel.PlaceId);
+        if (placeVm is null || (!placeVm.IsAdmin && !placeVm.IsCreator))
+        {
+            _dragChannel = null;
+            return;
+        }
+
+        var pos = e.GetPosition(this);
+        if (Math.Abs(pos.X - _dragStartPoint.X) < 4 && Math.Abs(pos.Y - _dragStartPoint.Y) < 4) return;
+
+        _dragInitiated = true;
+        var data = new DataObject();
+        data.Set(ChannelMoveFormat, _dragChannel.PlaceId + "\u0001" + _dragChannel.ChannelId);
+        try { await DragDrop.DoDragDrop(e, data, DragDropEffects.Move); }
+        catch { }
+        finally { _dragInitiated = false; _dragChannel = null; }
+    }
+
+    // Toggle a category's collapsed state. The header VM raises a rebuild of its place's tree.
+    private void CategoryHeader_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is CategoryHeaderViewModel header)
+            header.IsCollapsed = !header.IsCollapsed;
+    }
+
+    // Right-click a category header (admins) -> delete category. Channels in it fall back to
+    // uncategorized (handled server-side in PlaceService.RemoveCategory).
+    private void CategoryHeader_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+        if (sender is not Button btn || btn.DataContext is not CategoryHeaderViewModel header) return;
+        if (DataContext is not MainViewModel vm) return;
+
+        var placeVm = vm.Places.FirstOrDefault(p => p.PlaceId == header.PlaceId);
+        if (placeVm?.IsAdmin != true && placeVm?.IsCreator != true) return;
+
+        var menu = new ContextMenu();
+        var deleteItem = new MenuItem { Header = "Delete category", Foreground = Brush.Parse("#f87171") };
+        deleteItem.Click += (_, _) => vm.ExecuteCommand("pcategoryrm", new[] { header.PlaceId, header.Name });
+        menu.Items.Add(deleteItem);
+
+        btn.ContextMenu = menu;
+        menu.Closed += (_, _) => btn.ContextMenu = null;
+        menu.Open(btn);
         e.Handled = true;
     }
 
@@ -1146,7 +1267,18 @@ public partial class MainView : UserControl
 
     private void Channel_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+        var props = e.GetCurrentPoint(this).Properties;
+        // Record the press so Channel_PointerMoved can start a drag once the pointer moves past
+        // the threshold. A plain click (no movement) still selects the channel as before.
+        if (props.IsLeftButtonPressed && sender is Button lbtn
+            && lbtn.DataContext is ChannelItemViewModel dragChannel)
+        {
+            _dragStartPoint = e.GetPosition(this);
+            _dragChannel = dragChannel;
+            _dragInitiated = false;
+        }
+
+        if (!props.IsRightButtonPressed) return;
         if (sender is not Button btn || btn.DataContext is not ChannelItemViewModel channel) return;
         if (DataContext is not MainViewModel vm) return;
 

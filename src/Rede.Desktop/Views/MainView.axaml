@@ -269,7 +269,9 @@
                      Only visible when a place is selected from the top rail (and the
                      sidebar is expanded). Shows the place's channels at the top of the
                      sidebar so the place dominates the view, exactly like Discord. -->
-                <StackPanel IsVisible="{Binding ShowPlaceChannels}">
+                <StackPanel x:Name="PlaceChannelList"
+                            IsVisible="{Binding ShowPlaceChannels}"
+                            DragDrop.AllowDrop="True">
                     <!-- Channels section header (with member count) -->
                     <Border Padding="12,10,12,6"
                             IsVisible="{Binding !IsSidebarCollapsed}">
@@ -285,10 +287,33 @@
                         </Grid>
                     </Border>
 
-                    <!-- Channels list -->
-                    <ItemsControl ItemsSource="{Binding ActivePlace.Channels}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ChannelItemViewModel">
+                    <!-- Channels list: interleaved category headers + channels (ChannelTree).
+                         Drag a channel onto a category header (or another channel) to move it;
+                         drop on empty channel-area space to make it uncategorized. -->
+                    <ItemsControl ItemsSource="{Binding ActivePlace.ChannelTree}">
+                        <ItemsControl.DataTemplates>
+                            <DataTemplate DataType="vm:CategoryHeaderViewModel" x:DataType="vm:CategoryHeaderViewModel">
+                                <Button Classes="ghost"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Padding="10,6,8,2"
+                                        Margin="2,4,2,0"
+                                        BorderThickness="0"
+                                        Background="Transparent"
+                                        Click="CategoryHeader_Click"
+                                        PointerPressed="CategoryHeader_PointerPressed">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding ChevronGlyph}" Classes="muted"
+                                                   FontSize="{StaticResource RedeCaptionSize}"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding DisplayName}" Classes="secondary"
+                                                   FontWeight="{StaticResource RedeWeightSemiBold}"
+                                                   FontSize="{StaticResource RedeCaptionSize}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                            <DataTemplate DataType="vm:ChannelItemViewModel" x:DataType="vm:ChannelItemViewModel">
                                 <Grid ColumnDefinitions="3,*">
                                     <Border Grid.Column="0"
                                             Width="3"
@@ -306,7 +331,8 @@
                                             BorderThickness="0"
                                             CornerRadius="4"
                                             Click="Channel_Click"
-                                            PointerPressed="Channel_PointerPressed">
+                                            PointerPressed="Channel_PointerPressed"
+                                            PointerMoved="Channel_PointerMoved">
                                         <Grid ColumnDefinitions="*,Auto">
                                             <TextBlock Grid.Column="0">
                                                 <Run Text="#" Foreground="{DynamicResource RedeTextMutedBrush}" />
@@ -320,7 +346,7 @@
                                     </Button>
                                 </Grid>
                             </DataTemplate>
-                        </ItemsControl.ItemTemplate>
+                        </ItemsControl.DataTemplates>
                     </ItemsControl>
                 </StackPanel>
 

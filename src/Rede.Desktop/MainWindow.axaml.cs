@@ -1854,6 +1854,13 @@ public partial class MainWindow : Window
                     _mainVm.AddSystemMessage("Place not found.");
                 break;
 
+            case "pchannelcat" when args.Length >= 2:
+                // args: placeId, channelId, [category]. Empty/missing category -> uncategorized (null).
+                var pccCategory = args.Length >= 3 ? string.Join(" ", args[2..]) : "";
+                _places?.SetChannelCategory(args[0], args[1],
+                    string.IsNullOrEmpty(pccCategory) ? null : pccCategory, _chat);
+                break;
+
             case "pnick" when args.Length >= 1:
                 // /pnick <nickname> — set own nickname in current place
                 // /pnick <userId> <nickname> — admin sets someone's nickname
@@ -2124,6 +2131,9 @@ public partial class MainWindow : Window
                 for (int i = existing.Channels.Count - 1; i >= 0; i--)
                     if (!existingChIds.Contains(existing.Channels[i].ChannelId))
                         existing.Channels.RemoveAt(i);
+
+                existing.CategoryOrder = p.Categories.ToList();
+                existing.RebuildChannelTree();
             }
             else
             {
@@ -2153,6 +2163,8 @@ public partial class MainWindow : Window
                     OwnerColor = p.OwnerColor, AdminColor = p.AdminColor,
                     MemberColor = p.MemberColor,
                 };
+                placeVm.CategoryOrder = p.Categories.ToList();
+                placeVm.RebuildChannelTree();
                 placeVm.LoadIcon(p.IconData);
                 _iconDataCache[id] = p.IconData;
                 _mainVm.Places.Add(placeVm);

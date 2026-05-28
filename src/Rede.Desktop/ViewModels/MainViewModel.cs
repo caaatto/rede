@@ -748,6 +748,15 @@ public partial class PlaceItemViewModel : ViewModelBase
     // opened — Home/@ owns the active state until then.
     [ObservableProperty] private bool _isExpanded;
     [ObservableProperty] private ObservableCollection<ChannelItemViewModel> _channels = new();
+    // Display rows for the sidebar: interleaved CategoryHeaderViewModel + ChannelItemViewModel.
+    // Built by RebuildChannelTree from Channels + CategoryOrder. The flat Channels list stays
+    // canonical for navigation/lookup; ChannelTree is purely for rendering.
+    [ObservableProperty] private ObservableCollection<ViewModelBase> _channelTree = new();
+    // Raw category names in stored order (from Place.Categories). Used as bucket keys against
+    // each channel's raw Category, so this must NOT be sanitized (display sanitizing happens
+    // on the header VM).
+    public List<string> CategoryOrder { get; set; } = new();
+    private readonly Dictionary<string, CategoryHeaderViewModel> _headers = new();
     [ObservableProperty] private bool _hasUnread;
     [ObservableProperty] private int _memberCount;
     [ObservableProperty] private bool _isCreator;
@@ -785,6 +794,75 @@ public partial class PlaceItemViewModel : ViewModelBase
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoadIcon failed: {ex.Message}"); IconImage?.Dispose(); IconImage = null; HasIcon = false; }
     }
+
+    // Rebuild the interleaved display list. Uncategorized channels render first (no header,
+    // Discord-style), then each category in CategoryOrder as a collapsible header followed by
+    // its channels. Header instances are reused across rebuilds so collapse state survives the
+    // differential place sync. Channel VM instances are reused (passed in via Channels), so the
+    // selection highlight (IsSelected) is preserved.
+    public void RebuildChannelTree()
+    {
+        var byCat = new Dictionary<string, List<ChannelItemViewModel>>();
+        var uncategorized = new List<ChannelItemViewModel>();
+        foreach (var ch in Channels)
+        {
+            var cat = ch.Category;
+            if (string.IsNullOrEmpty(cat) || !CategoryOrder.Contains(cat))
+            {
+                uncategorized.Add(ch);
+            }
+            else
+            {
+                if (!byCat.TryGetValue(cat, out var list)) { list = new(); byCat[cat] = list; }
+                list.Add(ch);
+            }
+        }
+
+        var rows = new List<ViewModelBase>();
+        foreach (var ch in uncategorized) rows.Add(ch);
+        foreach (var cat in CategoryOrder)
+        {
+            if (!_headers.TryGetValue(cat, out var header))
+            {
+                header = new CategoryHeaderViewModel { PlaceId = PlaceId, Name = cat, Owner = this };
+                _headers[cat] = header;
+            }
+            rows.Add(header);
+            if (!header.IsCollapsed && byCat.TryGetValue(cat, out var chans))
+                foreach (var ch in chans) rows.Add(ch);
+        }
+        // Drop headers for categories that no longer exist
+        foreach (var stale in _headers.Keys.Where(k => !CategoryOrder.Contains(k)).ToList())
+            _headers.Remove(stale);
+
+        ChannelTree.Clear();
+        foreach (var row in rows) ChannelTree.Add(row);
+    }
+}
+
+public partial class CategoryHeaderViewModel : ViewModelBase
+{
+    [ObservableProperty] private string _placeId = "";
+    // Raw category name — the key used for bucketing and passed to SetChannelCategory.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private string _name = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ChevronGlyph))]
+    private bool _isCollapsed;
+
+    // Set by PlaceItemViewModel.RebuildChannelTree so the header can ask its place to rebuild
+    // when the user toggles collapse.
+    public PlaceItemViewModel? Owner { get; set; }
+
+    public string ChevronGlyph => IsCollapsed ? "▸" : "▾"; // ▸ collapsed, ▾ expanded
+
+    // Strip control chars + bidi overrides for display (anti-spoofing). The raw Name stays
+    // intact for bucket matching against channel.Category.
+    public string DisplayName => Regex.Replace(Name ?? "",
+        @"[\x00-\x1f\x7f\u200E\u200F\u202A-\u202E\u2066-\u2069]", "").Trim().ToUpperInvariant();
+
+    partial void OnIsCollapsedChanged(bool value) => Owner?.RebuildChannelTree();
 }
 
 public partial class ChannelItemViewModel : ViewModelBase
