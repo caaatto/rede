@@ -19,6 +19,20 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Crash capture. The call/audio path runs native code (PortAudio,
+        // RNNoise) whose faults can't be caught by managed try/catch, and a
+        // truly-unhandled managed exception on any thread tears the process
+        // down with no window left to show it. Both modes previously left the
+        // user with a silently-vanished app. Persist whatever we can to
+        // ~/.rede/crash.log so the next occurrence is diagnosable.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            WriteCrashLog("UnhandledException", e.ExceptionObject as Exception);
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            WriteCrashLog("UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+
         // Info flags handled before single-instance lock so they still work when
         // a REDE GUI is already running.
         if (Array.Exists(args, IsVersionFlag))
@@ -62,6 +76,19 @@ class Program
             .WithInterFont()
             .LogToTrace()
             .UseDesktopWebView();
+
+    private static void WriteCrashLog(string kind, Exception? ex)
+    {
+        try
+        {
+            var redeDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".rede");
+            Directory.CreateDirectory(redeDir);
+            var line = $"=== {DateTime.UtcNow:o} {kind} (REDE v{UpdateService.Version}) ===\n{ex}\n\n";
+            File.AppendAllText(Path.Combine(redeDir, "crash.log"), line);
+            Console.Error.WriteLine(line);
+        }
+        catch { /* last-ditch handler — never throw from here */ }
+    }
 
     private static bool AcquireSingleInstanceLock()
     {
