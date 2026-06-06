@@ -71,6 +71,7 @@ Double-click `REDE.exe`.
 - **Group calls** - LiveKit SFU for Places/Groups, E2EE via SFrame (key never leaves client), up to 25 participants, 1080p60 video
 - **Profile customization** - accent colors, avatar images (PNG/GIF/JPEG), shared with contacts
 - **Multi-device** - each device has its own keys, messages delivered to all devices
+- **Hardware security keys (FIDO2)** - require a physical key (Thetis, YubiKey, etc.) plus your passphrase to unlock your profile, with optional server-side 2FA. Multiple keys + recovery code supported
 - **Anonymous transport** - connect via I2P or Tor to hide your IP from the server
 - **Message padding** - fixed-size buckets prevent traffic analysis
 - **Self-destructing messages** - TTL-based auto-delete
@@ -205,6 +206,28 @@ Link additional devices to receive messages on all of them.
 Each device has its own cryptographic identity.
 
 
+## security keys (FIDO2)
+
+Optionally require a physical FIDO2/WebAuthn security key (Thetis, YubiKey, etc.)
+to unlock your profile. Enroll one under **Settings → Security → Security Keys**.
+
+Once enrolled, your profile can only be opened with **your passphrase plus the
+hardware key** - a stolen laptop and a cracked passphrase are no longer enough.
+How it works:
+
+- A random Profile Master Secret is mixed into your profile's encryption key.
+  It is never stored in the clear - only wrapped by the key's `hmac-secret`
+  output (and by a recovery code). Passphrase alone can no longer decrypt.
+- **Multiple keys** can be enrolled (a main key + a backup), and a one-time
+  **recovery code** is generated so you are never locked out if a key is lost.
+- **Server-side 2FA** (optional): the same key also gates login at the server,
+  so your account can't be used from another machine even with your identity keys.
+- **Platforms**: Windows uses the built-in WebAuthn API (no extra install);
+  Linux uses `libfido2` (`sudo apt install libfido2-1`).
+
+Profiles without an enrolled key are unchanged - this is fully opt-in.
+
+
 ## privacy
 
 ```
@@ -234,6 +257,7 @@ There is no recovery mechanism - do not lose your passphrase.
 - Backward-compatible PQ fallback: peers without PQ keys still get classical X3DH (security regression flagged in logs)
 - Server signatures: all server responses signed with Ed25519
 - Voice E2EE: SRTP keys never leave the Double Ratchet session (inherits PQ protection from session bootstrap)
+- Optional hardware second factor: FIDO2 security key (`hmac-secret`) bound into the at-rest profile key, with optional server-side WebAuthn 2FA
 
 
 ## license
