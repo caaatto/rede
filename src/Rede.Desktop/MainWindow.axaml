@@ -14,7 +14,11 @@
         KeyDown="Window_KeyDown">
 
     <Panel>
-        <ContentControl x:Name="RootContent" />
+        <!-- Stretch hosted views to the window bounds so their internal ScrollViewers are
+             height-constrained and scroll instead of overflowing off-screen. -->
+        <ContentControl x:Name="RootContent"
+                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
         <!-- Title-bar drag strip. The window is chromeless
              (ExtendClientAreaToDecorationsHint) so the top 36px has no OS drag
              region — this transparent strip provides it. It sits above the

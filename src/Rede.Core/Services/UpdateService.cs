@@ -11,7 +11,7 @@ public class UpdateService
     private readonly string _branch;
 
     private const string GitHubRepo = "caaatto/rede";
-    internal const string CurrentVersion = "2.20.6-beta";
+    internal const string CurrentVersion = "2.20.7-beta";
 
     /// <summary>The version this build identifies as (e.g. for `REDE --version`).</summary>
     public static string Version => CurrentVersion;

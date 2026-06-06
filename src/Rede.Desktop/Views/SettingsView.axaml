@@ -47,8 +47,10 @@
                        Classes="title"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center" />
-            <!-- spacer to balance Back button -->
-            <Border Grid.Column="2" Width="60" />
+            <!-- temporary scroll diagnostics -->
+            <TextBlock Grid.Column="2" x:Name="ScrollDebug" MinWidth="60"
+                       VerticalAlignment="Center" HorizontalAlignment="Right"
+                       Classes="secondary" FontSize="10" FontFamily="Courier New, monospace" />
         </Grid>
 
         <!-- Sidebar + Content -->
@@ -85,7 +87,7 @@
             </Border>
 
             <!-- Content area -->
-            <ScrollViewer Grid.Column="1" x:Name="ContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,8,32,24">
+            <ScrollViewer Grid.Column="1" x:Name="ContentScroll" VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Disabled" Padding="32,8,32,24">
                 <Grid MaxWidth="560" HorizontalAlignment="Center"
                       RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
