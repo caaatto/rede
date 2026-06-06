@@ -37,6 +37,7 @@
                         <MultiBinding Converter="{x:Static BoolConverters.And}">
                             <Binding Path="HasQuickLogin" />
                             <Binding Path="!IsAwaitingSecurityKey" />
+                            <Binding Path="!IsLoading" />
                         </MultiBinding>
                     </StackPanel.IsVisible>
                     <TextBlock Text="Welcome back"
@@ -160,6 +161,7 @@
                             <Binding Path="!IsRegisterMode" />
                             <Binding Path="!HasQuickLogin" />
                             <Binding Path="!IsAwaitingSecurityKey" />
+                            <Binding Path="!IsLoading" />
                         </MultiBinding>
                     </StackPanel.IsVisible>
 
@@ -217,6 +219,7 @@
                             <Binding Path="IsRegisterMode" />
                             <Binding Path="!HasQuickLogin" />
                             <Binding Path="!IsAwaitingSecurityKey" />
+                            <Binding Path="!IsLoading" />
                         </MultiBinding>
                     </Grid.IsVisible>
 
@@ -288,6 +291,7 @@
                             <Binding Path="IsRegisterMode" />
                             <Binding Path="!HasQuickLogin" />
                             <Binding Path="!IsAwaitingSecurityKey" />
+                            <Binding Path="!IsLoading" />
                         </MultiBinding>
                     </Button.IsVisible>
                 </Button>
