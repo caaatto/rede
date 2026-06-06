@@ -253,15 +253,36 @@ public class AudioEngine : IDisposable
         try
         {
             PortAudioSharp.PortAudio.Initialize();
+
+            // PortAudio enumerates every physical device once PER host API (Windows: MME,
+            // DirectSound, WASAPI, WDM-KS; Linux: ALSA, Pulse, JACK), which floods the picker
+            // with duplicates and odd virtual entries. Restrict to the default host API — the one
+            // the OS default device belongs to — so each device appears exactly once.
+            int defaultHostApi = -1;
+            try
+            {
+                int defIn = PortAudioSharp.PortAudio.DefaultInputDevice;
+                int defOut = PortAudioSharp.PortAudio.DefaultOutputDevice;
+                if (defIn >= 0 && defIn != PortAudioSharp.PortAudio.NoDevice)
+                    defaultHostApi = PortAudioSharp.PortAudio.GetDeviceInfo(defIn).hostApi;
+                else if (defOut >= 0 && defOut != PortAudioSharp.PortAudio.NoDevice)
+                    defaultHostApi = PortAudioSharp.PortAudio.GetDeviceInfo(defOut).hostApi;
+            }
+            catch { }
+
             int count = PortAudioSharp.PortAudio.DeviceCount;
+            var seen = new HashSet<string>();
             for (int i = 0; i < count; i++)
             {
                 var info = PortAudioSharp.PortAudio.GetDeviceInfo(i);
-                if (info.maxInputChannels > 0 || info.maxOutputChannels > 0)
-                {
-                    devices.Add(new AudioDeviceInfo(i, info.name,
-                        info.maxInputChannels > 0, info.maxOutputChannels > 0));
-                }
+                if (info.maxInputChannels <= 0 && info.maxOutputChannels <= 0) continue;
+                // Only the default host API (unless we couldn't determine it, then keep all).
+                if (defaultHostApi >= 0 && info.hostApi != defaultHostApi) continue;
+                // De-dup safety net by name + direction.
+                var key = $"{info.name}|{info.maxInputChannels > 0}|{info.maxOutputChannels > 0}";
+                if (!seen.Add(key)) continue;
+                devices.Add(new AudioDeviceInfo(i, info.name,
+                    info.maxInputChannels > 0, info.maxOutputChannels > 0));
             }
             PortAudioSharp.PortAudio.Terminate();
         }
