@@ -46,6 +46,9 @@ public interface IFido2Authenticator
     /// <summary>True if a usable backend (libfido2 / platform WebAuthn) is loaded.</summary>
     bool IsAvailable { get; }
 
+    /// <summary>Short human-readable backend state for diagnostics (shown in Settings).</summary>
+    string DescribeBackend();
+
     /// <summary>True if at least one authenticator is currently connected.</summary>
     bool HasDevice();
 

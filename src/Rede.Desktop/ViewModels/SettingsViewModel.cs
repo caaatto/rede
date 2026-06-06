@@ -317,6 +317,7 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _fidoStatus = "";
     [ObservableProperty] private bool _hasRecoveryCode;
     [ObservableProperty] private string _generatedRecoveryCode = ""; // shown ONCE right after generation
+    [ObservableProperty] private string _fidoDiagnostics = "";       // backend state line (diagnostics)
 
     public bool ShowFidoInstall => !FidoBackendAvailable && !IsFidoBusy;
     public bool HasSecurityKeys => SecurityKeys.Count > 0;

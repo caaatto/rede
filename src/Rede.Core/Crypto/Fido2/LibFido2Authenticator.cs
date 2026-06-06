@@ -40,6 +40,9 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
 
     public bool IsAvailable => IsAvailableStatic;
 
+    public string DescribeBackend()
+        => IsAvailableStatic ? "libfido2 loaded" : "libfido2 not found (install the libfido2 system package)";
+
     static LibFido2Authenticator()
     {
         NativeLibrary.SetDllImportResolver(typeof(LibFido2Authenticator).Assembly, (name, asm, searchPath) =>

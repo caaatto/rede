@@ -26,6 +26,9 @@ public partial class MainWindow : Window
     // The unlock service owns the session Profile Master Secret, cleared on logout/close.
     private readonly Rede.Core.Crypto.Fido2.IFido2Authenticator _fidoAuth;
     private readonly Rede.Core.Crypto.Fido2.Fido2UnlockService _fido;
+    // Native window handle, cached on the UI thread (the Windows WebAuthn API needs an HWND and
+    // must not pull it from a background thread). Updated once the window handle exists.
+    private IntPtr _windowHandle;
 
     private RedeConnection? _conn;
     private AuthService? _auth;
@@ -64,13 +67,14 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         _fidoAuth = OperatingSystem.IsWindows()
-            ? new Rede.Core.Crypto.Fido2.WindowsWebAuthnAuthenticator(() => TryGetPlatformHandle()?.Handle ?? IntPtr.Zero)
+            ? new Rede.Core.Crypto.Fido2.WindowsWebAuthnAuthenticator(() => _windowHandle)
             : new Rede.Core.Crypto.Fido2.LibFido2Authenticator();
         _fido = new Rede.Core.Crypto.Fido2.Fido2UnlockService(_fidoAuth, _store);
         InitializeComponent();
         AdjustStartupSize();
         Loaded += (_, _) =>
         {
+            _windowHandle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
             ShowLogin();
             CheckForUpdatesAsync();
 
@@ -2925,6 +2929,7 @@ public partial class MainWindow : Window
                 Added = "Added " + DateTimeOffset.FromUnixTimeMilliseconds(k.AddedAt).LocalDateTime.ToString("yyyy-MM-dd"),
             }).ToList();
             vm.SetSecurityKeys(keys, _fido.HasRecovery(hash), _fido.BackendAvailable);
+            vm.FidoDiagnostics = _fidoAuth.DescribeBackend();
         }
         RefreshFidoKeys();
 
@@ -2998,7 +3003,11 @@ public partial class MainWindow : Window
         vm.OnEnrollKeyRequested += async (keyName, pin) =>
         {
             if (_auth?.Profile is null || _auth.Passphrase is null) return false;
-            var cred = await _fido.EnrollKeyAsync(_auth.Profile, _auth.Passphrase, keyName, pin);
+            // Run the native ceremony off the UI thread (the OS security-key dialog blocks the
+            // calling thread; doing it on the UI thread can prevent the dialog from showing).
+            var profile = _auth.Profile;
+            var pass = _auth.Passphrase;
+            var cred = await Task.Run(() => _fido.EnrollKeyAsync(profile, pass, keyName, pin));
             _lastFidoPin = pin;
             // Register the credential's public key with the server for login 2FA (best-effort —
             // local unlock works regardless of whether the server enrollment lands).

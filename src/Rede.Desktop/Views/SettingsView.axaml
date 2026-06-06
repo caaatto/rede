@@ -522,6 +522,9 @@
                             <TextBlock Text="Security Keys (FIDO2)" Classes="header" />
                             <TextBlock Text="Require a hardware security key (plus your passphrase) to unlock this profile. Enroll a backup key and generate a recovery code so you are never locked out."
                                        Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+                            <TextBlock Text="{Binding FidoDiagnostics}"
+                                       IsVisible="{Binding FidoDiagnostics, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       Classes="secondary" FontSize="11" FontFamily="Courier New, monospace" />
 
                             <!-- Install native support (when libfido2 is not loaded) -->
                             <StackPanel Spacing="6" IsVisible="{Binding ShowFidoInstall}">

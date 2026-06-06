@@ -36,6 +36,16 @@ public sealed class WindowsWebAuthnAuthenticator : IFido2Authenticator
         get { try { return WebAuthNGetApiVersionNumber() > 0; } catch { return false; } }
     }
 
+    public string DescribeBackend()
+    {
+        try
+        {
+            int v = WebAuthNGetApiVersionNumber();
+            return v > 0 ? $"Windows WebAuthn API v{v}" : "Windows WebAuthn API not available";
+        }
+        catch (Exception e) { return "webauthn.dll load error: " + e.GetType().Name; }
+    }
+
     // The WebAuthn API does not expose device enumeration without a ceremony; the OS dialog itself
     // prompts to insert/tap a key. Treat "API present" as ready, and "hmac-secret supported" as a
     // function of API version (the salt API needs a recent build) — real failures surface per-call.
