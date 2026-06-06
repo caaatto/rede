@@ -194,21 +194,22 @@ public sealed class WindowsWebAuthnAuthenticator : IFido2Authenticator
             int hr = WebAuthNAuthenticatorGetAssertion(_hwndProvider(), rpId, ref clientData, ref opts, out pAssertion);
             if (hr != 0) throw MapHr(hr, "get_assertion");
 
-            // WEBAUTHN_ASSERTION layout:
-            //  0 dwVersion
-            //  8 cbAuthenticatorData / 16 pbAuthenticatorData
-            // 24 cbSignature / 32 pbSignature
-            // 40 Credential: dwVersion(40) cbId(44) pbId(48) pwszCredentialType(56)
-            // 64 cbUserId / 72 pbUserId
-            // v2: Extensions(80 c, 88 p) cbCredLargeBlob(96) pbCredLargeBlob(104) dwCredLargeBlobStatus(112)
-            // v3: pHmacSecret(120)
+            // WEBAUTHN_ASSERTION layout (x64). NOTE: unlike the attestation struct, dwVersion is
+            // followed directly by a DWORD (not a pointer), so fields are NOT all 8-aligned off 0.
+            //   0  dwVersion (DWORD)
+            //   4  cbAuthenticatorData / 8  pbAuthenticatorData
+            //  16  cbSignature / 24 pbSignature
+            //  32  Credential { dwVersion@32; cbId@36; pbId@40; pwszCredentialType@48 } -> ends@56
+            //  56  cbUserId / 64 pbUserId
+            //  v2: 72 Extensions(c@72,p@80) / 88 cbCredLargeBlob / 96 pbCredLargeBlob / 104 dwCredLargeBlobStatus
+            //  v3: 112 pHmacSecret
             int ver = Marshal.ReadInt32(pAssertion, 0);
-            uint cbAuth = (uint)Marshal.ReadInt32(pAssertion, 8);
-            IntPtr pbAuth = Marshal.ReadIntPtr(pAssertion, 16);
-            uint cbSig = (uint)Marshal.ReadInt32(pAssertion, 24);
-            IntPtr pbSig = Marshal.ReadIntPtr(pAssertion, 32);
-            uint cbId = (uint)Marshal.ReadInt32(pAssertion, 44);
-            IntPtr pbId = Marshal.ReadIntPtr(pAssertion, 48);
+            uint cbAuth = (uint)Marshal.ReadInt32(pAssertion, 4);
+            IntPtr pbAuth = Marshal.ReadIntPtr(pAssertion, 8);
+            uint cbSig = (uint)Marshal.ReadInt32(pAssertion, 16);
+            IntPtr pbSig = Marshal.ReadIntPtr(pAssertion, 24);
+            uint cbId = (uint)Marshal.ReadInt32(pAssertion, 36);
+            IntPtr pbId = Marshal.ReadIntPtr(pAssertion, 40);
 
             var authData = Copy(pbAuth, cbAuth);
             var sig = Copy(pbSig, cbSig);
@@ -217,7 +218,7 @@ public sealed class WindowsWebAuthnAuthenticator : IFido2Authenticator
             byte[]? hmac = null;
             if (requireHmac && ver >= 3)
             {
-                IntPtr pHmac = Marshal.ReadIntPtr(pAssertion, 120); // WEBAUTHN_HMAC_SECRET_SALT*
+                IntPtr pHmac = Marshal.ReadIntPtr(pAssertion, 112); // WEBAUTHN_HMAC_SECRET_SALT*
                 if (pHmac != IntPtr.Zero)
                 {
                     uint cbFirst = (uint)Marshal.ReadInt32(pHmac, 0);
