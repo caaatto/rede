@@ -21,10 +21,10 @@ public partial class MainWindow : Window
     private readonly LoginViewModel _loginVm = new();
     private readonly MainViewModel _mainVm = new();
     private readonly ProfileStore _store = new();
-    // FIDO2 hardware-key unlock. The authenticator backend (libfido2) is optional and
-    // may be unavailable until the native lib is installed from Settings; the unlock
-    // service owns the session Profile Master Secret and is cleared on logout/close.
-    private readonly Rede.Core.Crypto.Fido2.LibFido2Authenticator _fidoAuth = new();
+    // FIDO2 hardware-key unlock. Windows uses the built-in WebAuthn API (always available; the OS
+    // dialog drives PIN/touch); other platforms use libfido2 (system package or on-demand install).
+    // The unlock service owns the session Profile Master Secret, cleared on logout/close.
+    private readonly Rede.Core.Crypto.Fido2.IFido2Authenticator _fidoAuth;
     private readonly Rede.Core.Crypto.Fido2.Fido2UnlockService _fido;
 
     private RedeConnection? _conn;
@@ -63,6 +63,9 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _fidoAuth = OperatingSystem.IsWindows()
+            ? new Rede.Core.Crypto.Fido2.WindowsWebAuthnAuthenticator(() => TryGetPlatformHandle()?.Handle ?? IntPtr.Zero)
+            : new Rede.Core.Crypto.Fido2.LibFido2Authenticator();
         _fido = new Rede.Core.Crypto.Fido2.Fido2UnlockService(_fidoAuth, _store);
         InitializeComponent();
         AdjustStartupSize();
@@ -2875,7 +2878,7 @@ public partial class MainWindow : Window
                     }
                 }
                 if (downloadUrl is null || releaseTag is null)
-                    throw new Exception($"{libFile} not found in any GitHub release — upload it with the next release");
+                    throw new Exception($"Download for {libFile} isn't available yet.");
                 var bytes = await http.GetByteArrayAsync(downloadUrl);
 
                 // RNNoise is a native library loaded into our process — a tampered blob
@@ -2886,7 +2889,7 @@ public partial class MainWindow : Window
                 var verified = await Rede.Core.Services.UpdateService.VerifyReleaseAssetAsync(
                     releaseTag, libFile, bytes, s => verifyErr = s);
                 if (!verified)
-                    throw new Exception(verifyErr ?? "Signature/hash verification failed — refusing to install.");
+                    throw new Exception(verifyErr ?? "Signature or hash check failed; not installing.");
 
                 await File.WriteAllBytesAsync(destPath, bytes);
 
@@ -2961,7 +2964,7 @@ public partial class MainWindow : Window
                     }
                 }
                 if (downloadUrl is null || releaseTag is null)
-                    throw new Exception($"{libFile} not found in any GitHub release — upload it with the next release");
+                    throw new Exception($"Download for {libFile} isn't available yet.");
                 var bytes = await http.GetByteArrayAsync(downloadUrl);
 
                 // libfido2 is native code loaded into our process with access to the unlocked
@@ -2970,7 +2973,7 @@ public partial class MainWindow : Window
                 var verified = await Rede.Core.Services.UpdateService.VerifyReleaseAssetAsync(
                     releaseTag, libFile, bytes, s => verifyErr = s);
                 if (!verified)
-                    throw new Exception(verifyErr ?? "Signature/hash verification failed — refusing to install.");
+                    throw new Exception(verifyErr ?? "Signature or hash check failed; not installing.");
 
                 await File.WriteAllBytesAsync(destPath, bytes);
                 Rede.Core.Crypto.Fido2.LibFido2Authenticator.TryReload();

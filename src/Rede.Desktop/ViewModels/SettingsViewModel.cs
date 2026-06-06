@@ -370,7 +370,7 @@ public partial class SettingsViewModel : ViewModelBase
             {
                 GeneratedRecoveryCode = code;
                 HasRecoveryCode = true;
-                FidoStatus = "Write this code down now — it will not be shown again.";
+                FidoStatus = "Write this code down now. It will not be shown again.";
             }
             else FidoStatus = "Could not generate a recovery code.";
         }

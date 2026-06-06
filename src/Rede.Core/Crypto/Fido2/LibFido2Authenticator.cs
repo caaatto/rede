@@ -189,8 +189,11 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
             dev = OpenDevice(path);
             assert = fido_assert_new();
 
+            // Unified with the Windows backend (which signs SHA256(clientDataJSON)): the signed
+            // client-data hash is SHA256(serverChallenge). The server verifies over the same.
+            var cdh = System.Security.Cryptography.SHA256.HashData(clientDataHash);
             Check(fido_assert_set_rp(assert, rpId), "assert_set_rp");
-            Check(fido_assert_set_clientdata_hash(assert, clientDataHash, (nuint)clientDataHash.Length), "assert_set_clientdata_hash");
+            Check(fido_assert_set_clientdata_hash(assert, cdh, (nuint)cdh.Length), "assert_set_clientdata_hash");
             foreach (var cid in allowCredentialIds)
                 Check(fido_assert_allow_cred(assert, cid, (nuint)cid.Length), "assert_allow_cred");
 
@@ -303,7 +306,7 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
             Fido2ErrorKind.NoCredentials => "Security key holds none of the enrolled credentials.",
             Fido2ErrorKind.PinRequired => "This security key requires a PIN.",
             Fido2ErrorKind.PinInvalid => "Wrong PIN.",
-            Fido2ErrorKind.PinBlocked => "Too many wrong PIN attempts — the key is locked. Remove and reinsert it.",
+            Fido2ErrorKind.PinBlocked => "Too many wrong PIN attempts. The key is locked; remove and reinsert it.",
             Fido2ErrorKind.NoUserPresence => "Timed out waiting for you to touch the security key.",
             _ => $"Security key error during {op}: {detail} (0x{rc:x2}).",
         };
