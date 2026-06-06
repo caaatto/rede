@@ -85,7 +85,7 @@
             </Border>
 
             <!-- Content area -->
-            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,8,32,24">
+            <ScrollViewer Grid.Column="1" x:Name="ContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,8,32,24">
                 <Grid MaxWidth="560" HorizontalAlignment="Center"
                       RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
@@ -524,11 +524,21 @@
                                        Classes="secondary" TextWrapping="Wrap" FontSize="11" />
 
                             <!-- Install native support (when libfido2 is not loaded) -->
-                            <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding ShowFidoInstall}">
+                            <StackPanel Spacing="6" IsVisible="{Binding ShowFidoInstall}">
+                                <TextBlock Text="Security-key support isn't loaded. On Linux install the system library (e.g. sudo apt install libfido2-1), then reopen Settings. On Windows it's built in."
+                                           Classes="secondary" TextWrapping="Wrap" FontSize="11" />
                                 <Button Content="Install security-key support"
                                         Command="{Binding InstallFido2Command}"
+                                        IsEnabled="{Binding !IsFidoBusy}"
+                                        HorizontalAlignment="Left"
                                         Padding="16,6" />
                             </StackPanel>
+
+                            <!-- Status / progress — always visible so install failures aren't silent -->
+                            <TextBlock Text="{Binding FidoStatus}"
+                                       IsVisible="{Binding FidoStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       Foreground="{DynamicResource RedeAccentTealBrush}"
+                                       FontSize="12" TextWrapping="Wrap" />
 
                             <!-- Enrolled keys list -->
                             <ItemsControl ItemsSource="{Binding SecurityKeys}" IsVisible="{Binding HasSecurityKeys}">
@@ -572,7 +582,6 @@
                                         IsEnabled="{Binding HasSecurityKeys}"
                                         Classes="ghost"
                                         Padding="16,6" />
-                                <TextBlock Text="{Binding FidoStatus}" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" />
                             </StackPanel>
 
                             <!-- One-time recovery code display -->

@@ -16,6 +16,23 @@ public partial class SettingsView : UserControl
     {
         InitializeComponent();
         DataContextChanged += (_, _) => PopulateColorPalette();
+
+        // Wheel-scroll the settings page even when the pointer is over a child control.
+        // ComboBoxes/Sliders/etc. otherwise consume the wheel, so the page appears unscrollable
+        // unless you happen to hover empty space. A tunnelling handler (handledEventsToo) routes
+        // the wheel to the page scroll before children see it. Open ComboBox dropdowns live in a
+        // separate popup tree, so their lists still scroll normally.
+        if (ContentScroll is not null)
+        {
+            ContentScroll.AddHandler(PointerWheelChangedEvent, (_, e) =>
+            {
+                var max = System.Math.Max(0, ContentScroll.Extent.Height - ContentScroll.Viewport.Height);
+                if (max <= 0) return;
+                var y = System.Math.Clamp(ContentScroll.Offset.Y - e.Delta.Y * 60, 0, max);
+                ContentScroll.Offset = new Avalonia.Vector(ContentScroll.Offset.X, y);
+                e.Handled = true;
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        }
     }
 
     protected override void OnLoaded(RoutedEventArgs e)

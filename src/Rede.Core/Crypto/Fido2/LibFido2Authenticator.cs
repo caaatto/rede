@@ -45,8 +45,8 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
         NativeLibrary.SetDllImportResolver(typeof(LibFido2Authenticator).Assembly, (name, asm, searchPath) =>
         {
             if (name != Lib) return IntPtr.Zero;
-            if (NativeLibrary.TryLoad(name, asm, searchPath, out var handle))
-                return handle;
+            IntPtr handle;
+            // User-installed / bundled copy first.
             foreach (var path in new[]
                      {
                          Path.Combine(LibsDirectory, LibFileName),
@@ -56,6 +56,17 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
                 if (File.Exists(path) && NativeLibrary.TryLoad(path, out handle))
                     return handle;
             }
+            // System library. The default name resolves to the unversioned soname
+            // (libfido2.so / fido2.dll), which only ships with the -dev package on Linux;
+            // the runtime package installs versioned sonames, so try those explicitly.
+            string[] candidates = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? new[] { "fido2.dll", "fido2" }
+                : new[] { "libfido2.so", "libfido2.so.1", "libfido2.so.1.12.0" };
+            foreach (var n in candidates)
+                if (NativeLibrary.TryLoad(n, asm, searchPath, out handle))
+                    return handle;
+            if (NativeLibrary.TryLoad(name, asm, searchPath, out handle))
+                return handle;
             return IntPtr.Zero;
         });
 
