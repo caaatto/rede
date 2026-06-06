@@ -32,14 +32,6 @@ public partial class SettingsView : UserControl
                 ContentScroll.Offset = new Avalonia.Vector(ContentScroll.Offset.X, y);
                 e.Handled = true;
             }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-
-            // Temporary diagnostics: surface the live viewport/extent so we can see whether the
-            // ScrollViewer is actually height-constrained at runtime.
-            ContentScroll.LayoutUpdated += (_, _) =>
-            {
-                if (ScrollDebug is not null)
-                    ScrollDebug.Text = $"vp{ContentScroll.Viewport.Height:0} ext{ContentScroll.Extent.Height:0}";
-            };
         }
     }
 

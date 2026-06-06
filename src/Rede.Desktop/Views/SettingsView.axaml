@@ -47,10 +47,8 @@
                        Classes="title"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center" />
-            <!-- temporary scroll diagnostics -->
-            <TextBlock Grid.Column="2" x:Name="ScrollDebug" MinWidth="60"
-                       VerticalAlignment="Center" HorizontalAlignment="Right"
-                       Classes="secondary" FontSize="10" FontFamily="Courier New, monospace" />
+            <!-- spacer to balance Back button -->
+            <Border Grid.Column="2" Width="60" />
         </Grid>
 
         <!-- Sidebar + Content -->
@@ -87,8 +85,11 @@
             </Border>
 
             <!-- Content area -->
-            <ScrollViewer Grid.Column="1" x:Name="ContentScroll" VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Disabled" Padding="32,8,32,24">
-                <Grid MaxWidth="560" HorizontalAlignment="Center"
+            <!-- NOTE: the spacing around the content is a Margin on the inner Grid, NOT Padding on
+                 the ScrollViewer. ScrollViewer.Padding is subtracted from the scrollable extent in
+                 Avalonia, which clipped the bottom ~32px (the last controls were unreachable). -->
+            <ScrollViewer Grid.Column="1" x:Name="ContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid MaxWidth="560" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="32,8,32,24"
                       RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
                     <!-- =========================================================== -->
