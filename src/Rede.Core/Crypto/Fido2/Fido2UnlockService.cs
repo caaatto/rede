@@ -180,14 +180,20 @@ public sealed class Fido2UnlockService
 
         if (first)
         {
-            // Bind the profile to the new factor, THEN persist the sidecar — never leave a sidecar
-            // (which forces hardware-key mode) pointing at a profile still encrypted passphrase-only.
             SetSession(pms);
+            // Write the sidecar FIRST, then re-encrypt the profile with the new factor. If we did it
+            // the other way and crashed in between, the profile would be PMS-encrypted with NO sidecar
+            // to recover the PMS — an unrecoverable lockout. This order means a crash leaves the profile
+            // still passphrase-only + a sidecar whose PMS simply doesn't apply yet; the login self-heal
+            // (passphrase-only fallback) then recovers cleanly and drops the stale sidecar.
+            Fido2SidecarStore.Save(hashHex, sc);
             await _store.SaveProfileAsync(profile, passphrase);
             await _store.SaveChatHistoryAsync(profile, passphrase);
         }
-
-        Fido2SidecarStore.Save(hashHex, sc);
+        else
+        {
+            Fido2SidecarStore.Save(hashHex, sc);
+        }
         if (generated) CryptoService.ZeroOut(pms); // SetSession kept its own clone
         return cred; // caller may register the public key with the server (Phase B)
     }

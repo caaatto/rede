@@ -536,6 +536,7 @@ public partial class MainWindow : Window
             // LoginByHashAsync will do this again via AuthService but that's acceptable — scrypt
             // is cached after first derivation, so the second call is ~1ms.
             var probe = await _store.LoadProfileByHashAsync(hash, passBytes);
+            probe ??= await SelfHealStaleSidecarAsync(hash, passBytes);
             if (probe is null)
             {
                 System.Security.Cryptography.CryptographicOperations.ZeroMemory(passBytes);
@@ -722,6 +723,13 @@ public partial class MainWindow : Window
             await _conn!.ConnectAsync();
             await WaitForQueueIfNeeded();
             var ok = await _auth!.LoginAsync(userId, passBytes);
+            if (!ok && _store.HasActivePms)
+            {
+                // Stale/desynced security-key data — fall back to passphrase-only instead of locking out.
+                var healed = await SelfHealStaleSidecarAsync(
+                    Rede.Core.Crypto.Fido2.Fido2SidecarStore.HashForUserId(userId.Trim()), passBytes);
+                if (healed is not null) ok = await _auth.LoginAsync(userId, passBytes);
+            }
             if (!ok)
             {
                 Dispatcher.UIThread.Post(() =>
@@ -842,6 +850,27 @@ public partial class MainWindow : Window
         _loginVm.IsLoading = true;
         // Re-run the original login; the gate now passes because _store has the PMS.
         pending?.Continue();
+    }
+
+    /// <summary>
+    /// Recover from a stale/desynced FIDO2 sidecar: if a key/recovery unlock produced a secret
+    /// that does NOT decrypt the profile, retry passphrase-only. On success the profile is actually
+    /// passphrase-only, so the stale sidecar is dropped — recovering instead of locking the user out.
+    /// Returns the decrypted profile, or null if passphrase-only also fails.
+    /// </summary>
+    private async Task<Rede.Core.Storage.Profile?> SelfHealStaleSidecarAsync(string hash, byte[] passBytes)
+    {
+        if (!_store.HasActivePms) return null;
+        _store.SetActivePms(null);
+        var profile = await _store.LoadProfileByHashAsync(hash, passBytes);
+        if (profile is not null)
+        {
+            try { Rede.Core.Crypto.Fido2.Fido2SidecarStore.Delete(hash); } catch { }
+            _fido.ClearSession();
+            Dispatcher.UIThread.Post(() => _mainVm.AddSystemMessage(
+                "Your security-key data was out of sync and has been reset. Re-enroll your key in Settings."));
+        }
+        return profile;
     }
 
     private async void RegisterAsync(string displayName, byte[] passBytes, string serverUrl, string transport, string inviteCode)
