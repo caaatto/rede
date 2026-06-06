@@ -165,8 +165,9 @@ public sealed class WindowsWebAuthnAuthenticator : IFido2Authenticator
         {
             pSaltBytes = Marshal.AllocHGlobal(hmacSalt.Length);
             Marshal.Copy(hmacSalt, 0, pSaltBytes, hmacSalt.Length);
-            // WEBAUTHN_HMAC_SECRET_SALT { cbFirst; pbFirst; cbSecond; pbSecond; }
-            pGlobalSalt = Marshal.AllocHGlobal(IntPtr.Size * 2 + 8);
+            // WEBAUTHN_HMAC_SECRET_SALT { DWORD cbFirst; PBYTE pbFirst; DWORD cbSecond; PBYTE pbSecond; }
+            // x64 layout: cbFirst@0, pbFirst@8, cbSecond@16, pbSecond@24 -> 32 bytes total.
+            pGlobalSalt = Marshal.AllocHGlobal(16 + IntPtr.Size * 2);
             Marshal.WriteInt32(pGlobalSalt, 0, hmacSalt.Length);
             Marshal.WriteIntPtr(pGlobalSalt, 8, pSaltBytes);
             Marshal.WriteInt32(pGlobalSalt, 8 + IntPtr.Size, 0);
