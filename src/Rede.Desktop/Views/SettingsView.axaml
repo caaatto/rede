@@ -514,6 +514,79 @@
                                            FontSize="12" />
                             </StackPanel>
                         </StackPanel>
+
+                        <Separator />
+
+                        <!-- Security Keys (FIDO2) -->
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Security Keys (FIDO2)" Classes="header" />
+                            <TextBlock Text="Require a hardware security key (plus your passphrase) to unlock this profile. Enroll a backup key and generate a recovery code so you are never locked out."
+                                       Classes="secondary" TextWrapping="Wrap" FontSize="11" />
+
+                            <!-- Install native support (when libfido2 is not loaded) -->
+                            <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding ShowFidoInstall}">
+                                <Button Content="Install security-key support"
+                                        Command="{Binding InstallFido2Command}"
+                                        Padding="16,6" />
+                            </StackPanel>
+
+                            <!-- Enrolled keys list -->
+                            <ItemsControl ItemsSource="{Binding SecurityKeys}" IsVisible="{Binding HasSecurityKeys}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource RedeBackgroundBrush}"
+                                                CornerRadius="8" Padding="12,8" Margin="0,0,0,6">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <StackPanel Grid.Column="0" Spacing="2">
+                                                    <TextBlock Text="{Binding Name}" />
+                                                    <TextBlock Text="{Binding Added}" Classes="secondary" FontSize="11" />
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Classes="ghost" Content="Remove"
+                                                        Padding="12,4" VerticalAlignment="Center"
+                                                        Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).RemoveSecurityKeyCommand}"
+                                                        CommandParameter="{Binding CredentialId}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Enroll a new key -->
+                            <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto"
+                                  IsVisible="{Binding FidoBackendAvailable}">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Key name" Classes="secondary" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="1" x:Name="FidoKeyNameBox"
+                                         Watermark="e.g. Thetis Pro" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Key PIN (if set)" Classes="secondary" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="FidoPinBox"
+                                         PasswordChar="•" Watermark="Security-key PIN" Margin="0,8,0,0" />
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding FidoBackendAvailable}">
+                                <Button Content="Enroll security key"
+                                        Click="EnrollSecurityKey_Click"
+                                        IsEnabled="{Binding !IsFidoBusy}"
+                                        Padding="16,6" />
+                                <Button Content="Generate recovery code"
+                                        Click="GenerateRecovery_Click"
+                                        IsEnabled="{Binding HasSecurityKeys}"
+                                        Classes="ghost"
+                                        Padding="16,6" />
+                                <TextBlock Text="{Binding FidoStatus}" VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <!-- One-time recovery code display -->
+                            <Border Background="{DynamicResource RedeBackgroundBrush}" CornerRadius="8" Padding="16,12"
+                                    IsVisible="{Binding GeneratedRecoveryCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="Recovery code (shown once)" Classes="secondary" FontSize="11" />
+                                    <SelectableTextBlock Text="{Binding GeneratedRecoveryCode}"
+                                                         FontFamily="Courier New, monospace" FontSize="15"
+                                                         Foreground="{DynamicResource RedeAccentTealBrush}"
+                                                         TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- =========================================================== -->

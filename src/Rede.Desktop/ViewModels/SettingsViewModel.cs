@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
@@ -300,6 +301,104 @@ public partial class SettingsViewModel : ViewModelBase
         {
             IsChangingPassphrase = false;
         }
+    }
+
+    // --- Security keys (FIDO2) ---
+    public sealed class Fido2KeyItem
+    {
+        public string Name { get; init; } = "";
+        public string CredentialId { get; init; } = "";
+        public string Added { get; init; } = "";
+    }
+
+    [ObservableProperty] private ObservableCollection<Fido2KeyItem> _securityKeys = new();
+    [ObservableProperty] private bool _fidoBackendAvailable;
+    [ObservableProperty] private bool _isFidoBusy;
+    [ObservableProperty] private string _fidoStatus = "";
+    [ObservableProperty] private bool _hasRecoveryCode;
+    [ObservableProperty] private string _generatedRecoveryCode = ""; // shown ONCE right after generation
+
+    public bool ShowFidoInstall => !FidoBackendAvailable && !IsFidoBusy;
+    public bool HasSecurityKeys => SecurityKeys.Count > 0;
+
+    partial void OnFidoBackendAvailableChanged(bool value) => OnPropertyChanged(nameof(ShowFidoInstall));
+    partial void OnIsFidoBusyChanged(bool value) => OnPropertyChanged(nameof(ShowFidoInstall));
+
+    /// <summary>Download + verify the native libfido2 (handled by MainWindow, mirrors RNNoise install).</summary>
+    public Func<Task>? OnInstallFido2;
+    /// <summary>(keyName, pin) → success. MainWindow performs make-credential + PMS wrap.</summary>
+    public event Func<string, string?, Task<bool>>? OnEnrollKeyRequested;
+    /// <summary>Returns the one-time recovery code (grouped) or null on failure.</summary>
+    public event Func<Task<string?>>? OnGenerateRecoveryRequested;
+    /// <summary>credentialId (base64) of the key to remove.</summary>
+    public event Func<string, Task>? OnRemoveKeyRequested;
+
+    [RelayCommand]
+    private async Task InstallFido2()
+    {
+        if (OnInstallFido2 is not null) await OnInstallFido2();
+    }
+
+    public async Task EnrollKeyAsync(string keyName, string? pin)
+    {
+        if (IsFidoBusy || OnEnrollKeyRequested is null) return;
+        IsFidoBusy = true;
+        FidoStatus = "Touch your security key…";
+        GeneratedRecoveryCode = "";
+        try
+        {
+            var ok = await OnEnrollKeyRequested.Invoke(keyName, pin);
+            FidoStatus = ok
+                ? (HasRecoveryCode
+                    ? "Security key enrolled."
+                    : "Security key enrolled. Generate a recovery code now so you can't get locked out.")
+                : "Enrollment failed.";
+        }
+        catch (Exception ex) { FidoStatus = ex.Message; }
+        finally { IsFidoBusy = false; }
+    }
+
+    public async Task GenerateRecoveryAsync()
+    {
+        if (IsFidoBusy || OnGenerateRecoveryRequested is null) return;
+        IsFidoBusy = true;
+        FidoStatus = "";
+        try
+        {
+            var code = await OnGenerateRecoveryRequested.Invoke();
+            if (code is not null)
+            {
+                GeneratedRecoveryCode = code;
+                HasRecoveryCode = true;
+                FidoStatus = "Write this code down now — it will not be shown again.";
+            }
+            else FidoStatus = "Could not generate a recovery code.";
+        }
+        catch (Exception ex) { FidoStatus = ex.Message; }
+        finally { IsFidoBusy = false; }
+    }
+
+    [RelayCommand]
+    private async Task RemoveSecurityKey(string credentialId)
+    {
+        if (IsFidoBusy || OnRemoveKeyRequested is null || string.IsNullOrEmpty(credentialId)) return;
+        IsFidoBusy = true;
+        try
+        {
+            await OnRemoveKeyRequested.Invoke(credentialId);
+            FidoStatus = "Security key removed.";
+        }
+        catch (Exception ex) { FidoStatus = ex.Message; }
+        finally { IsFidoBusy = false; }
+    }
+
+    /// <summary>Repopulate the enrolled-key list + recovery flag (called by MainWindow on open / after ops).</summary>
+    public void SetSecurityKeys(IEnumerable<Fido2KeyItem> keys, bool hasRecovery, bool backendAvailable)
+    {
+        SecurityKeys = new ObservableCollection<Fido2KeyItem>(keys);
+        HasRecoveryCode = hasRecovery;
+        FidoBackendAvailable = backendAvailable;
+        OnPropertyChanged(nameof(HasSecurityKeys));
     }
 
     // Voice call transport (read-only, derived from connection)

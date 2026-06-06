@@ -32,6 +32,14 @@ public class ProfileStore
     private byte[]? _cachedSalt;        // salt used to derive the cached key
     private byte[]? _cachedPassphrase;  // owned copy — to detect passphrase changes (byte[] so we can zero on clear)
 
+    // FIDO2 second factor: Profile Master Secret for the current session. Null = no
+    // hardware key enrolled (classical passphrase-only behavior, fully backward-compatible).
+    // Set once at login (from a FIDO2 assertion or recovery code) via SetActivePms, mixed
+    // into every key derivation, and survives passphrase changes — only ClearActivePms
+    // (logout / app exit) zeros it. It is intentionally NOT cleared by ClearCachedKey,
+    // which also runs on mid-session flushes (e.g. ContactService.RemoveContact).
+    private byte[]? _activePms;
+
     private CancellationTokenSource? _debounceCts;
     private volatile bool _savePending;
     private CancellationTokenSource? _historyDebounceCts;
@@ -162,7 +170,7 @@ public class ProfileStore
         var envelope = JsonSerializer.Deserialize<ProfileEncryption.EncryptedEnvelope>(json, JsonOpts);
         if (envelope is null) return null;
 
-        var profile = ProfileEncryption.Decrypt<Profile>(envelope, passphrase);
+        var profile = ProfileEncryption.Decrypt<Profile>(envelope, passphrase, _activePms);
         if (profile is not null)
         {
             CacheKey(passphrase);
@@ -252,10 +260,35 @@ public class ProfileStore
         if (_cachedPassphrase is not null) CryptoService.ZeroOut(_cachedPassphrase);
 
         var salt = SodiumCore.GetRandomBytes(16);
-        _cachedKey64 = ProfileEncryption.DeriveKey(passphrase, salt, ProfileEncryption.ScryptNCurrent, 64);
+        _cachedKey64 = ProfileEncryption.DeriveKey(passphrase, salt, ProfileEncryption.ScryptNCurrent, 64, _activePms);
         _cachedSalt = salt;
         // Own a copy so caller can freely zero their buffer
         _cachedPassphrase = (byte[])passphrase.Clone();
+    }
+
+    /// <summary>
+    /// Set the FIDO2-derived Profile Master Secret for this session. Pass null to clear it
+    /// (e.g. when unlocking a profile that turned out to have no hardware key). Owns a copy,
+    /// so the caller may zero its buffer afterwards. Invalidates the cached key so the next
+    /// load/save re-derives with the new factor.
+    /// </summary>
+    public void SetActivePms(byte[]? pms)
+    {
+        if (_activePms is not null) { CryptoService.ZeroOut(_activePms); _activePms = null; }
+        if (pms is not null && pms.Length > 0) _activePms = (byte[])pms.Clone();
+        // Force re-derivation on next CacheKey call.
+        if (_cachedKey64 is not null) { CryptoService.ZeroOut(_cachedKey64); _cachedKey64 = null; }
+        if (_cachedSalt is not null) { CryptoService.ZeroOut(_cachedSalt); _cachedSalt = null; }
+        if (_cachedPassphrase is not null) { CryptoService.ZeroOut(_cachedPassphrase); _cachedPassphrase = null; }
+    }
+
+    /// <summary>True if a FIDO2 Profile Master Secret is active for this session.</summary>
+    public bool HasActivePms => _activePms is not null;
+
+    /// <summary>Zero and discard the session PMS. Call on logout / app exit only.</summary>
+    public void ClearActivePms()
+    {
+        if (_activePms is not null) { CryptoService.ZeroOut(_activePms); _activePms = null; }
     }
 
     public async Task SaveProfileAsync(Profile profile, byte[] passphrase)
@@ -281,7 +314,7 @@ public class ProfileStore
                 {
                     var envelope = _cachedKey64 is not null
                         ? ProfileEncryption.EncryptWithDerivedKey(profile, _cachedKey64, _cachedSalt)
-                        : ProfileEncryption.Encrypt(profile, passphrase);
+                        : ProfileEncryption.Encrypt(profile, passphrase, _activePms);
                     bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOpts);
                 }
                 finally { profile.ChatHistory = chatHistory; }
@@ -314,7 +347,7 @@ public class ProfileStore
             {
                 var envelope = _cachedKey64 is not null
                     ? ProfileEncryption.EncryptWithDerivedKey(profile.ChatHistory, _cachedKey64, _cachedSalt)
-                    : ProfileEncryption.Encrypt(profile.ChatHistory, passphrase);
+                    : ProfileEncryption.Encrypt(profile.ChatHistory, passphrase, _activePms);
                 bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOpts);
             }
             await AtomicWriteAsync(p, bytes);
@@ -339,7 +372,7 @@ public class ProfileStore
             var json = await File.ReadAllTextAsync(p);
             var envelope = JsonSerializer.Deserialize<ProfileEncryption.EncryptedEnvelope>(json, JsonOpts);
             if (envelope is null) return new();
-            var history = ProfileEncryption.Decrypt<Dictionary<string, List<ChatMessage>>>(envelope, passphrase);
+            var history = ProfileEncryption.Decrypt<Dictionary<string, List<ChatMessage>>>(envelope, passphrase, _activePms);
             return history ?? new();
         }
         catch { return new(); }

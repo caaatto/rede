@@ -141,4 +141,22 @@ public partial class SettingsView : UserControl
             // newPass is zeroed by the handler after mlock replacement
         }
     }
+
+    private async void EnrollSecurityKey_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SettingsViewModel vm) return;
+        var name = this.FindControl<TextBox>("FidoKeyNameBox")?.Text?.Trim();
+        var pin = this.FindControl<TextBox>("FidoPinBox")?.Text;
+        await vm.EnrollKeyAsync(string.IsNullOrWhiteSpace(name) ? "Security key" : name,
+            string.IsNullOrEmpty(pin) ? null : pin);
+        // Clear the PIN box after use.
+        var pinBox = this.FindControl<TextBox>("FidoPinBox");
+        if (pinBox is not null) pinBox.Text = "";
+    }
+
+    private async void GenerateRecovery_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is SettingsViewModel vm)
+            await vm.GenerateRecoveryAsync();
+    }
 }

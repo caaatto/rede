@@ -28,12 +28,22 @@ public static class ProfileEncryption
         ulong N, uint r, uint p,
         byte[] buf, nuint bufLen);
 
+    /// <summary>Domain string for the FIDO2 second-factor key mix (see <paramref name="pms"/> in DeriveKey).</summary>
+    private const string PmsMixInfo = "rede-profile-fido2-v1";
+
     /// <summary>
     /// Derive a 32-byte key using scrypt. Mirrors: deriveKey(passphrase, salt, scryptN)
     /// Uses N/r=8/p=1 parameters matching the JS client's crypto.scryptSync call.
     /// Caller owns <paramref name="passphrase"/> (bytes are not zeroed here).
+    ///
+    /// When <paramref name="pms"/> (Profile Master Secret, from an enrolled FIDO2 key or
+    /// the recovery code) is supplied, the scrypt output is additionally mixed with it via
+    /// HKDF — so the passphrase alone can no longer decrypt the profile (true second factor
+    /// at rest). When <paramref name="pms"/> is null the result is byte-for-byte the classical
+    /// scrypt key, keeping non-FIDO profiles fully backward-compatible.
+    /// Caller also owns <paramref name="pms"/> (bytes are not zeroed here).
     /// </summary>
-    public static byte[] DeriveKey(byte[] passphrase, byte[] salt, int scryptN = 0, int outputLen = 32)
+    public static byte[] DeriveKey(byte[] passphrase, byte[] salt, int scryptN = 0, int outputLen = 32, byte[]? pms = null)
     {
         int N = scryptN > 0 ? scryptN : ScryptNCurrent;
         var output = new byte[outputLen];
@@ -47,16 +57,28 @@ public static class ProfileEncryption
         if (result != 0)
             throw new CryptographicException("scrypt key derivation failed");
 
-        return output;
+        if (pms is null || pms.Length == 0)
+            return output;
+
+        // Mix the hardware/recovery secret into the scrypt output. ikm = scryptOut || pms,
+        // salt = the per-profile scrypt salt, so the mixed key is bound to both factors.
+        var ikm = new byte[output.Length + pms.Length];
+        Buffer.BlockCopy(output, 0, ikm, 0, output.Length);
+        Buffer.BlockCopy(pms, 0, ikm, output.Length, pms.Length);
+        var mixed = Hkdf.DeriveKey(ikm, salt, PmsMixInfo, outputLen);
+        CryptoService.ZeroOut(ikm);
+        CryptoService.ZeroOut(output);
+        return mixed;
     }
 
     /// <summary>
     /// Encrypt profile data to an envelope. Mirrors: encryptProfile(data, passphrase)
+    /// When <paramref name="pms"/> is supplied it is mixed into the key (FIDO2 second factor).
     /// </summary>
-    public static EncryptedEnvelope Encrypt(object data, byte[] passphrase)
+    public static EncryptedEnvelope Encrypt(object data, byte[] passphrase, byte[]? pms = null)
     {
         var salt = SodiumCore.GetRandomBytes(16);
-        var combined = DeriveKey(passphrase, salt, ScryptNCurrent, 64);
+        var combined = DeriveKey(passphrase, salt, ScryptNCurrent, 64, pms);
         var envelope = EncryptWithDerivedKey(data, combined, salt);
         CryptoService.ZeroOut(combined);
         return envelope;
@@ -103,8 +125,10 @@ public static class ProfileEncryption
 
     /// <summary>
     /// Decrypt profile from envelope. Mirrors: decryptProfile(envelope, passphrase)
+    /// When <paramref name="pms"/> is supplied it is mixed into the key (FIDO2 second factor);
+    /// it must match the secret used at encryption time or decryption returns null.
     /// </summary>
-    public static T? Decrypt<T>(EncryptedEnvelope envelope, byte[] passphrase) where T : class
+    public static T? Decrypt<T>(EncryptedEnvelope envelope, byte[] passphrase, byte[]? pms = null) where T : class
     {
         try
         {
@@ -112,8 +136,10 @@ public static class ProfileEncryption
             var encrypted = Convert.FromBase64String(envelope.Data);
             var scryptN = envelope.ScryptN > 0 ? envelope.ScryptN : ScryptNLegacy;
 
-            // L7: Try single 64-byte derivation first (new format), fall back to separate salt (legacy)
-            var combined = DeriveKey(passphrase, salt, scryptN, 64);
+            // L7: Try single 64-byte derivation first (new format), fall back to separate salt (legacy).
+            // The legacy HMAC/key fallback paths below never use the PMS — they only apply to
+            // pre-FIDO profiles, which by definition were never encrypted with a second factor.
+            var combined = DeriveKey(passphrase, salt, scryptN, 64, pms);
             var key = new byte[32];
             var hmacKey = new byte[32];
             Buffer.BlockCopy(combined, 0, key, 0, 32);

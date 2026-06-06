@@ -32,7 +32,13 @@
                 <Separator Margin="0,2" />
 
                 <!-- === QUICK LOGIN MODE (profile hint exists) === -->
-                <StackPanel Spacing="10" IsVisible="{Binding HasQuickLogin}" Width="320">
+                <StackPanel Spacing="10" Width="320">
+                    <StackPanel.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="HasQuickLogin" />
+                            <Binding Path="!IsAwaitingSecurityKey" />
+                        </MultiBinding>
+                    </StackPanel.IsVisible>
                     <TextBlock Text="Welcome back"
                                Classes="secondary"
                                HorizontalAlignment="Center" />
@@ -69,8 +75,58 @@
                             IsEnabled="{Binding !IsLoading}" />
                 </StackPanel>
 
+                <!-- === SECURITY KEY UNLOCK GATE === -->
+                <StackPanel Spacing="10" Width="320" IsVisible="{Binding IsAwaitingSecurityKey}">
+                    <TextBlock Text="Security key required"
+                               Classes="secondary" HorizontalAlignment="Center"
+                               FontWeight="{StaticResource RedeWeightMedium}" />
+                    <TextBlock Text="{Binding SecurityKeyStatus}"
+                               Classes="secondary" TextWrapping="Wrap" HorizontalAlignment="Center" />
+
+                    <!-- PIN (only if the key has one set) -->
+                    <StackPanel Spacing="4" IsVisible="{Binding NeedsPin}">
+                        <TextBlock Text="Security-key PIN" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightMedium}" />
+                        <TextBox Text="{Binding KeyPin}" PasswordChar="•" Watermark="key PIN" />
+                    </StackPanel>
+
+                    <Button Content="Unlock with security key"
+                            Command="{Binding RetrySecurityKeyCommand}"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            IsVisible="{Binding !ShowRecoveryEntry}" />
+
+                    <Button Content="Use recovery code instead" Classes="ghost"
+                            Command="{Binding ToggleRecoveryEntryCommand}"
+                            HorizontalAlignment="Center" FontSize="{StaticResource RedeSmallSize}"
+                            Padding="8,4" IsVisible="{Binding !ShowRecoveryEntry}" />
+
+                    <StackPanel Spacing="6" IsVisible="{Binding ShowRecoveryEntry}">
+                        <TextBlock Text="Recovery code" Classes="secondary"
+                                   FontWeight="{StaticResource RedeWeightMedium}" />
+                        <TextBox Text="{Binding RecoveryCode}" Watermark="XXXX-XXXX-…" />
+                        <Button Content="Unlock with recovery code"
+                                Command="{Binding SubmitRecoveryCommand}"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                        <Button Content="Use security key instead" Classes="ghost"
+                                Command="{Binding ToggleRecoveryEntryCommand}"
+                                HorizontalAlignment="Center" FontSize="{StaticResource RedeSmallSize}"
+                                Padding="8,4" />
+                    </StackPanel>
+
+                    <Button Content="Cancel" Classes="ghost"
+                            Command="{Binding CancelFidoCommand}"
+                            HorizontalAlignment="Center" FontSize="{StaticResource RedeSmallSize}"
+                            Padding="8,4" />
+                </StackPanel>
+
                 <!-- Mode tabs (hidden in quick-login mode) -->
-                <Grid ColumnDefinitions="*,*" IsVisible="{Binding !HasQuickLogin}">
+                <Grid ColumnDefinitions="*,*">
+                    <Grid.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="!HasQuickLogin" />
+                            <Binding Path="!IsAwaitingSecurityKey" />
+                        </MultiBinding>
+                    </Grid.IsVisible>
                     <Border Grid.Column="0"
                             BorderThickness="0,0,0,2"
                             Padding="0,0,0,8"
@@ -103,6 +159,7 @@
                         <MultiBinding Converter="{x:Static BoolConverters.And}">
                             <Binding Path="!IsRegisterMode" />
                             <Binding Path="!HasQuickLogin" />
+                            <Binding Path="!IsAwaitingSecurityKey" />
                         </MultiBinding>
                     </StackPanel.IsVisible>
 
@@ -159,6 +216,7 @@
                         <MultiBinding Converter="{x:Static BoolConverters.And}">
                             <Binding Path="IsRegisterMode" />
                             <Binding Path="!HasQuickLogin" />
+                            <Binding Path="!IsAwaitingSecurityKey" />
                         </MultiBinding>
                     </Grid.IsVisible>
 
@@ -229,6 +287,7 @@
                         <MultiBinding Converter="{x:Static BoolConverters.And}">
                             <Binding Path="IsRegisterMode" />
                             <Binding Path="!HasQuickLogin" />
+                            <Binding Path="!IsAwaitingSecurityKey" />
                         </MultiBinding>
                     </Button.IsVisible>
                 </Button>

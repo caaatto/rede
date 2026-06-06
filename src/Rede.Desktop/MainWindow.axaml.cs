@@ -21,6 +21,11 @@ public partial class MainWindow : Window
     private readonly LoginViewModel _loginVm = new();
     private readonly MainViewModel _mainVm = new();
     private readonly ProfileStore _store = new();
+    // FIDO2 hardware-key unlock. The authenticator backend (libfido2) is optional and
+    // may be unavailable until the native lib is installed from Settings; the unlock
+    // service owns the session Profile Master Secret and is cleared on logout/close.
+    private readonly Rede.Core.Crypto.Fido2.LibFido2Authenticator _fidoAuth = new();
+    private readonly Rede.Core.Crypto.Fido2.Fido2UnlockService _fido;
 
     private RedeConnection? _conn;
     private AuthService? _auth;
@@ -58,6 +63,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _fido = new Rede.Core.Crypto.Fido2.Fido2UnlockService(_fidoAuth, _store);
         InitializeComponent();
         AdjustStartupSize();
         Loaded += (_, _) =>
@@ -228,6 +234,8 @@ public partial class MainWindow : Window
             System.Security.Cryptography.CryptographicOperations.ZeroMemory(_auth.Passphrase);
             _passphraseLock?.Dispose();
             _passphraseLock = null;
+            _fido.ClearSession();
+            _lastFidoPin = null;
         }
         catch { }
         _conn?.Dispose();
@@ -308,6 +316,22 @@ public partial class MainWindow : Window
         _loginVm.OnQuickLoginRequested += OnQuickLogin;
         _loginVm.OnRegisterRequested += OnRegister;
         _loginVm.OnUpdateRequested += OnUpdateRequested;
+
+        // FIDO2 unlock gate handlers
+        _loginVm.OnSecurityKeyUnlockRequested -= OnSecurityKeyUnlock;
+        _loginVm.OnRecoveryUnlockRequested -= OnRecoveryUnlock;
+        _loginVm.OnFidoCancelRequested -= OnFidoCancel;
+        _loginVm.OnSecurityKeyUnlockRequested += OnSecurityKeyUnlock;
+        _loginVm.OnRecoveryUnlockRequested += OnRecoveryUnlock;
+        _loginVm.OnFidoCancelRequested += OnFidoCancel;
+        // Reset any stale gate state from a previous attempt.
+        _pendingFido = null;
+        _loginVm.IsAwaitingSecurityKey = false;
+        _loginVm.ShowRecoveryEntry = false;
+        _loginVm.NeedsPin = false;
+        _loginVm.KeyPin = "";
+        _loginVm.RecoveryCode = "";
+        _loginVm.SecurityKeyStatus = "";
 
         // Enable quick-login mode if a profile hint exists from a previous session
         var hint = _store.ReadLastProfileHint();
@@ -484,6 +508,12 @@ public partial class MainWindow : Window
     {
         try
         {
+            // Security-key gate: a profile with an enrolled FIDO2 key cannot be decrypted by
+            // passphrase alone. Obtain the Profile Master Secret (key tap or recovery code)
+            // first; the continuation re-enters this method once _store has the PMS.
+            if (TryBeginFidoGate(hash, () => QuickLoginAsync(hash, passBytes, serverUrl, transport)))
+                return;
+
             _loginVm.IsLoading = true;
             _loginVm.ErrorMessage = "";
             _lastServerUrl = serverUrl;
@@ -660,6 +690,11 @@ public partial class MainWindow : Window
     {
         try
         {
+            // Security-key gate (see QuickLoginAsync). hash = sha256(userId).
+            var fidoHash = Rede.Core.Crypto.Fido2.Fido2SidecarStore.HashForUserId(userId.Trim());
+            if (TryBeginFidoGate(fidoHash, () => LoginAsync(userId, passBytes, serverUrl, transport)))
+                return;
+
             _loginVm.IsLoading = true;
             _loginVm.ErrorMessage = "";
             _lastServerUrl = serverUrl;
@@ -695,6 +730,111 @@ public partial class MainWindow : Window
             Dispatcher.UIThread.Post(() =>
                 ShowBootFail(SanitizeErrorMessage(ex)));
         }
+    }
+
+    // --- FIDO2 hardware-key unlock gate ---
+
+    private sealed record PendingFidoLogin(string Hash, Action Continue);
+    private PendingFidoLogin? _pendingFido;
+    // Transient: the key PIN entered at unlock/enroll, reused for the server-2FA touch within
+    // this run so the user isn't prompted for the PIN twice. Cleared on logout/close.
+    private string? _lastFidoPin;
+
+    /// <summary>
+    /// If the profile has an enrolled security key and the session PMS isn't available yet,
+    /// reveal the unlock gate and stash a continuation. Returns true (caller must return) when
+    /// the gate took over; false to proceed with the normal passphrase-only flow.
+    /// </summary>
+    private bool TryBeginFidoGate(string hash, Action continueLogin)
+    {
+        if (!Rede.Core.Crypto.Fido2.Fido2SidecarStore.HasFidoEnrolled(hash) || _store.HasActivePms)
+            return false;
+
+        _pendingFido = new PendingFidoLogin(hash, continueLogin);
+        Dispatcher.UIThread.Post(() =>
+        {
+            _loginVm.IsLoading = false;
+            _loginVm.ShowRecoveryEntry = false;
+            _loginVm.NeedsPin = false;
+            _loginVm.IsAwaitingSecurityKey = true;
+            _loginVm.SecurityKeyStatus = _fido.BackendAvailable
+                ? "Touch your security key to unlock…"
+                : "Security-key support isn't installed on this device. Use your recovery code.";
+        });
+        // Auto-attempt the assertion so the key starts blinking for a touch immediately.
+        if (_fido.BackendAvailable)
+            BeginKeyUnlock(null);
+        return true;
+    }
+
+    private void OnSecurityKeyUnlock(string? pin) => BeginKeyUnlock(pin);
+    private void OnRecoveryUnlock(string code) => BeginRecoveryUnlock(code);
+    private void OnFidoCancel() => _pendingFido = null;
+
+    private void BeginKeyUnlock(string? pin)
+    {
+        var pending = _pendingFido;
+        if (pending is null) return;
+        _lastFidoPin = pin; // reuse for the server-2FA assertion later this run
+        Dispatcher.UIThread.Post(() => _loginVm.SecurityKeyStatus = "Touch your security key…");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var pms = _fido.TryUnlockWithKey(pending.Hash, pin);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (pms is null)
+                        _loginVm.SecurityKeyStatus = "That key isn't enrolled for this profile.";
+                    else
+                        CompleteFidoUnlock();
+                });
+            }
+            catch (Rede.Core.Crypto.Fido2.Fido2Exception ex)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (ex.Kind is Rede.Core.Crypto.Fido2.Fido2ErrorKind.PinRequired
+                        or Rede.Core.Crypto.Fido2.Fido2ErrorKind.PinInvalid)
+                        _loginVm.NeedsPin = true;
+                    _loginVm.SecurityKeyStatus = ex.Message;
+                });
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.UIThread.Post(() => _loginVm.SecurityKeyStatus = SanitizeErrorMessage(ex));
+            }
+        });
+    }
+
+    private void BeginRecoveryUnlock(string code)
+    {
+        var pending = _pendingFido;
+        if (pending is null) return;
+        Dispatcher.UIThread.Post(() => _loginVm.SecurityKeyStatus = "Checking recovery code…");
+        _ = Task.Run(() =>
+        {
+            byte[]? pms = null;
+            try { pms = _fido.UnlockWithRecovery(pending.Hash, code); }
+            catch { /* treated as wrong code below */ }
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (pms is null) _loginVm.SecurityKeyStatus = "Wrong recovery code.";
+                else CompleteFidoUnlock();
+            });
+        });
+    }
+
+    private void CompleteFidoUnlock()
+    {
+        var pending = _pendingFido;
+        _pendingFido = null;
+        _loginVm.IsAwaitingSecurityKey = false;
+        _loginVm.KeyPin = "";
+        _loginVm.RecoveryCode = "";
+        _loginVm.IsLoading = true;
+        // Re-run the original login; the gate now passes because _store has the PMS.
+        pending?.Continue();
     }
 
     private async void RegisterAsync(string displayName, byte[] passBytes, string serverUrl, string transport, string inviteCode)
@@ -833,6 +973,41 @@ public partial class MainWindow : Window
             _mainVm.AddSystemMessage($"[WARNING] {err}");
         });
         _store.OnSaveError += _saveErrorHandler;
+
+        // FIDO2 server-side 2FA: after Ed25519 auth, the server asks for a hardware assertion
+        // before sending AUTH_OK. Sign the server challenge with the enrolled key and reply.
+        _conn.On(Rede.Core.Protocol.Msg.Fido2VerifyChallenge, msg =>
+        {
+            var challengeB64 = msg["challenge"]?.GetValue<string>();
+            if (challengeB64 is null || _auth?.Profile is null) return;
+            var hash = Rede.Core.Crypto.Fido2.Fido2SidecarStore.HashForUserId(_auth.Profile.UserId);
+            var sc = Rede.Core.Crypto.Fido2.Fido2SidecarStore.Load(hash);
+            if (sc is null || sc.Keys.Count == 0) return;
+            byte[] challenge;
+            try { challenge = Convert.FromBase64String(challengeB64); }
+            catch { return; }
+            var allow = sc.Keys.Select(k => Convert.FromBase64String(k.CredentialId)).ToList();
+            var rpId = sc.RpId;
+            var pin = _lastFidoPin;
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Dispatcher.UIThread.Post(() => _mainVm.ConnectionStatus = "Touch your security key…");
+                    var a = _fidoAuth.GetServerAssertion(rpId, allow, challenge, pin);
+                    _conn?.Send(Rede.Core.Protocol.Msg.Fido2VerifyResponse, new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["credentialId"] = Convert.ToBase64String(a.CredentialId),
+                        ["authData"] = Convert.ToBase64String(a.AuthData),
+                        ["signature"] = Convert.ToBase64String(a.Signature),
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Dispatcher.UIThread.Post(() => ShowBootFail("Security key verification failed: " + SanitizeErrorMessage(ex)));
+                }
+            });
+        });
 
         // Status / Presence handler — server broadcasts to all, client filters locally
         _conn.On(Rede.Core.Protocol.Msg.StatusChange, msg =>
@@ -2736,6 +2911,130 @@ public partial class MainWindow : Window
             }
         };
 
+        // --- Security keys (FIDO2) ---
+        void RefreshFidoKeys()
+        {
+            var hash = Rede.Core.Crypto.Fido2.Fido2SidecarStore.HashForUserId(p.UserId);
+            var keys = _fido.ListKeys(hash).Select(k => new SettingsViewModel.Fido2KeyItem
+            {
+                Name = k.Name,
+                CredentialId = k.CredentialId,
+                Added = "Added " + DateTimeOffset.FromUnixTimeMilliseconds(k.AddedAt).LocalDateTime.ToString("yyyy-MM-dd"),
+            }).ToList();
+            vm.SetSecurityKeys(keys, _fido.HasRecovery(hash), _fido.BackendAvailable);
+        }
+        RefreshFidoKeys();
+
+        vm.OnInstallFido2 = async () =>
+        {
+            vm.IsFidoBusy = true;
+            vm.FidoStatus = "Downloading security-key support…";
+            try
+            {
+                var libsDir = Rede.Core.Crypto.Fido2.LibFido2Authenticator.LibsDirectory;
+                Directory.CreateDirectory(libsDir);
+                var libFile = Rede.Core.Crypto.Fido2.LibFido2Authenticator.LibFileName;
+                var destPath = Path.Combine(libsDir, libFile);
+
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("REDE-Updater");
+                var releasesJson = await http.GetStringAsync("https://api.github.com/repos/caaatto/rede/releases");
+                string? downloadUrl = null, releaseTag = null;
+                using (var doc = System.Text.Json.JsonDocument.Parse(releasesJson))
+                {
+                    foreach (var release in doc.RootElement.EnumerateArray())
+                    {
+                        if (release.TryGetProperty("assets", out var assets))
+                        {
+                            foreach (var asset in assets.EnumerateArray())
+                            {
+                                if (asset.GetProperty("name").GetString() == libFile &&
+                                    asset.TryGetProperty("browser_download_url", out var urlProp))
+                                {
+                                    downloadUrl = urlProp.GetString();
+                                    releaseTag = release.GetProperty("tag_name").GetString();
+                                    break;
+                                }
+                            }
+                        }
+                        if (downloadUrl is not null) break;
+                    }
+                }
+                if (downloadUrl is null || releaseTag is null)
+                    throw new Exception($"{libFile} not found in any GitHub release — upload it with the next release");
+                var bytes = await http.GetByteArrayAsync(downloadUrl);
+
+                // libfido2 is native code loaded into our process with access to the unlocked
+                // profile + the security key — verify Ed25519 sig + SHA256SUMS before writing.
+                string? verifyErr = null;
+                var verified = await Rede.Core.Services.UpdateService.VerifyReleaseAssetAsync(
+                    releaseTag, libFile, bytes, s => verifyErr = s);
+                if (!verified)
+                    throw new Exception(verifyErr ?? "Signature/hash verification failed — refusing to install.");
+
+                await File.WriteAllBytesAsync(destPath, bytes);
+                Rede.Core.Crypto.Fido2.LibFido2Authenticator.TryReload();
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    vm.IsFidoBusy = false;
+                    vm.FidoStatus = _fido.BackendAvailable ? "Installed!" : "Downloaded but failed to load";
+                    RefreshFidoKeys();
+                });
+            }
+            catch (Exception ex)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    vm.IsFidoBusy = false;
+                    vm.FidoStatus = $"Failed: {ex.Message}";
+                });
+            }
+        };
+
+        vm.OnEnrollKeyRequested += async (keyName, pin) =>
+        {
+            if (_auth?.Profile is null || _auth.Passphrase is null) return false;
+            var cred = await _fido.EnrollKeyAsync(_auth.Profile, _auth.Passphrase, keyName, pin);
+            _lastFidoPin = pin;
+            // Register the credential's public key with the server for login 2FA (best-effort —
+            // local unlock works regardless of whether the server enrollment lands).
+            if (cred.CredentialPublicKeyCose.Length == 64 && _conn is not null && _mainVm.IsConnected)
+            {
+                _conn.Send(Rede.Core.Protocol.Msg.Fido2Enroll, new System.Text.Json.Nodes.JsonObject
+                {
+                    ["credentialId"] = Convert.ToBase64String(cred.CredentialId),
+                    ["publicKey"] = Convert.ToBase64String(cred.CredentialPublicKeyCose),
+                });
+            }
+            Dispatcher.UIThread.Post(RefreshFidoKeys);
+            return true;
+        };
+
+        vm.OnGenerateRecoveryRequested += () =>
+        {
+            if (_auth?.Profile is null) return Task.FromResult<string?>(null);
+            var hash = Rede.Core.Crypto.Fido2.Fido2SidecarStore.HashForUserId(_auth.Profile.UserId);
+            var code = _fido.GenerateRecovery(hash);
+            Dispatcher.UIThread.Post(RefreshFidoKeys);
+            return Task.FromResult<string?>(code);
+        };
+
+        vm.OnRemoveKeyRequested += async (credentialId) =>
+        {
+            if (_auth?.Profile is null || _auth.Passphrase is null) return;
+            await _fido.RemoveKeyAsync(_auth.Profile, _auth.Passphrase, credentialId);
+            // Also drop the server-side 2FA credential (best-effort).
+            if (_conn is not null && _mainVm.IsConnected)
+            {
+                _conn.Send(Rede.Core.Protocol.Msg.Fido2Remove, new System.Text.Json.Nodes.JsonObject
+                {
+                    ["credentialId"] = credentialId,
+                });
+            }
+            Dispatcher.UIThread.Post(RefreshFidoKeys);
+        };
+
         // Cache device list to avoid re-enumerating on every slider change
         var cachedDevices = Rede.Core.Audio.AudioEngine.GetDevices();
         var cachedInputDevs = cachedDevices.Where(d => d.IsInput).ToList();
@@ -3006,6 +3305,8 @@ public partial class MainWindow : Window
                 ExportNoncesToProfile();
                 await _store.FlushAsync(_auth.Profile, _auth.Passphrase);
                 _auth.Profile.ZeroSecrets();
+                _fido.ClearSession();
+                _lastFidoPin = null;
             }
             _conn?.Dispose();
             ForceQuit();

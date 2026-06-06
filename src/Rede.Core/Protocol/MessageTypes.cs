@@ -55,6 +55,15 @@ public static class Msg
     public const string DeviceLinkFail = "device_link_fail";
     public const string DeviceAdded = "device_added";
 
+    // FIDO2 server-side 2FA (hardware-key login second factor, per device)
+    public const string Fido2Enroll = "fido2_enroll";
+    public const string Fido2EnrollOk = "fido2_enroll_ok";
+    public const string Fido2EnrollFail = "fido2_enroll_fail";
+    public const string Fido2Remove = "fido2_remove";
+    public const string Fido2RemoveOk = "fido2_remove_ok";
+    public const string Fido2VerifyChallenge = "fido2_verify_challenge";
+    public const string Fido2VerifyResponse = "fido2_verify_response";
+
     // Sealed Sender
     public const string SealedMessage = "sealed_message";
     public const string SealedMessageAck = "sealed_message_ack";

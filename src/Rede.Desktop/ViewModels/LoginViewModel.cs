@@ -28,6 +28,49 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty] private bool _hasQuickLogin;
     [ObservableProperty] private string _quickLoginHash = "";
 
+    // FIDO2 hardware-key unlock gate. Shown after the passphrase is submitted for a
+    // profile that has a security key enrolled — the passphrase alone can't decrypt it.
+    [ObservableProperty] private bool _isAwaitingSecurityKey;
+    [ObservableProperty] private bool _showRecoveryEntry;
+    [ObservableProperty] private bool _needsPin;
+    [ObservableProperty] private string _keyPin = "";
+    [ObservableProperty] private string _recoveryCode = "";
+    [ObservableProperty] private string _securityKeyStatus = "";
+
+    /// <summary>Retry/perform the hardware-key assertion. Arg = key PIN (null if none set).</summary>
+    public event Action<string?>? OnSecurityKeyUnlockRequested;
+    /// <summary>Unlock via recovery code instead of the hardware key.</summary>
+    public event Action<string>? OnRecoveryUnlockRequested;
+    /// <summary>Abort the FIDO gate and return to the passphrase form.</summary>
+    public event Action? OnFidoCancelRequested;
+
+    [RelayCommand]
+    private void RetrySecurityKey()
+        => OnSecurityKeyUnlockRequested?.Invoke(string.IsNullOrEmpty(KeyPin) ? null : KeyPin);
+
+    [RelayCommand]
+    private void ToggleRecoveryEntry() => ShowRecoveryEntry = !ShowRecoveryEntry;
+
+    [RelayCommand]
+    private void SubmitRecovery()
+    {
+        if (!string.IsNullOrWhiteSpace(RecoveryCode))
+            OnRecoveryUnlockRequested?.Invoke(RecoveryCode);
+    }
+
+    [RelayCommand]
+    private void CancelFido()
+    {
+        IsAwaitingSecurityKey = false;
+        ShowRecoveryEntry = false;
+        NeedsPin = false;
+        KeyPin = "";
+        RecoveryCode = "";
+        SecurityKeyStatus = "";
+        IsLoading = false;
+        OnFidoCancelRequested?.Invoke();
+    }
+
     public static readonly (string Name, string Url, string Transport)[] Servers =
     {
         ("I2Pd Nürnberg", "ws://ifq6tbaob6tepx33yj5ldawwystnggcpqdbmfavmla635wekrwlq.b32.i2p", "I2P"),

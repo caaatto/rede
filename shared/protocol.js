@@ -64,6 +64,18 @@ const MSG = {
   DEVICE_LINK_FAIL: 'device_link_fail',
   DEVICE_ADDED: 'device_added',
 
+  // FIDO2 server-side 2FA (hardware-key login second factor, per device)
+  // FIDO2_ENROLL payload: { credentialId (b64), publicKey (b64 raw P-256 x||y, 64 B) }
+  // FIDO2_VERIFY_CHALLENGE payload: { challenge (b64, 32 B) }
+  // FIDO2_VERIFY_RESPONSE payload: { credentialId (b64), authData (b64), signature (b64 DER) }
+  FIDO2_ENROLL: 'fido2_enroll',
+  FIDO2_ENROLL_OK: 'fido2_enroll_ok',
+  FIDO2_ENROLL_FAIL: 'fido2_enroll_fail',
+  FIDO2_REMOVE: 'fido2_remove',
+  FIDO2_REMOVE_OK: 'fido2_remove_ok',
+  FIDO2_VERIFY_CHALLENGE: 'fido2_verify_challenge',
+  FIDO2_VERIFY_RESPONSE: 'fido2_verify_response',
+
   // Sealed Sender
   SEALED_MESSAGE: 'sealed_message',
   SEALED_MESSAGE_ACK: 'sealed_message_ack',
