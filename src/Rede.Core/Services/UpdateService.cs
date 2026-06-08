@@ -293,7 +293,13 @@ public class UpdateService
 
             onStatus?.Invoke("Installing...");
 
-            var currentExe = Environment.ProcessPath;
+            // When packaged as an AppImage, ProcessPath points inside the read-only
+            // squashfs mount (/tmp/.mount_*). The real, writable file is exposed via
+            // $APPIMAGE — update that instead so self-update keeps working. The asset
+            // we download is the self-contained ELF, which is itself runnable, so the
+            // file stays launchable after the swap.
+            var currentExe = Environment.GetEnvironmentVariable("APPIMAGE")
+                             ?? Environment.ProcessPath;
             if (currentExe is null) return false;
 
             // Check if we need elevated privileges (binary in root-owned dir like /usr/bin)

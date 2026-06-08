@@ -26,22 +26,35 @@ chmod +x REDE
 ./REDE
 ```
 
+**AppImage** - portable, double-click to run, no install needed. Grab
+`REDE-x86_64.AppImage` from the release:
+```bash
+chmod +x REDE-x86_64.AppImage
+./REDE-x86_64.AppImage
+```
+It integrates into your app menu on first run and auto-updates itself in place.
+
 **System-wide install** (optional):
 ```bash
 sudo cp REDE /usr/local/bin/REDE
 sudo chmod 755 /usr/local/bin/REDE
 ```
 
-**Install script** - clones the repo, builds from source, creates a launcher
-and `.desktop` entry:
+**Install script** (recommended) - downloads the latest prebuilt binary,
+**verifies its Ed25519 signature**, and installs a `rede` launcher, app icon
+and `.desktop` entry. No SDK or build step:
 ```bash
-curl -sL https://raw.githubusercontent.com/caaatto/rede/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/caaatto/rede/main/scripts/install.sh | bash
 ```
-This installs to `~/.local/share/rede` and creates a `rede` launcher in
-`~/.local/bin`. If `~/.local/bin` is not in your `PATH`, add it:
+This installs `REDE` to `~/.local/bin` (user-writable, so the app can keep
+auto-updating itself) and registers it in your application menu. Re-run any
+time to repair the install, or pipe with `-s -- --uninstall` to remove it. If
+`~/.local/bin` is not in your `PATH`, add it:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+To build from source instead (requires the .NET 8 SDK + git), use
+`scripts/install-from-source.sh`.
 
 **Desktop entry** - if you placed the binary manually and want an app
 launcher, create `~/.local/share/applications/rede.desktop`:
