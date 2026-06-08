@@ -185,8 +185,13 @@ trap 'rm -rf "$TMP"' EXIT
 # Take the most recent tag from the releases list instead.
 if [ -z "$VERSION" ]; then
   info "Resolving latest release..."
-  VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
-              | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+  # Fetch fully into a variable, then parse with a single sed that quits after
+  # the first match. Avoid any `curl | grep -m1` / `... | head` pipeline: the
+  # early reader closes the pipe, the writer dies with SIGPIPE, and `pipefail`
+  # would abort the whole install. A here-string + `q` has no pipe at all.
+  releases_json="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases")" \
+    || { err "Could not reach GitHub to list releases."; exit 1; }
+  VERSION="$(sed -nE '/"tag_name":/{ s/.*"tag_name": *"([^"]+)".*/\1/p; q; }' <<< "$releases_json")"
   [ -n "$VERSION" ] || { err "Could not determine latest release tag."; exit 1; }
 fi
 ok "Release: $VERSION"
