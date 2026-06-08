@@ -88,6 +88,25 @@ Categories=Network;Chat;InstantMessaging;
 Double-click `REDE.exe`.
 
 
+## updating
+
+Rede updates itself - you never re-clone, re-run the installer, or `git pull`.
+
+1. On launch, the app checks GitHub for a newer release.
+2. If one exists, the login screen shows **"Update available: vX.Y.Z - click to install"**.
+3. Click it. Rede downloads the new build, **verifies its Ed25519 signature and
+   checksum**, and swaps the binary in place.
+4. Restart the app. Done.
+
+No package manager, and no `sudo` when installed to `~/.local/bin` (the installer's
+default) - exactly like the Windows build, which swaps `REDE.exe`. The AppImage
+updates itself the same way.
+
+The `curl | … | bash` installer is a one-time bootstrap. The only reason to run it
+again is if a future release needs a brand-new system library - the self-updater
+swaps only the app binary, not its OS dependencies.
+
+
 ## features
 
 - **End-to-end encryption** - PQXDH (X25519 + ML-KEM-768 hybrid post-quantum) + Double Ratchet, XSalsa20-Poly1305. Quantum-resistant against "harvest now, decrypt later" attacks.
