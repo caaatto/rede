@@ -40,16 +40,30 @@ sudo cp REDE /usr/local/bin/REDE
 sudo chmod 755 /usr/local/bin/REDE
 ```
 
-**Install script** (recommended) - downloads the latest prebuilt binary,
-**verifies its Ed25519 signature**, and installs a `rede` launcher, app icon
-and `.desktop` entry. No SDK or build step:
+**Install script** (recommended) - one command does everything: installs all
+system dependencies (GUI, voice, hardware-key support) via your package manager
+(apt/dnf/pacman/zypper), downloads the latest prebuilt binary, **verifies its
+Ed25519 signature**, and registers a `rede` launcher, app icon and `.desktop`
+entry. No SDK or build step:
 ```bash
 curl -sSL https://raw.githubusercontent.com/caaatto/rede/main/scripts/install.sh | bash
 ```
-This installs `REDE` to `~/.local/bin` (user-writable, so the app can keep
-auto-updating itself) and registers it in your application menu. Re-run any
-time to repair the install, or pipe with `-s -- --uninstall` to remove it. If
-`~/.local/bin` is not in your `PATH`, add it:
+The dependency step needs `sudo` (you'll be prompted). `REDE` itself installs
+to `~/.local/bin` — user-writable, so the app **auto-updates itself in place,
+exactly like the Windows build**, with no further package-manager involvement.
+Re-run any time to repair the install. Flags:
+
+| Flag | Effect |
+|---|---|
+| `--no-deps` | skip the system-dependency step |
+| `--with-tor` / `--with-i2p` | also install the Tor / i2pd daemon for anonymous transport |
+| `--uninstall` | remove the app (keeps your profile and system packages) |
+| `--no-verify` | skip the signature check (not recommended) |
+
+When piped, pass flags after `-s --`, e.g.
+`curl -sSL … | bash -s -- --with-tor`.
+
+If `~/.local/bin` is not in your `PATH`, add it:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```

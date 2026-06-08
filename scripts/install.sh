@@ -3,12 +3,16 @@ set -euo pipefail
 
 # Rede Desktop — Download Installer (Linux)
 #
-# Downloads the prebuilt, self-contained REDE binary from GitHub Releases,
-# verifies its Ed25519 signature against the release signing key, installs it
-# to ~/.local/bin, and registers an app icon + .desktop entry.
+# One command sets up everything Rede needs:
+#   1. installs all system dependencies (GUI, voice, FIDO2) via your package
+#      manager — apt / dnf / pacman / zypper, auto-detected
+#   2. downloads the prebuilt, self-contained REDE binary from GitHub Releases
+#   3. verifies its Ed25519 signature against the release signing key
+#   4. installs it to ~/.local/bin (user-writable, so the app keeps
+#      auto-updating itself in place — exactly like the Windows build)
+#   5. registers an app icon + .desktop entry
 #
-# No .NET SDK, no git, no build step. The app auto-updates itself afterwards,
-# so this script normally only needs to run once.
+# No .NET SDK, no git, no build step.
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/caaatto/rede/main/scripts/install.sh | bash
@@ -16,6 +20,9 @@ set -euo pipefail
 # Options (flags when run as a file, or env vars when piped):
 #   --version vX.Y.Z   REDE_VERSION=vX.Y.Z   install a specific release tag
 #   --prefix DIR       REDE_PREFIX=DIR       install root (default ~/.local)
+#   --no-deps          REDE_NO_DEPS=1        skip the system-dependency step
+#   --with-tor         REDE_WITH_TOR=1       also install the Tor daemon
+#   --with-i2p         REDE_WITH_I2P=1       also install the i2pd daemon
 #   --no-verify        REDE_NO_VERIFY=1      skip signature check (NOT recommended)
 #   --uninstall                              remove an existing install
 
@@ -27,12 +34,18 @@ ICON_URL="https://raw.githubusercontent.com/${REPO}/main/src/Rede.Desktop/Assets
 VERSION="${REDE_VERSION:-}"
 PREFIX="${REDE_PREFIX:-$HOME/.local}"
 NO_VERIFY="${REDE_NO_VERIFY:-0}"
+NO_DEPS="${REDE_NO_DEPS:-0}"
+WITH_TOR="${REDE_WITH_TOR:-0}"
+WITH_I2P="${REDE_WITH_I2P:-0}"
 ACTION="install"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION="$2"; shift 2 ;;
     --prefix)  PREFIX="$2";  shift 2 ;;
+    --no-deps) NO_DEPS=1; shift ;;
+    --with-tor) WITH_TOR=1; shift ;;
+    --with-i2p) WITH_I2P=1; shift ;;
     --no-verify) NO_VERIFY=1; shift ;;
     --uninstall) ACTION="uninstall"; shift ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -58,7 +71,7 @@ if [ "$ACTION" = "uninstall" ]; then
         "$ICON_DIR/rede.png"
   update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
   gtk-update-icon-cache "$PREFIX/share/icons/hicolor" 2>/dev/null || true
-  ok "Uninstalled. (Your profile in ~/.rede was left untouched.)"
+  ok "Uninstalled. (System packages and your profile in ~/.rede were left untouched.)"
   exit 0
 fi
 
@@ -73,6 +86,96 @@ fi
 for cmd in curl base64 sha256sum; do
   command -v "$cmd" >/dev/null 2>&1 || { err "Missing required tool: $cmd"; exit 1; }
 done
+
+# ------------------------------------------------------------- dependencies ---
+# Run a command as root: directly if already root, else via sudo.
+run_root() {
+  if [ "$(id -u)" -eq 0 ]; then "$@"
+  elif command -v sudo >/dev/null 2>&1; then sudo "$@"
+  else err "Need root to install packages, but neither root nor sudo is available."; return 1
+  fi
+}
+
+# apt: first package name in the list that actually exists (handles renames
+# like libasound2 -> libasound2t64 and libjack-jackd2-0 vs libjack0).
+apt_first() { for p in "$@"; do apt-cache show "$p" >/dev/null 2>&1 && { echo "$p"; return 0; }; done; }
+
+ask_yes() {  # ask_yes "Question"  -> 0=yes. Only prompts on a real TTY; else "no".
+  [ -t 0 ] || return 1
+  local a; printf '    %s [y/N] ' "$1" > /dev/tty
+  read -r a < /dev/tty || return 1
+  case "$a" in [yYjJ]*) return 0 ;; *) return 1 ;; esac
+}
+
+install_deps() {
+  local pm="" pkgs=()
+  for c in apt-get dnf pacman zypper; do command -v "$c" >/dev/null 2>&1 && { pm="$c"; break; }; done
+  if [ -z "$pm" ]; then
+    err "No supported package manager (apt/dnf/pacman/zypper) found — skipping dependency install."
+    err "Rede needs: ICU, OpenSSL, ALSA, JACK, fontconfig/freetype, X11 client libs, libGL, libfido2."
+    return 0
+  fi
+  info "Installing system dependencies via ${pm}..."
+
+  # Offer the anonymity daemons unless already forced on. Interactive only —
+  # piped (curl|bash) runs have no TTY, so they default to "no" (opt-in).
+  [ "$WITH_TOR" = 1 ] || { ask_yes "Also install Tor (anonymous transport)?" && WITH_TOR=1; }
+  [ "$WITH_I2P" = 1 ] || { ask_yes "Also install i2pd (I2P anonymous transport)?" && WITH_I2P=1; }
+
+  case "$pm" in
+    apt-get)
+      local icu jack asound
+      icu="$(apt-cache --names-only search '^libicu[0-9]+$' 2>/dev/null | cut -d' ' -f1 | sort -V | tail -1)"
+      jack="$(apt_first libjack-jackd2-0 libjack0)"
+      asound="$(apt_first libasound2t64 libasound2)"
+      pkgs=( ${icu:+$icu} ${jack:+$jack} ${asound:+$asound}
+             libssl3 libgssapi-krb5-2 zlib1g libstdc++6 libgcc-s1
+             libfontconfig1 libfreetype6 fonts-liberation
+             libx11-6 libice6 libsm6 libxext6 libxrender1 libxi6 libxrandr2 libxcursor1 libgl1
+             libfido2-1 )
+      [ "$WITH_TOR" = 1 ] && pkgs+=(tor)
+      [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
+      run_root apt-get update -qq || true
+      run_root apt-get install -y --no-install-recommends "${pkgs[@]}"
+      ;;
+    dnf)
+      pkgs=( libicu openssl-libs krb5-libs zlib libstdc++ libgcc
+             fontconfig freetype liberation-fonts
+             libX11 libICE libSM libXext libXrender libXi libXrandr libXcursor mesa-libGL
+             alsa-lib jack-audio-connection-kit libfido2 )
+      [ "$WITH_TOR" = 1 ] && pkgs+=(tor)
+      [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
+      # --skip-broken/--skip-unavailable: tolerate name drift across Fedora/RHEL
+      run_root dnf install -y --setopt=install_weak_deps=False --skip-broken "${pkgs[@]}" \
+        || run_root dnf install -y --skip-unavailable "${pkgs[@]}" || true
+      ;;
+    pacman)
+      pkgs=( icu openssl krb5 zlib gcc-libs
+             fontconfig freetype2 ttf-liberation
+             libx11 libice libsm libxext libxrender libxi libxrandr libxcursor libglvnd
+             alsa-lib jack2 libfido2 )
+      [ "$WITH_TOR" = 1 ] && pkgs+=(tor)
+      [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
+      run_root pacman -Sy --needed --noconfirm "${pkgs[@]}" || true
+      ;;
+    zypper)
+      pkgs=( libicu libopenssl3 krb5 libz1 libstdc++6
+             fontconfig freetype2 liberation-fonts
+             libX11-6 libICE6 libSM6 libXext6 libXrender1 libXi6 libXrandr2 libXcursor1 Mesa-libGL1
+             libasound2 libjack0 libfido2 )
+      [ "$WITH_TOR" = 1 ] && pkgs+=(tor)
+      [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
+      run_root zypper --non-interactive install --no-recommends "${pkgs[@]}" || true
+      ;;
+  esac
+  ok "Dependencies installed."
+}
+
+if [ "$NO_DEPS" = "1" ]; then
+  info "Skipping system-dependency step (--no-deps)."
+else
+  install_deps || err "Dependency step reported errors — continuing; some features may not work."
+fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -195,7 +298,7 @@ say ""
 ok "Rede $VERSION installed."
 say "    Binary:   $BIN_PATH"
 say "    Launch:   rede   (or find 'REDE' in your app menu)"
-say "    Update:   automatic — the app updates itself in place"
+say "    Update:   automatic — the app updates itself in place, like on Windows"
 say "    Remove:   $0 --uninstall"
 say ""
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
