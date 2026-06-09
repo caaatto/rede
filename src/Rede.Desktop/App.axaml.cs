@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform;
+using Avalonia.Threading;
 using AvaloniaWebView;
 
 namespace Rede.Desktop;
@@ -30,6 +32,25 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+
+        // Avalonia 11.3.x bug: the Linux DBus tray (DBusTrayIconImpl) converts the XAML-declared
+        // TrayIcon.Icon to an ARGB pixmap during Application init — before Skia is ready — which
+        // silently yields all-zero bytes, and no NewIcon signal is ever emitted to correct it
+        // (so the tray shows a blank/black icon forever). Re-assigning the icon once the framework
+        // is loaded (Skia up) forces a fresh conversion + NewIcon emission.
+        Dispatcher.UIThread.Post(RefreshTrayIcon, DispatcherPriority.Loaded);
+    }
+
+    private void RefreshTrayIcon()
+    {
+        try
+        {
+            var icons = TrayIcon.GetIcons(this);
+            if (icons is not { Count: > 0 }) return;
+            using var stream = AssetLoader.Open(new System.Uri("avares://Rede.Desktop/Assets/icon.png"));
+            icons[0].Icon = new WindowIcon(stream);
+        }
+        catch { }
     }
 
     // ---- TrayIcon handlers ----

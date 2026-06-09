@@ -50,8 +50,9 @@ public sealed class Fido2UnlockService
 
     /// <summary>
     /// Unlock via a connected hardware key. Returns the PMS (also pushed into the ProfileStore for
-    /// this session) or null if the connected device is not one of the enrolled keys / no sidecar.
-    /// Throws <see cref="Fido2Exception"/> for actionable problems (no backend, no device, PIN, touch).
+    /// this session), or null if no FIDO enrollment exists for this profile at all (no sidecar).
+    /// Throws <see cref="Fido2Exception"/> for actionable problems (no backend, no device, PIN, touch,
+    /// or a connected key that responded but matches none of the enrolled wraps → NoCredentials).
     /// </summary>
     public byte[]? TryUnlockWithKey(string hashHex, string? pin)
     {
@@ -70,12 +71,34 @@ public sealed class Fido2UnlockService
         {
             wrapKey = Hkdf.DeriveKey(res.HmacSecret, Array.Empty<byte>(), WrapInfo, 32);
             var credB64 = Convert.ToBase64String(res.CredentialId);
+
+            // Fast path: the assertion told us which credential responded.
             var entry = sc.Keys.FirstOrDefault(k => k.CredentialId == credB64);
-            if (entry is null) return null;
-            var pms = TryOpen(entry.WrappedPms, entry.Nonce, wrapKey);
-            if (pms is null) return null;
-            SetSession(pms);
-            return pms;
+            if (entry is not null)
+            {
+                var pms = TryOpen(entry.WrappedPms, entry.Nonce, wrapKey);
+                if (pms is not null) { SetSession(pms); return pms; }
+            }
+
+            // CTAP2 lets the authenticator OMIT the credential id in an assertion response when
+            // the allow-list has exactly one entry — so res.CredentialId can come back empty (or,
+            // rarely, not match). The hmac-secret we just derived only opens the wrap of the key
+            // that actually responded, so try it against every enrolled entry: at most one opens.
+            // Without this, a profile with a single enrolled key fails with "not enrolled" even
+            // though the key is correct (recovery code still works because it never touches HW).
+            foreach (var k in sc.Keys)
+            {
+                if (k.CredentialId == credB64) continue; // already tried above
+                var pms = TryOpen(k.WrappedPms, k.Nonce, wrapKey);
+                if (pms is not null) { SetSession(pms); return pms; }
+            }
+
+            // The key responded (so the hardware is fine) but its hmac-secret opened none of the
+            // enrolled wraps — it's a different key than the one(s) enrolled for this profile, or
+            // the sidecar was overwritten by an enrollment on another machine. Distinct from the
+            // "no enrollment at all" null above so the login UI can tell the user which it is.
+            throw new Fido2Exception(Fido2ErrorKind.NoCredentials,
+                "This security key is not enrolled for this profile. Use a key you enrolled here, or your recovery code.");
         }
         finally
         {

@@ -800,7 +800,10 @@ public partial class MainWindow : Window
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (pms is null)
-                        _loginVm.SecurityKeyStatus = "That key isn't enrolled for this profile.";
+                        // null now means "no FIDO enrollment for this profile" (sidecar vanished
+                        // between the gate and here). A key that responds but doesn't match throws
+                        // Fido2Exception(NoCredentials) and is handled in the catch below.
+                        _loginVm.SecurityKeyStatus = "No security key is enrolled for this profile. Use your passphrase.";
                     else
                         CompleteFidoUnlock();
                 });

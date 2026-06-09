@@ -145,6 +145,17 @@ public class RedeConnection : IDisposable
         _cts = new CancellationTokenSource();
         _ws = new ClientWebSocket();
 
+        // Dead-socket detection. Without this, a half-open TCP connection (typical after a
+        // Wi-Fi switch — no FIN/RST is delivered) leaves ReceiveAsync blocked indefinitely:
+        // ReceiveLoop never exits, OnDisconnected never fires, and the reconnect path below
+        // never runs — the app appears "Connected" but is frozen until the OS TCP keepalive
+        // gives up (15+ min). With a keepalive interval the runtime emits periodic WS pings;
+        // on a broken link the ping SEND fails at the TCP layer (no route, or retransmits time
+        // out) and aborts the socket, so ReceiveAsync throws and the existing reconnect kicks
+        // in within the TCP failure window instead of hours. (KeepAliveTimeout, which would
+        // bound this to a clean pong deadline, is .NET 9+ only — not available on net8.0.)
+        _ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+
         // TLS cert validation: CA-trusted chain OR TOFU pin (whichever passes).
         //
         // The real identity anchor is the Ed25519 server signing key, TOFU-pinned per
