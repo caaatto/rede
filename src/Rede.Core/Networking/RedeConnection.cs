@@ -7,6 +7,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Rede.Core.Crypto;
 using Rede.Core.Protocol;
 
@@ -25,6 +26,11 @@ public class RedeConnection : IDisposable
     private readonly ProxySettings _proxySettings;
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
+    // Outgoing frames go through a single-writer pump so the sync Send() never blocks its caller
+    // (often the UI thread) on a slow/half-open socket. _wsSendLock serializes EVERY _ws.SendAsync
+    // (text pump + binary SRTP + async text) so there is never more than one outstanding send.
+    private Channel<byte[]>? _sendQueue;
+    private readonly SemaphoreSlim _wsSendLock = new(1, 1);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Action<JsonObject>> _handlers = new();
     private string? _pinnedCertFingerprint;
 
@@ -140,6 +146,7 @@ public class RedeConnection : IDisposable
         // M2: Dispose previous WS and CTS to prevent resource leak on reconnect
         _cts?.Cancel();
         _cts?.Dispose();
+        _sendQueue?.Writer.TryComplete(); // stop the previous pump; a fresh queue is created on connect
         try { _ws?.Dispose(); } catch { }
 
         _cts = new CancellationTokenSource();
@@ -229,6 +236,14 @@ public class RedeConnection : IDisposable
 
             _isConnected = true;
             _reconnectAttempts = 0; // M5: Reset backoff on successful connect
+
+            // Start the send pump BEFORE announcing the connection: OnConnected handlers
+            // (e.g. AuthService.Reauthenticate) call Send synchronously and must enqueue.
+            _sendQueue = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
+            var pumpQueue = _sendQueue;
+            var pumpToken = _cts.Token;
+            _ = Task.Run(() => SendPump(pumpQueue, pumpToken));
+
             OnConnected?.Invoke();
 
             _ = Task.Run(() => ReceiveLoop(_cts.Token));
@@ -257,19 +272,51 @@ public class RedeConnection : IDisposable
             return false;
         }
 
+        // Hand off to the background pump and return immediately. The previous implementation
+        // blocked the caller on Task.Run(...).GetAwaiter().GetResult(); on a half-open socket
+        // (e.g. after a Wi-Fi switch — State stays Open, no FIN/RST) SendAsync waits out the TCP
+        // timeout, freezing the calling UI thread. With ShutdownMode.OnExplicitShutdown that froze
+        // the whole app with no way to close it. Enqueueing can't block.
+        return _sendQueue?.Writer.TryWrite(bytes) ?? false;
+    }
+
+    /// <summary>
+    /// Single consumer of the outgoing text queue. The ONLY place text frames hit the socket, so
+    /// no two text sends ever overlap; the shared _wsSendLock also keeps binary (SRTP) sends from
+    /// overlapping. A failed/timed-out send aborts the socket so ReceiveLoop exits and reconnect runs.
+    /// </summary>
+    private async Task SendPump(Channel<byte[]> queue, CancellationToken ct)
+    {
+        // Background thread — a slow/dead socket stalls only this pump, never the UI. Bounded so a
+        // half-open link is detected (abort → reconnect) instead of hanging until the OS TCP timeout.
+        var sendTimeout = _proxySettings.UseI2P ? TimeSpan.FromSeconds(60)
+                        : _proxySettings.UseTor ? TimeSpan.FromSeconds(45)
+                        : TimeSpan.FromSeconds(20);
+        bool failed = false;
         try
         {
-            // M7: Use Task.Run to avoid sync-over-async deadlock on UI thread
-            Task.Run(async () =>
-                await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true,
-                    _cts?.Token ?? CancellationToken.None)
-            ).GetAwaiter().GetResult();
-            return true;
+            await foreach (var bytes in queue.Reader.ReadAllAsync(ct))
+            {
+                var ws = _ws;
+                if (ws is null || ws.State != WebSocketState.Open) { failed = true; break; }
+                await _wsSendLock.WaitAsync(ct);
+                try
+                {
+                    using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    sendCts.CancelAfter(sendTimeout);
+                    await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, sendCts.Token);
+                }
+                catch { failed = true; break; }
+                finally { _wsSendLock.Release(); }
+            }
         }
-        catch
-        {
-            return false;
-        }
+        catch (OperationCanceledException) { }
+        catch (ChannelClosedException) { }
+
+        // A send failure (not a clean teardown) means the socket is dead — abort it so the blocked
+        // ReceiveAsync throws, ReceiveLoop exits, and the existing reconnect path takes over.
+        if (failed && !ct.IsCancellationRequested)
+            try { _ws?.Abort(); } catch { }
     }
 
     /// <summary>
@@ -280,10 +327,17 @@ public class RedeConnection : IDisposable
         if (_ws?.State != WebSocketState.Open)
             return false;
         if (data.Length > 8192) return false; // SRTP packets should be well under 8KB
+        var ws = _ws;
+        if (ws is null) return false;
         try
         {
-            await _ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Binary, true,
-                _cts?.Token ?? CancellationToken.None);
+            await _wsSendLock.WaitAsync(_cts?.Token ?? CancellationToken.None);
+            try
+            {
+                await ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Binary, true,
+                    _cts?.Token ?? CancellationToken.None);
+            }
+            finally { _wsSendLock.Release(); }
             return true;
         }
         catch
@@ -312,10 +366,17 @@ public class RedeConnection : IDisposable
             return false;
         }
 
+        var ws = _ws;
+        if (ws is null) return false;
         try
         {
-            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true,
-                _cts?.Token ?? CancellationToken.None);
+            await _wsSendLock.WaitAsync(_cts?.Token ?? CancellationToken.None);
+            try
+            {
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true,
+                    _cts?.Token ?? CancellationToken.None);
+            }
+            finally { _wsSendLock.Release(); }
             return true;
         }
         catch
@@ -477,13 +538,22 @@ public class RedeConnection : IDisposable
     public void Disconnect()
     {
         ShouldReconnect = false;
-        if (_ws?.State == WebSocketState.Open)
+        _sendQueue?.Writer.TryComplete();
+        var ws = _ws;
+        if (ws?.State == WebSocketState.Open)
         {
+            // Best-effort goodbye + close, bounded to 2s. CloseAsync (like the old Send) waits out
+            // the TCP timeout on a half-open socket, so without the bound a quit/logout could freeze
+            // the UI thread on a dead connection just like the post-login hang we fixed.
             try
             {
-                Send(Msg.SessionEnd);
-                _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Bye", CancellationToken.None)
-                    .GetAwaiter().GetResult();
+                var bye = Encoding.UTF8.GetBytes(ProtocolSerializer.CreateClientMessage(Msg.SessionEnd));
+                Task.Run(async () =>
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    try { await ws.SendAsync(new ArraySegment<byte>(bye), WebSocketMessageType.Text, true, cts.Token); } catch { }
+                    try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Bye", cts.Token); } catch { }
+                }).Wait(TimeSpan.FromSeconds(2));
             }
             catch { }
         }
