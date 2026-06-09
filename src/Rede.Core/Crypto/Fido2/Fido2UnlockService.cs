@@ -146,7 +146,7 @@ public sealed class Fido2UnlockService
     /// the active session PMS (so the caller must already be unlocked via a key or recovery code).
     /// Prompts the user for PIN + touch via the authenticator. Throws <see cref="Fido2Exception"/>.
     /// </summary>
-    public async Task<Fido2Credential> EnrollKeyAsync(Profile profile, byte[] passphrase, string keyName, string? pin)
+    public async Task<Fido2Credential> EnrollKeyAsync(Profile profile, byte[] passphrase, string keyName, string? pin, IProgress<string>? progress = null)
     {
         EnsureBackend();
         if (!_auth.HasDevice())
@@ -178,6 +178,11 @@ public sealed class Fido2UnlockService
 
         var userHandle = SHA256.HashData(Encoding.UTF8.GetBytes(profile.UserId));
         var cred = _auth.MakeCredential(sc.RpId, profile.DisplayName ?? profile.UserId, userHandle, pin);
+
+        // Enrollment needs TWO separate ceremonies (make-credential, then the hmac-secret assertion),
+        // so the OS prompts for a SECOND touch here. Without a hint the user thinks the first touch
+        // failed and walks away. Surface it before we block on the second blocking OS call.
+        progress?.Report("Touch your security key again to finish enrollment…");
 
         var salt = Convert.FromBase64String(sc.HmacSalt);
         // Wrap under the same UV state the unlock will use for this pin (PIN ⇒ UV, touch ⇒ non-UV),

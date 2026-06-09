@@ -417,6 +417,11 @@ public partial class MainWindow : Window
             if (_authFailed)
                 return;
 
+            // If the FIDO2 second-touch encryption overlay is mid-decrypt, let it finish before we
+            // swap to the main view — otherwise AUTH_OK (which races the decrypt) would cut it short.
+            if (_bootView is not null)
+                await _bootView.SecurityGateTask;
+
             _bootView = null;
             _bootDone = null;
             var mainView = CreateMainView();
@@ -1032,7 +1037,17 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    Dispatcher.UIThread.Post(() => _mainVm.ConnectionStatus = "Touch your security key…");
+                    // This is the SECOND touch (first one unlocked the local profile). The user is
+                    // watching the boot animation right now, so take it over with the ASCII encryption
+                    // lock overlay — the MainView ConnectionStatus isn't visible yet. _bootView is null
+                    // only if boot already finished, in which case ConnectionStatus on the visible
+                    // MainView covers it. (Boot can't actually finish first: it waits on AUTH_OK, which
+                    // the server only sends after this assertion — so the overlay is reliably shown.)
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        _mainVm.ConnectionStatus = "Touch your security key again…";
+                        _bootView?.BeginSecurityGate();
+                    });
                     var a = _fidoAuth.GetServerAssertion(rpId, allow, challenge, pin);
                     _conn?.Send(Rede.Core.Protocol.Msg.Fido2VerifyResponse, new System.Text.Json.Nodes.JsonObject
                     {
@@ -1040,10 +1055,15 @@ public partial class MainWindow : Window
                         ["authData"] = Convert.ToBase64String(a.AuthData),
                         ["signature"] = Convert.ToBase64String(a.Signature),
                     });
+                    Dispatcher.UIThread.Post(() => _bootView?.ResolveSecurityGate(true));
                 }
                 catch (Exception ex)
                 {
-                    Dispatcher.UIThread.Post(() => ShowBootFail("Security key verification failed: " + SanitizeErrorMessage(ex)));
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        _bootView?.ResolveSecurityGate(false);
+                        ShowBootFail("Security key verification failed: " + SanitizeErrorMessage(ex));
+                    });
                 }
             });
         });
@@ -3032,14 +3052,14 @@ public partial class MainWindow : Window
             }
         };
 
-        vm.OnEnrollKeyRequested += async (keyName, pin) =>
+        vm.OnEnrollKeyRequested += async (keyName, pin, progress) =>
         {
             if (_auth?.Profile is null || _auth.Passphrase is null) return false;
             // Run the native ceremony off the UI thread (the OS security-key dialog blocks the
             // calling thread; doing it on the UI thread can prevent the dialog from showing).
             var profile = _auth.Profile;
             var pass = _auth.Passphrase;
-            var cred = await Task.Run(() => _fido.EnrollKeyAsync(profile, pass, keyName, pin));
+            var cred = await Task.Run(() => _fido.EnrollKeyAsync(profile, pass, keyName, pin, progress));
             _lastFidoPin = pin;
             // Register the credential's public key with the server for login 2FA (best-effort —
             // local unlock works regardless of whether the server enrollment lands).

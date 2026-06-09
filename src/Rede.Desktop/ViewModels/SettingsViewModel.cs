@@ -327,8 +327,9 @@ public partial class SettingsViewModel : ViewModelBase
 
     /// <summary>Download + verify the native libfido2 (handled by MainWindow, mirrors RNNoise install).</summary>
     public Func<Task>? OnInstallFido2;
-    /// <summary>(keyName, pin) → success. MainWindow performs make-credential + PMS wrap.</summary>
-    public event Func<string, string?, Task<bool>>? OnEnrollKeyRequested;
+    /// <summary>(keyName, pin, progress) → success. MainWindow performs make-credential + PMS wrap.
+    /// The progress reporter surfaces the "touch again" hint between the two enroll ceremonies.</summary>
+    public event Func<string, string?, IProgress<string>, Task<bool>>? OnEnrollKeyRequested;
     /// <summary>Returns the one-time recovery code (grouped) or null on failure.</summary>
     public event Func<Task<string?>>? OnGenerateRecoveryRequested;
     /// <summary>credentialId (base64) of the key to remove.</summary>
@@ -346,9 +347,11 @@ public partial class SettingsViewModel : ViewModelBase
         IsFidoBusy = true;
         FidoStatus = "Touch your security key…";
         GeneratedRecoveryCode = "";
+        // Progress is constructed on the UI thread, so Report() marshals back to it — safe to set FidoStatus.
+        var progress = new Progress<string>(s => FidoStatus = s);
         try
         {
-            var ok = await OnEnrollKeyRequested.Invoke(keyName, pin);
+            var ok = await OnEnrollKeyRequested.Invoke(keyName, pin, progress);
             FidoStatus = ok
                 ? (HasRecoveryCode
                     ? "Security key enrolled."

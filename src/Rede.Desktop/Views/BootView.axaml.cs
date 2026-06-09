@@ -209,11 +209,16 @@ public partial class BootView : UserControl
     private void AppendLine(string text)
     {
         _buffer.AppendLine(text);
-        Dispatcher.UIThread.Post(() =>
-        {
-            _bootText.Text = _buffer.ToString();
-            _scroller.ScrollToEnd();
-        });
+        Dispatcher.UIThread.Post(Render);
+    }
+
+    /// <summary>Paint the buffer — unless the security gate overlay currently owns the screen
+    /// (boot writes still accumulate in _buffer; the gate's decrypt reveals them at the end).</summary>
+    private void Render()
+    {
+        if (_gated) return;
+        _bootText.Text = _buffer.ToString();
+        _scroller.ScrollToEnd();
     }
 
     private async Task TypeLine(string text)
@@ -225,17 +230,14 @@ public partial class BootView : UserControl
             var current = _buffer + line.ToString();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                if (_gated) return;
                 _bootText.Text = current;
                 _scroller.ScrollToEnd();
             });
             await Delay(2);
         }
         _buffer.AppendLine(line.ToString());
-        Dispatcher.UIThread.Post(() =>
-        {
-            _bootText.Text = _buffer.ToString();
-            _scroller.ScrollToEnd();
-        });
+        Dispatcher.UIThread.Post(Render);
     }
 
     private async Task StatusLine(string label, string value)
@@ -325,6 +327,147 @@ public partial class BootView : UserControl
             _bootText.Text = _buffer.ToString();
             _scroller.ScrollToEnd();
         });
+    }
+
+    // ---- Server-2FA security gate (the SECOND touch) -------------------------------------------
+    // The first touch unlocked the local profile; the server then demands a hardware assertion
+    // before AUTH_OK. That happens while THIS boot view is on screen, so we take the display over
+    // with an ASCII "encryption" lock animation, hold it until the user taps the key, then play a
+    // matrix-style decrypt back into the normal boot log before the app enters. While _gated is set
+    // the normal boot writes keep filling _buffer but don't paint — the gate owns the screen.
+
+    private bool _gated;
+    private TaskCompletionSource? _gateDone;        // completes when the decrypt animation finishes
+    private TaskCompletionSource<bool>? _unlock;    // signalled by ResolveSecurityGate(ok)
+
+    /// <summary>Awaited by MainWindow before swapping to the main view, so the decrypt plays fully.</summary>
+    public Task SecurityGateTask => _gateDone?.Task ?? Task.CompletedTask;
+
+    private static readonly string[] LockLocked =
+    {
+        "    _____",
+        "   /     \\",
+        "  |       |",
+        "  |       |",
+        " _|_______|_",
+        "|           |",
+        "|    ___    |",
+        "|   |   |   |",
+        "|   |___|   |",
+        "|     |     |",
+        "|___________|",
+    };
+
+    private static readonly string[] LockOpen =
+    {
+        "    _____",
+        "   /     \\",
+        "   \\      |",
+        "          |",
+        " _________|_",
+        "|           |",
+        "|    ___    |",
+        "|   |   |   |",
+        "|   |_ _|   |",
+        "|     o     |",
+        "|___________|",
+    };
+
+    /// <summary>Begin the encryption lock overlay and wait for the second touch.</summary>
+    public void BeginSecurityGate() => Dispatcher.UIThread.Post(() =>
+    {
+        if (_gated) return;
+        _unlock = new TaskCompletionSource<bool>();
+        _gateDone = new TaskCompletionSource();
+        _ = RunSecurityGate();
+    });
+
+    /// <summary>Touch done: ok=true plays the unlock + decrypt; ok=false drops the overlay (caller
+    /// then runs the fail sequence).</summary>
+    public void ResolveSecurityGate(bool ok) => Dispatcher.UIThread.Post(() => _unlock?.TrySetResult(ok));
+
+    private async Task RunSecurityGate()
+    {
+        var snapshot = _buffer.ToString();
+        _gated = true;
+        var tick = 0;
+
+        // 1) Locked + encryption rain, looping until the key is tapped (or the assertion fails).
+        while (!(_unlock?.Task.IsCompleted ?? true))
+        {
+            var frame = ComposeGateFrame(LockLocked, "AWAITING HARDWARE SECURITY KEY", blinkOn: (tick / 4) % 2 == 0);
+            await Dispatcher.UIThread.InvokeAsync(() => { _bootText.Text = frame; _scroller.ScrollToEnd(); });
+            await Delay(90);
+            tick++;
+        }
+
+        var ok = _unlock?.Task.Result ?? false;
+        if (ok)
+        {
+            // 2) Shackle springs open.
+            for (var i = 0; i < 3; i++)
+            {
+                var frame = ComposeGateFrame(LockOpen, "ACCESS GRANTED — DECRYPTING", blinkOn: true);
+                await Dispatcher.UIThread.InvokeAsync(() => _bootText.Text = frame);
+                await Delay(130);
+            }
+            // 3) Matrix decrypt: scramble resolves back into the real boot log.
+            var target = snapshot.Replace("\r", "").Split('\n');
+            const int dframes = 12;
+            for (var f = 0; f <= dframes; f++)
+            {
+                var display = DecryptFrame(target, (double)f / dframes);
+                await Dispatcher.UIThread.InvokeAsync(() => { _bootText.Text = display; _scroller.ScrollToEnd(); });
+                await Delay(55);
+            }
+        }
+
+        _gated = false;
+        await Dispatcher.UIThread.InvokeAsync(() => { _bootText.Text = _buffer.ToString(); _scroller.ScrollToEnd(); });
+        _gateDone?.TrySetResult();
+    }
+
+    private static string ComposeGateFrame(string[] lockArt, string caption, bool blinkOn)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("            >> SESSION ENCRYPTED <<");
+        sb.AppendLine("      " + caption);
+        sb.AppendLine();
+        foreach (var l in lockArt)
+            sb.AppendLine("            " + l);
+        sb.AppendLine();
+        for (var r = 0; r < 3; r++)
+            sb.AppendLine("      " + RainLine(30));
+        sb.AppendLine();
+        sb.AppendLine(blinkOn ? "            [ TOUCH KEY TO DECRYPT ]" : "");
+        return sb.ToString();
+    }
+
+    private static string RainLine(int len)
+    {
+        const string chars = "01010110:.x#$%/\\<>";
+        var sb = new StringBuilder(len);
+        for (var i = 0; i < len; i++)
+            sb.Append(chars[Random.Shared.Next(chars.Length)]);
+        return sb.ToString();
+    }
+
+    private static string DecryptFrame(string[] target, double progress)
+    {
+        const string glitch = "01@#$%&*!=+~<>/?";
+        var sb = new StringBuilder();
+        foreach (var line in target)
+        {
+            foreach (var ch in line)
+            {
+                if (ch == ' ') { sb.Append(' '); continue; }
+                sb.Append(Random.Shared.NextDouble() < progress ? ch : glitch[Random.Shared.Next(glitch.Length)]);
+            }
+            sb.Append('\n');
+        }
+        return sb.ToString();
     }
 
     private static Task Delay(int ms) => Task.Delay(ms);
