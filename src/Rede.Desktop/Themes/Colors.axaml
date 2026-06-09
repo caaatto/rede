@@ -51,5 +51,6 @@
     <SolidColorBrush x:Key="RedeSuccessBrush" Color="{StaticResource RedeSuccess}" />
 
     <SolidColorBrush x:Key="RedeGlowVioletBrush" Color="{StaticResource RedeGlowViolet}" />
+    <SolidColorBrush x:Key="RedeGlowTealBrush" Color="{StaticResource RedeGlowTeal}" />
 
 </ResourceDictionary>

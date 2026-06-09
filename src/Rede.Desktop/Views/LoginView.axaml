@@ -5,6 +5,30 @@
              x:Class="Rede.Desktop.Views.LoginView"
              x:DataType="vm:LoginViewModel">
 
+    <UserControl.Styles>
+        <!-- Pulsing glow ring behind the key icon — the visual "tap your key now"
+             cue shown while the security-key gate waits for a hardware touch. -->
+        <Style Selector="Border.touchPulse">
+            <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+            <Style.Animations>
+                <Animation Duration="0:0:1.6" IterationCount="INFINITE" Easing="SineEaseInOut">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="Opacity" Value="0.25" />
+                        <Setter Property="RenderTransform" Value="scale(0.8)" />
+                    </KeyFrame>
+                    <KeyFrame Cue="50%">
+                        <Setter Property="Opacity" Value="0.75" />
+                        <Setter Property="RenderTransform" Value="scale(1.15)" />
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="Opacity" Value="0.25" />
+                        <Setter Property="RenderTransform" Value="scale(0.8)" />
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
+    </UserControl.Styles>
+
     <!-- Centered login panel on dark background -->
     <ScrollViewer VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
@@ -77,12 +101,33 @@
                 </StackPanel>
 
                 <!-- === SECURITY KEY UNLOCK GATE === -->
-                <StackPanel Spacing="10" Width="320" IsVisible="{Binding IsAwaitingSecurityKey}">
+                <StackPanel Spacing="12" Width="320" IsVisible="{Binding IsAwaitingSecurityKey}">
+
+                    <!-- Animated touch prompt: a pulsing key icon tells the user to
+                         physically tap their security key. Hidden in recovery-code mode,
+                         where no hardware tap is required. -->
+                    <Panel Height="96" IsVisible="{Binding !ShowRecoveryEntry}">
+                        <Border Classes="touchPulse"
+                                Width="88" Height="88" CornerRadius="44"
+                                Background="{DynamicResource RedeGlowTealBrush}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <Border Width="60" Height="60" CornerRadius="30"
+                                Background="{DynamicResource RedeSurfaceActiveBrush}"
+                                BorderBrush="{DynamicResource RedeAccentTealBrush}"
+                                BorderThickness="1.5"
+                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Image Source="{StaticResource IconLock}" Width="28" Height="28"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Panel>
+
                     <TextBlock Text="Security key required"
-                               Classes="secondary" HorizontalAlignment="Center"
-                               FontWeight="{StaticResource RedeWeightMedium}" />
+                               HorizontalAlignment="Center"
+                               FontWeight="{StaticResource RedeWeightMedium}"
+                               Foreground="{DynamicResource RedeTextPrimaryBrush}" />
                     <TextBlock Text="{Binding SecurityKeyStatus}"
-                               Classes="secondary" TextWrapping="Wrap" HorizontalAlignment="Center" />
+                               Classes="secondary" TextWrapping="Wrap"
+                               HorizontalAlignment="Center" TextAlignment="Center" />
 
                     <!-- PIN (only if the key has one set) -->
                     <StackPanel Spacing="4" IsVisible="{Binding NeedsPin}">
