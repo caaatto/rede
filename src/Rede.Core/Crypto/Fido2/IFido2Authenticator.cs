@@ -67,8 +67,13 @@ public interface IFido2Authenticator
     /// it holds and returns that credential id plus its 32-byte HMAC output for the salt
     /// (deterministic per credential+salt) — one user touch even when several keys are enrolled.
     /// Throws <see cref="Fido2Exception"/> (Kind=NoCredentials when the device holds none of them).
+    ///
+    /// <paramref name="requireUv"/> selects the CTAP2 hmac-secret variant: false → CredRandomWithoutUV
+    /// (touch only), true → CredRandomWithUV (PIN/UV). These produce DIFFERENT secrets for the same
+    /// key+salt, so unlock must request the same UV state the wrap was created under. (Windows
+    /// WebAuthn always performs UV, so its backend ignores this flag.)
     /// </summary>
-    Fido2HmacResult GetHmacSecret(string rpId, IReadOnlyList<byte[]> allowCredentialIds, byte[] salt, string? pin);
+    Fido2HmacResult GetHmacSecret(string rpId, IReadOnlyList<byte[]> allowCredentialIds, byte[] salt, string? pin, bool requireUv);
 
     /// <summary>
     /// Perform a standard assertion over <paramref name="allowCredentialIds"/> with

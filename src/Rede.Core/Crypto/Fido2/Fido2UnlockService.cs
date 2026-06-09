@@ -64,7 +64,15 @@ public sealed class Fido2UnlockService
 
         var allow = sc.Keys.Select(k => Convert.FromBase64String(k.CredentialId)).ToList();
         var salt = Convert.FromBase64String(sc.HmacSalt);
-        var res = _auth.GetHmacSecret(sc.RpId, allow, salt, pin); // throws on PIN/no-touch/no-credentials
+
+        // A wrap is created under either UV (PIN — e.g. enrolled on Windows, where WebAuthn always
+        // verifies the user) or non-UV (touch only — typical on Linux/libfido2). CTAP2 derives a
+        // DIFFERENT hmac-secret for each, so a Windows-made wrap can't be opened by a non-UV Linux
+        // assertion and vice-versa. We can't tell which from the sidecar, so try non-UV first (one
+        // touch, the common local case); if nothing opens, ask the UI for a PIN and retry under UV.
+        // A supplied pin means we are on that UV retry.
+        bool requireUv = pin is not null;
+        var res = _auth.GetHmacSecret(sc.RpId, allow, salt, pin, requireUv); // throws on PIN/no-touch/no-credentials
 
         byte[]? wrapKey = null;
         try
@@ -72,31 +80,27 @@ public sealed class Fido2UnlockService
             wrapKey = Hkdf.DeriveKey(res.HmacSecret, Array.Empty<byte>(), WrapInfo, 32);
             var credB64 = Convert.ToBase64String(res.CredentialId);
 
-            // Fast path: the assertion told us which credential responded.
-            var entry = sc.Keys.FirstOrDefault(k => k.CredentialId == credB64);
-            if (entry is not null)
+            // The hmac-secret only opens the wrap of the key that actually responded. Try the
+            // credential the assertion named first, then every entry — CTAP2 may OMIT the id for a
+            // single-credential allow-list (res.CredentialId comes back empty), so we can't rely on
+            // the match. At most one wrap opens.
+            foreach (var k in sc.Keys.Where(k => k.CredentialId == credB64)
+                                     .Concat(sc.Keys.Where(k => k.CredentialId != credB64)))
             {
-                var pms = TryOpen(entry.WrappedPms, entry.Nonce, wrapKey);
-                if (pms is not null) { SetSession(pms); return pms; }
-            }
-
-            // CTAP2 lets the authenticator OMIT the credential id in an assertion response when
-            // the allow-list has exactly one entry — so res.CredentialId can come back empty (or,
-            // rarely, not match). The hmac-secret we just derived only opens the wrap of the key
-            // that actually responded, so try it against every enrolled entry: at most one opens.
-            // Without this, a profile with a single enrolled key fails with "not enrolled" even
-            // though the key is correct (recovery code still works because it never touches HW).
-            foreach (var k in sc.Keys)
-            {
-                if (k.CredentialId == credB64) continue; // already tried above
                 var pms = TryOpen(k.WrappedPms, k.Nonce, wrapKey);
                 if (pms is not null) { SetSession(pms); return pms; }
             }
 
-            // The key responded (so the hardware is fine) but its hmac-secret opened none of the
-            // enrolled wraps — it's a different key than the one(s) enrolled for this profile, or
-            // the sidecar was overwritten by an enrollment on another machine. Distinct from the
-            // "no enrollment at all" null above so the login UI can tell the user which it is.
+            // Nothing opened. If this was the non-UV pass, the wrap may have been enrolled under UV
+            // (e.g. a sidecar created on / copied from Windows) — surface PinRequired so the login UI
+            // collects the PIN and calls us again, which runs the UV pass. Reuses the existing
+            // PinRequired → NeedsPin → retry-with-pin flow; no new UI wiring needed.
+            if (!requireUv)
+                throw new Fido2Exception(Fido2ErrorKind.PinRequired,
+                    "Enter your security key PIN to unlock.");
+
+            // Even the UV pass opened no wrap — it's genuinely a different key than the one(s)
+            // enrolled for this profile. Distinct from the "no enrollment at all" null above.
             throw new Fido2Exception(Fido2ErrorKind.NoCredentials,
                 "This security key is not enrolled for this profile. Use a key you enrolled here, or your recovery code.");
         }
@@ -176,7 +180,9 @@ public sealed class Fido2UnlockService
         var cred = _auth.MakeCredential(sc.RpId, profile.DisplayName ?? profile.UserId, userHandle, pin);
 
         var salt = Convert.FromBase64String(sc.HmacSalt);
-        var hmac = _auth.GetHmacSecret(sc.RpId, new[] { cred.CredentialId }, salt, pin);
+        // Wrap under the same UV state the unlock will use for this pin (PIN ⇒ UV, touch ⇒ non-UV),
+        // so the try-both unlock reproduces this hmac-secret on the matching pass.
+        var hmac = _auth.GetHmacSecret(sc.RpId, new[] { cred.CredentialId }, salt, pin, requireUv: pin is not null);
 
         byte[]? wrapKey = null;
         byte[] wrapped;

@@ -125,8 +125,11 @@ public sealed class WindowsWebAuthnAuthenticator : IFido2Authenticator
         }
     }
 
-    public Fido2HmacResult GetHmacSecret(string rpId, IReadOnlyList<byte[]> allowCredentialIds, byte[] salt, string? pin)
+    public Fido2HmacResult GetHmacSecret(string rpId, IReadOnlyList<byte[]> allowCredentialIds, byte[] salt, string? pin, bool requireUv)
     {
+        // requireUv is ignored: the Windows WebAuthn API always performs user verification, so the
+        // hmac-secret is always the CredRandomWithUV variant. (The try-both unlock derives this on
+        // its UV pass; Windows-enrolled wraps therefore open on Windows and on Linux's UV retry.)
         // Local unlock: clientData is irrelevant; we only use the returned hmac-secret.
         var (credId, _, _, hmac) = Assert(rpId, allowCredentialIds, new byte[32], salt, requireHmac: true);
         if (hmac is null || hmac.Length == 0)

@@ -149,7 +149,7 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
         }
     }
 
-    public Fido2HmacResult GetHmacSecret(string rpId, IReadOnlyList<byte[]> allowCredentialIds, byte[] salt, string? pin)
+    public Fido2HmacResult GetHmacSecret(string rpId, IReadOnlyList<byte[]> allowCredentialIds, byte[] salt, string? pin, bool requireUv)
     {
         var path = FirstDevicePath() ?? throw Err(Fido2ErrorKind.NoDevice, "No security key detected.");
         IntPtr dev = IntPtr.Zero, assert = IntPtr.Zero;
@@ -163,6 +163,12 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
             foreach (var cid in allowCredentialIds)
                 Check(fido_assert_allow_cred(assert, cid, (nuint)cid.Length), "assert_allow_cred");
             Check(fido_assert_set_extensions(assert, FIDO_EXT_HMAC_SECRET), "assert_set_extensions");
+            // UV ON → CredRandomWithUV (PIN), OFF → CredRandomWithoutUV (touch); the hmac-secret
+            // differs between the two. Only FORCE uv on the UV retry — leave it unset otherwise so
+            // the non-UV pass stays byte-identical to pre-existing behavior (no regression for keys
+            // already enrolled touch-only on this machine).
+            if (requireUv)
+                Check(fido_assert_set_uv(assert, FIDO_OPT_TRUE), "assert_set_uv");
             Check(fido_assert_set_hmac_salt(assert, salt, (nuint)salt.Length), "assert_set_hmac_salt");
 
             var rc = fido_dev_get_assert(dev, assert, pin);
@@ -370,6 +376,7 @@ public sealed class LibFido2Authenticator : IFido2Authenticator
     [DllImport(Lib)] private static extern int fido_assert_set_clientdata_hash(IntPtr assert, byte[] ptr, nuint len);
     [DllImport(Lib)] private static extern int fido_assert_allow_cred(IntPtr assert, byte[] ptr, nuint len);
     [DllImport(Lib)] private static extern int fido_assert_set_extensions(IntPtr assert, int flags);
+    [DllImport(Lib)] private static extern int fido_assert_set_uv(IntPtr assert, int uv);
     [DllImport(Lib)] private static extern int fido_assert_set_hmac_salt(IntPtr assert, byte[] salt, nuint len);
     [DllImport(Lib, CharSet = CharSet.Ansi)] private static extern int fido_dev_get_assert(IntPtr dev, IntPtr assert, [MarshalAs(UnmanagedType.LPUTF8Str)] string? pin);
     [DllImport(Lib)] private static extern nuint fido_assert_count(IntPtr assert);
