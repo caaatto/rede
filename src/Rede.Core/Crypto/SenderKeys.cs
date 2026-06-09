@@ -141,6 +141,7 @@ public static class SenderKeys
             CryptoService.ZeroOut(msgKey!);
 
             var result = MessagePadding.Unpad(decrypted);
+            CryptoService.ZeroOut(backup.ChainKey); // L3: don't leak the cloned chain key
             return result ?? System.Text.Encoding.UTF8.GetString(decrypted);
         }
         catch

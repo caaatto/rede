@@ -17,14 +17,18 @@ public class SrtpSession : IDisposable
     private ushort _lastRecvSeq;
     private bool _firstSend = true;
     private bool _firstRecv = true;
+    private readonly bool _rocInAuth;
 
     // RFC 3711 replay protection — 64-bit sliding window
     private ulong _replayWindow;
     private uint _lastRecvIndex; // full 32-bit index = (ROC << 16) | SEQ
 
-    public SrtpSession(byte[] masterKey, byte[] masterSalt)
+    /// <param name="rocInAuth">v2 calls: include the 4-byte big-endian ROC in the
+    /// HMAC input (RFC 3711 §4.2). Legacy (v1) calls must pass false.</param>
+    public SrtpSession(byte[] masterKey, byte[] masterSalt, bool rocInAuth = false)
     {
         (_cipherKey, _authKey, _sessionSalt) = SrtpCrypto.DeriveSessionKeys(masterKey, masterSalt);
+        _rocInAuth = rocInAuth;
     }
 
     /// <summary>
@@ -48,7 +52,7 @@ public class SrtpSession : IDisposable
         }
         _lastSendSeq = seq;
 
-        return SrtpCrypto.Protect(rtpPacket, _cipherKey, _authKey, _sessionSalt, _sendRoc);
+        return SrtpCrypto.Protect(rtpPacket, _cipherKey, _authKey, _sessionSalt, _sendRoc, _rocInAuth);
     }
 
     /// <summary>
@@ -71,7 +75,7 @@ public class SrtpSession : IDisposable
                 estimatedRoc = _recvRoc - 1;
         }
 
-        var result = SrtpCrypto.Unprotect(srtpPacket, _cipherKey, _authKey, _sessionSalt, estimatedRoc);
+        var result = SrtpCrypto.Unprotect(srtpPacket, _cipherKey, _authKey, _sessionSalt, estimatedRoc, _rocInAuth);
         if (result is null) return null;
 
         // Compute full 32-bit packet index for replay check

@@ -38,9 +38,30 @@ public class ContactService : IDisposable
         _conn.On(Msg.UserLookupFail, HandleUserLookupFail);
     }
 
+    // L4: Track outstanding lookups — an unsolicited USER_LOOKUP_OK (malicious
+    // or compromised server) must not be able to create or update contacts.
+    // The server echoes the requested lookupId back as userId, so keying by it
+    // matches responses to requests exactly.
+    private static readonly TimeSpan PendingLookupTtl = TimeSpan.FromSeconds(60);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _pendingLookups = new();
+
+    private void RegisterPendingLookup(string lookupId)
+    {
+        // Opportunistic purge of expired entries (the dictionary stays tiny).
+        var cutoff = DateTime.UtcNow - PendingLookupTtl;
+        foreach (var kv in _pendingLookups)
+            if (kv.Value < cutoff) _pendingLookups.TryRemove(kv.Key, out _);
+        _pendingLookups[lookupId] = DateTime.UtcNow;
+    }
+
+    private bool ConsumePendingLookup(string userId)
+        => _pendingLookups.TryRemove(userId, out var requestedAt)
+           && DateTime.UtcNow - requestedAt <= PendingLookupTtl;
+
     /// <summary>Add a contact by looking up their ID on the server.</summary>
     public void AddContact(string lookupId)
     {
+        RegisterPendingLookup(lookupId);
         _conn.Send(Msg.UserLookup, ProtocolSerializer.Payload(
             ("lookupId", JsonValue.Create(lookupId))
         ));
@@ -132,6 +153,10 @@ public class ContactService : IDisposable
         var displayName = ProtocolSerializer.GetString(msg, "displayName");
 
         if (userId is null || publicKey is null) return;
+
+        // L4: Ignore lookups we never asked for — no contact creation, no
+        // key/device updates from server-pushed responses.
+        if (!ConsumePendingLookup(userId)) return;
 
         // Validate key format (32-byte base64)
         try

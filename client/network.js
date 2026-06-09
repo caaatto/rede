@@ -213,13 +213,23 @@ class RedeConnection {
                 console.error(`[TOFU] Fingerprint: ${fp}`);
                 console.error(`[TOFU] Verify this with the server admin!`);
               } else if (this.certFingerprint !== fp) {
-                console.error('[SECURITY] Server certificate has CHANGED!');
-                console.error(`  Pinned:  ${this.certFingerprint}`);
-                console.error(`  Current: ${fp}`);
-                console.error('[SECURITY] Connection BLOCKED. Delete ~/.rede/.cert_pin to re-pin.');
-                this.ws.close();
-                reject(new Error('Server certificate changed! Possible MITM attack. Connection blocked.'));
-                return;
+                // Pin mismatch: if the new chain is CA-trusted (e.g. routine
+                // Let's Encrypt renewal), silently re-pin. The Ed25519 server
+                // signing key remains the durable identity check.
+                if (this.ws._socket?.authorized === true) {
+                  this.certFingerprint = fp;
+                  this._savePinnedCert(fp);
+                  console.error('[TOFU] Server certificate renewed (CA-trusted) — pin updated.');
+                  console.error(`[TOFU] New fingerprint: ${fp}`);
+                } else {
+                  console.error('[SECURITY] Server certificate has CHANGED!');
+                  console.error(`  Pinned:  ${this.certFingerprint}`);
+                  console.error(`  Current: ${fp}`);
+                  console.error('[SECURITY] Connection BLOCKED. Delete ~/.rede/.cert_pin to re-pin.');
+                  this.ws.close();
+                  reject(new Error('Server certificate changed! Possible MITM attack. Connection blocked.'));
+                  return;
+                }
               }
             } else {
               console.error('[WARNING] Could not extract certificate fingerprint for pinning.');

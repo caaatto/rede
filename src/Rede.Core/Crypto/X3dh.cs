@@ -31,7 +31,10 @@ public static class X3dh
         List<OneTimePreKeyPublic>? PqOneTimePreKeys
     );
 
-    public record OneTimePreKeyPublic(int Id, string Key);
+    // Sig: Ed25519 detached signature over the raw public key bytes (same
+    // construction as SignedPreKeySig / PqSignedPreKeySig). Set for PQ one-time
+    // pre-keys; null for classical OTPKs (unsigned by design, per X3DH).
+    public record OneTimePreKeyPublic(int Id, string Key, string? Sig = null);
 
     /// <summary>Private parts — byte[] for storage in Profile, zeroable.</summary>
     public record PreKeyBundlePrivate(
@@ -56,7 +59,8 @@ public static class X3dh
         OneTimePreKeyBytes? PqOneTimePreKey
     );
 
-    public record OneTimePreKeyBytes(int Id, byte[] Key);
+    // Sig: optional Ed25519 signature over Key (PQ one-time pre-keys only).
+    public record OneTimePreKeyBytes(int Id, byte[] Key, byte[]? Sig = null);
 
     public record X3dhInitiateResult(
         byte[] SharedSecret,
@@ -99,13 +103,16 @@ public static class X3dh
         var (pqSpkPub, pqSpkPriv) = PQKem.GenerateKeyPair();
         var pqSpkSigB64 = CryptoService.SignBytesB64(pqSpkPub, signingSecretKey);
 
-        // PQ one-time pre-keys (ML-KEM-768)
+        // PQ one-time pre-keys (ML-KEM-768) — each signed with the identity
+        // signing key (same construction as the PQ signed pre-key) so initiators
+        // never have to encapsulate against unauthenticated key material.
         var pqOtpksPublic = new List<OneTimePreKeyPublic>();
         var pqOtpksPrivate = new List<OneTimePreKeyPrivate>();
         for (int i = 0; i < PqOneTimePreKeyCount; i++)
         {
             var (pub, priv) = PQKem.GenerateKeyPair();
-            pqOtpksPublic.Add(new OneTimePreKeyPublic(i, Convert.ToBase64String(pub)));
+            var sigB64 = CryptoService.SignBytesB64(pub, signingSecretKey);
+            pqOtpksPublic.Add(new OneTimePreKeyPublic(i, Convert.ToBase64String(pub), sigB64));
             pqOtpksPrivate.Add(new OneTimePreKeyPrivate(i, pub, priv));
         }
 
@@ -174,14 +181,21 @@ public static class X3dh
                 usedOtpkId = recipientBundle.OneTimePreKey.Id;
             }
 
-            // PQ encapsulation: prefer PQ-OPK, fall back to PQ-SPK.
+            // PQ encapsulation: prefer a SIGNED PQ-OPK, fall back to PQ-SPK.
+            // M1: an unsigned PQ-OPK (older client's bundle, or a server that
+            // doesn't relay sigs) is never trusted — fall back to the PQ-SPK,
+            // which was signature-verified above. An OPK with an INVALID sig
+            // means tampering: abort the whole agreement.
             if (pqAvailable)
             {
                 byte[] pqTarget;
-                if (recipientBundle.PqOneTimePreKey is not null)
+                var pqOtpk = recipientBundle.PqOneTimePreKey;
+                if (pqOtpk is not null && pqOtpk.Sig is not null)
                 {
-                    pqTarget = recipientBundle.PqOneTimePreKey.Key;
-                    usedPqOtpkId = recipientBundle.PqOneTimePreKey.Id;
+                    if (!CryptoService.Verify(pqOtpk.Key, pqOtpk.Sig, recipientBundle.SigningKey))
+                        return null;
+                    pqTarget = pqOtpk.Key;
+                    usedPqOtpkId = pqOtpk.Id;
                 }
                 else
                 {

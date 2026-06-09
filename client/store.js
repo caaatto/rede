@@ -165,10 +165,27 @@ function migrateProfile(profile) {
   return changed;
 }
 
+// Validate a server-provided devices map: keep only entries whose
+// publicKey and signingKey are base64 decoding to 32 bytes
+function validateDeviceMap(devices) {
+  if (!devices || typeof devices !== 'object') return null;
+  const validated = {};
+  for (const [dId, dInfo] of Object.entries(devices)) {
+    if (typeof dInfo !== 'object' || !dInfo || !dInfo.publicKey || !dInfo.signingKey) continue;
+    try {
+      const pk = cryptoMod.decodeBase64(dInfo.publicKey);
+      const sk = cryptoMod.decodeBase64(dInfo.signingKey);
+      if (pk.length !== 32 || sk.length !== 32) continue;
+    } catch { continue; }
+    validated[dId] = dInfo;
+  }
+  return validated;
+}
+
 function addContact(profile, internalId, publicKey, signingKey, displayName, passphrase, devices) {
   const existing = profile.contacts[internalId];
-  // Build devices map from server response
-  const deviceMap = devices || { primary: { publicKey, signingKey: signingKey || null } };
+  // Build devices map from server response (drop entries with invalid keys)
+  const deviceMap = validateDeviceMap(devices) || { primary: { publicKey, signingKey: signingKey || null } };
 
   if (existing && existing.publicKey !== publicKey) {
     return {
@@ -345,6 +362,13 @@ function generateAndStorePreKeys(profile, count, passphrase) {
   };
 }
 
+// Look up a one-time pre-key WITHOUT removing it — callers must call
+// consumeOneTimePreKey only after the key was successfully used to decrypt,
+// otherwise undecryptable messages can drain the pre-key pool
+function peekOneTimePreKey(profile, preKeyPub) {
+  return profile.oneTimePreKeys.find(k => k.publicKey === preKeyPub) || null;
+}
+
 function consumeOneTimePreKey(profile, preKeyPub, passphrase) {
   const idx = profile.oneTimePreKeys.findIndex(k => k.publicKey === preKeyPub);
   if (idx === -1) return null;
@@ -372,5 +396,6 @@ module.exports = {
   saveSenderKeyState,
   loadSenderKeyState,
   generateAndStorePreKeys,
+  peekOneTimePreKey,
   consumeOneTimePreKey,
 };

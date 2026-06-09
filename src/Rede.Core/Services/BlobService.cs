@@ -12,11 +12,13 @@ namespace Rede.Core.Services;
 /// <summary>
 /// Encrypted blob upload/download for file attachments.
 /// Blobs are AES-encrypted client-side — server stores opaque data.
-/// Max blob size: 10MB.
+/// Max blob size: 700 KB (base64-expanded BLOB_DATA must fit the 1 MB WS frame
+/// cap on both the server and RedeConnection's inbound limit — bigger blobs
+/// would upload fine but be undeliverable on fetch).
 /// </summary>
 public class BlobService : IDisposable
 {
-    public const int MaxBlobSize = 10 * 1024 * 1024; // 10MB
+    public const int MaxBlobSize = 700_000; // ~700 KB — see frame-cap note above
 
     private static readonly string BlobBaseDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".rede", "blobs");
@@ -25,10 +27,24 @@ public class BlobService : IDisposable
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _uploadPending = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<byte[]?>> _fetchPending = new();
 
-    // In-memory cache (blobId → decrypted bytes) for hot reads.
+    // In-memory cache (blobId + key/nonce binding → decrypted bytes) for hot reads.
+    // M3: keyed by CacheKey(), NOT bare blobId — a peer referencing a foreign
+    // blobId with a different key/nonce must miss, not read someone else's
+    // cached plaintext. (Disk stays keyed by blobId: it stores ciphertext, and
+    // secretbox.Open authenticates — a wrong-key hit fails and falls through.)
     private const int MaxCacheEntries = 100;
     private readonly ConcurrentDictionary<string, byte[]> _cache = new();
     private readonly Queue<string> _cacheOrder = new();
+
+    private static string CacheKey(string blobId, byte[] key, byte[] nonce)
+    {
+        var bound = new byte[key.Length + nonce.Length];
+        Buffer.BlockCopy(key, 0, bound, 0, key.Length);
+        Buffer.BlockCopy(nonce, 0, bound, key.Length, nonce.Length);
+        var hash = SHA256.HashData(bound);
+        CryptographicOperations.ZeroMemory(bound);
+        return blobId + ":" + Convert.ToHexString(hash).ToLowerInvariant();
+    }
 
     public event Action<string>? OnSystemMessage;
 
@@ -53,7 +69,7 @@ public class BlobService : IDisposable
     {
         if (plainData.Length > MaxBlobSize)
         {
-            OnSystemMessage?.Invoke($"File too large ({plainData.Length / 1024}KB). Max: {MaxBlobSize / 1024 / 1024}MB.");
+            OnSystemMessage?.Invoke($"Attachment too large ({plainData.Length / 1024} KB, max 700 KB).");
             return null;
         }
 
@@ -90,7 +106,7 @@ public class BlobService : IDisposable
 
         // Cache the plaintext locally + persist the ciphertext to disk so the
         // image survives restarts even if the server has dropped the blob.
-        CacheBlob(blobId, plainData);
+        CacheBlob(CacheKey(blobId, key, nonce), plainData);
         TryWriteCipherToDisk(blobId, cipherData);
 
         var att = new AttachmentInfo
@@ -114,8 +130,9 @@ public class BlobService : IDisposable
     /// </summary>
     public async Task<byte[]?> FetchAsync(AttachmentInfo att)
     {
-        // Hot in-memory cache first.
-        if (_cache.TryGetValue(att.BlobId, out var cached))
+        // Hot in-memory cache first — keyed by blobId + key/nonce binding (M3).
+        var cacheKey = CacheKey(att.BlobId, att.Key, att.Nonce);
+        if (_cache.TryGetValue(cacheKey, out var cached))
             return cached;
 
         // Local on-disk cache: ciphertext we wrote on a previous send/fetch.
@@ -126,11 +143,13 @@ public class BlobService : IDisposable
         {
             try
             {
+                // secretbox authenticates: a wrong key/nonce throws → treated as
+                // a miss (fail closed), never returns foreign plaintext.
                 var plain = SecretBox.Open(diskCipher, att.Nonce, att.Key);
-                CacheBlob(att.BlobId, plain);
+                CacheBlob(cacheKey, plain);
                 return plain;
             }
-            catch { /* corrupted on disk — fall through to network */ }
+            catch { /* corrupted on disk or wrong key — fall through to network */ }
         }
 
         var tcs = new TaskCompletionSource<byte[]?>();
@@ -151,7 +170,7 @@ public class BlobService : IDisposable
         try
         {
             var plain = SecretBox.Open(cipherData, att.Nonce, att.Key);
-            CacheBlob(att.BlobId, plain);
+            CacheBlob(cacheKey, plain);
             // Persist ciphertext locally so we don't have to round-trip the
             // server next time — and so the image still resolves after the
             // server has expired its copy.
@@ -165,10 +184,10 @@ public class BlobService : IDisposable
         }
     }
 
-    private void CacheBlob(string blobId, byte[] data)
+    private void CacheBlob(string cacheKey, byte[] data)
     {
-        _cache[blobId] = data;
-        _cacheOrder.Enqueue(blobId);
+        _cache[cacheKey] = data;
+        _cacheOrder.Enqueue(cacheKey);
         while (_cacheOrder.Count > MaxCacheEntries && _cacheOrder.TryDequeue(out var evictId))
         {
             if (_cache.TryRemove(evictId, out var evicted))

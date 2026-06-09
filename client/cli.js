@@ -812,7 +812,30 @@ async function cmdGinvite() {
           if (dev && dev.publicKey === bundle.identityKey) keyValid = true;
         }
         if (!keyValid && contact.publicKey === bundle.identityKey) keyValid = true;
-        if (!keyValid) continue;
+        if (!keyValid && devId && bundle.identityKey && bundle.signingKey && bundle.signedPreKey && bundle.signedPreKeySig) {
+          // Verify signed pre-key signature before accepting new device
+          try {
+            const naclUtil = require('tweetnacl-util');
+            const nacl = require('tweetnacl');
+            const sigBytes = naclUtil.decodeBase64(bundle.signedPreKeySig);
+            const preKeyBytes = naclUtil.decodeBase64(bundle.signedPreKey);
+            const sigKeyBytes = naclUtil.decodeBase64(bundle.signingKey);
+            if (sigBytes.length === 64 && preKeyBytes.length === 32 && sigKeyBytes.length === 32 &&
+                nacl.sign.detached.verify(preKeyBytes, sigBytes, sigKeyBytes)) {
+              if (!contact.devices) contact.devices = {};
+              contact.devices[devId] = { publicKey: bundle.identityKey, signingKey: bundle.signingKey };
+              store.saveProfile(profile, passphrase);
+              keyValid = true;
+              console.log(`[SECURITY] New device ${devId} for ${opts.to} accepted (pre-key sig verified). Verify fingerprint out-of-band!`);
+            }
+          } catch {
+            // Signature verification failed
+          }
+        }
+        if (!keyValid) {
+          console.error(`[SECURITY] Identity key mismatch for ${opts.to} device ${devId || 'primary'}! Skipped.`);
+          continue;
+        }
         const x3dhResult = cryptoMod.x3dhInitiate(profile.secretKey, {
           identityKey: bundle.identityKey, signingKey: bundle.signingKey,
           signedPreKey: bundle.signedPreKey, signedPreKeySig: bundle.signedPreKeySig,
@@ -935,8 +958,10 @@ async function cmdListen() {
       }
       // X3DH initial message
       const otpkUsed = !!msg.x3dh.usedOTPKPub;
+      // Peek only — the OTPK is consumed after a successful decrypt below,
+      // so undecryptable messages cannot drain the one-time pre-key pool
       const otpkSecret = otpkUsed
-        ? (() => { const k = store.consumeOneTimePreKey(profile, msg.x3dh.usedOTPKPub, passphrase); return k ? k.secretKey : null; })()
+        ? (() => { const k = store.peekOneTimePreKey(profile, msg.x3dh.usedOTPKPub); return k ? k.secretKey : null; })()
         : null;
       if (profile.signedPreKey) {
         const spkCandidates = [profile.signedPreKey];
@@ -959,6 +984,8 @@ async function cmdListen() {
             });
             plaintext = cryptoMod.ratchetDecrypt(ratchetState, msg.header, msg.encrypted, msg.nonce);
             if (plaintext !== null && plaintext !== undefined) {
+              // Decrypt succeeded — consume the OTPK only if it was actually used
+              if (otpk) store.consumeOneTimePreKey(profile, msg.x3dh.usedOTPKPub, passphrase);
               store.saveRatchetState(profile, msg.from, ratchetState, passphrase, fromDeviceId);
               x3dhDone = true;
               break;

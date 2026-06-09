@@ -237,6 +237,14 @@ public static class CryptoService
         catch { return false; }
     }
 
+    // L9 invariant (why a regex strip is safe here): in valid JSON the literal
+    // unescaped token "serverSig" can never occur INSIDE a string value — quotes
+    // inside string values are escaped as \" — so a match can only start at a
+    // real key. The value matcher [^"\\]*(?:\\.[^"\\]*)* is escape-aware and
+    // stops at the first unescaped quote, so it can't overrun into adjacent
+    // fields. A nested key named serverSig (attacker-supplied sub-object) would
+    // be stripped too, making the body differ from what the server signed —
+    // verification then FAILS, i.e. any mis-strip is fail-closed, never a forgery.
     private static string StripJsonField(string json, string fieldName)
     {
         var pattern = $@",\s*""{fieldName}""\s*:\s*""[^""\\]*(?:\\.[^""\\]*)*""";

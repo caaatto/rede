@@ -916,7 +916,8 @@ public class ChatService : IDisposable
             byte[]? PqSignedPreKey,
             byte[]? PqSignedPreKeySig,
             byte[]? PqOneTimePreKey,
-            string? PqOneTimePreKeyB64
+            string? PqOneTimePreKeyB64,
+            byte[]? PqOneTimePreKeySig
         )>();
 
         static bool TryDecode(string? b64, out byte[] bytes)
@@ -928,7 +929,7 @@ public class ChatService : IDisposable
         }
 
         void AddBundle(string? dId, string? ikB64, string? skB64, string? spkB64, string? spkSigB64, string? otpkB64,
-            string? pqSpkB64, string? pqSpkSigB64, string? pqOtpkB64)
+            string? pqSpkB64, string? pqSpkSigB64, string? pqOtpkB64, string? pqOtpkSigB64)
         {
             if (!TryDecode(ikB64, out var ik)) return;
             if (!TryDecode(spkB64, out var spk)) return;
@@ -943,7 +944,9 @@ public class ChatService : IDisposable
             if (pqSpkSigB64 is not null && TryDecode(pqSpkSigB64, out var pqSpkSigBytes)) pqSpkSig = pqSpkSigBytes;
             byte[]? pqOtpk = null;
             if (pqOtpkB64 is not null && TryDecode(pqOtpkB64, out var pqOtpkBytes)) pqOtpk = pqOtpkBytes;
-            deviceBundles.Add((dId, ik, sk, spk, spkSig, otpk, otpkB64, pqSpk, pqSpkSig, pqOtpk, pqOtpkB64));
+            byte[]? pqOtpkSig = null;
+            if (pqOtpkSigB64 is not null && TryDecode(pqOtpkSigB64, out var pqOtpkSigBytes)) pqOtpkSig = pqOtpkSigBytes;
+            deviceBundles.Add((dId, ik, sk, spk, spkSig, otpk, otpkB64, pqSpk, pqSpkSig, pqOtpk, pqOtpkB64, pqOtpkSig));
         }
 
         var devicesNode = msg["devices"];
@@ -961,7 +964,8 @@ public class ChatService : IDisposable
                     dObj["oneTimePreKey"]?.GetValue<string>(),
                     dObj["pqSignedPreKey"]?.GetValue<string>(),
                     dObj["pqSignedPreKeySig"]?.GetValue<string>(),
-                    dObj["pqOneTimePreKey"]?.GetValue<string>()
+                    dObj["pqOneTimePreKey"]?.GetValue<string>(),
+                    dObj["pqOneTimePreKeySig"]?.GetValue<string>()
                 );
             }
         }
@@ -976,7 +980,8 @@ public class ChatService : IDisposable
                 ProtocolSerializer.GetString(msg, "oneTimePreKey"),
                 ProtocolSerializer.GetString(msg, "pqSignedPreKey"),
                 ProtocolSerializer.GetString(msg, "pqSignedPreKeySig"),
-                ProtocolSerializer.GetString(msg, "pqOneTimePreKey")
+                ProtocolSerializer.GetString(msg, "pqOneTimePreKey"),
+                ProtocolSerializer.GetString(msg, "pqOneTimePreKeySig")
             );
         }
 
@@ -1033,7 +1038,11 @@ public class ChatService : IDisposable
             }
 
             var otpk = bundle.OneTimePreKey is not null ? new X3dh.OneTimePreKeyBytes(0, bundle.OneTimePreKey) : null;
-            var pqOtpk = bundle.PqOneTimePreKey is not null ? new X3dh.OneTimePreKeyBytes(0, bundle.PqOneTimePreKey) : null;
+            // M1: pass the PQ-OPK sig along — X3dh.Initiate verifies it (or falls
+            // back to the signed PQ-SPK when the sig is absent).
+            var pqOtpk = bundle.PqOneTimePreKey is not null
+                ? new X3dh.OneTimePreKeyBytes(0, bundle.PqOneTimePreKey, bundle.PqOneTimePreKeySig)
+                : null;
             var x3dhResult = X3dh.Initiate(Profile.SecretKey, new X3dh.RecipientBundle(
                 bundle.IdentityKey, bundle.SignedPreKey, bundle.SignedPreKeySig, bundle.SigningKey ?? Array.Empty<byte>(),
                 otpk, bundle.PqSignedPreKey, bundle.PqSignedPreKeySig, pqOtpk));

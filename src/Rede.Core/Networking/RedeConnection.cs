@@ -255,7 +255,10 @@ public class RedeConnection : IDisposable
         }
     }
 
-    private const int MaxOutgoingSize = 512 * 1024; // L3: 512KB outgoing limit
+    // L3: outgoing limit. 1 MB to match the server's WS frame cap (MAX_PAYLOAD)
+    // — a max-size BLOB_UPLOAD (700 KB blob, base64 ×1.33 ≈ 933 KB) must fit;
+    // the old 512 KB cap silently dropped it client-side.
+    private const int MaxOutgoingSize = 1_000_000;
 
     public bool Send(string type, JsonObject? payload = null)
     {

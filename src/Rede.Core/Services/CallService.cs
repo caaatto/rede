@@ -30,7 +30,8 @@ public class CallService : IDisposable
     private readonly RedeConnection _connection;
     private readonly ProfileStore _store;
     private AudioEngine? _audioEngine;
-    private SrtpSession? _srtpSession;
+    private SrtpSession? _srtpSend;
+    private SrtpSession? _srtpRecv;
 
     private CallState _state = CallState.Idle;
     private string? _callId;
@@ -38,6 +39,13 @@ public class CallService : IDisposable
     private CallMode _callMode;
     private byte[]? _srtpMasterKey;
     private byte[]? _srtpMasterSalt;
+    // SRTP v2: per-direction session keys (HKDF) + ROC-covering MAC. Negotiated
+    // via "v":2 in the offer's ratchet-encrypted srtpParams and an explicit
+    // {"v":2} ack in the CALL_ANSWER — either side missing it falls back to the
+    // legacy (shared-key, no-ROC-MAC) path unchanged.
+    private const int SrtpVersion = 2;
+    private bool _srtpV2;
+    private bool _isInitiator;
     private DateTime _callStartTime;
     private System.Timers.Timer? _offerTimeout;
 
@@ -117,6 +125,8 @@ public class CallService : IDisposable
         _callId = GenerateCallId();
         _remoteUserId = targetUserId;
         _state = CallState.Offering;
+        _isInitiator = true;
+        _srtpV2 = false; // enabled only when the answer acks v2
 
         // Generate SRTP key material
         (_srtpMasterKey, _srtpMasterSalt) = SrtpCrypto.GenerateKeyMaterial();
@@ -141,6 +151,7 @@ public class CallService : IDisposable
             {
                 srtpKey = Convert.ToBase64String(_srtpMasterKey),
                 srtpSalt = Convert.ToBase64String(_srtpMasterSalt),
+                v = SrtpVersion, // older callees ignore unknown fields → legacy
             });
 
             var result = DoubleRatchet.Encrypt(ratchetState, srtpPlaintext);
@@ -183,6 +194,7 @@ public class CallService : IDisposable
                     {
                         srtpKey = Convert.ToBase64String(_srtpMasterKey),
                         srtpSalt = Convert.ToBase64String(_srtpMasterSalt),
+                        v = SrtpVersion,
                     });
                     var result = DoubleRatchet.Encrypt(legacyState, srtpPlaintext);
                     legacySrtpParams = new JsonObject
@@ -271,6 +283,11 @@ public class CallService : IDisposable
             ["to"] = _remoteUserId,
             ["callId"] = _callId,
         };
+
+        // Ack SRTP v2 so the caller switches to per-direction keys + ROC MAC.
+        // Carries no key material — just the negotiated version.
+        if (_srtpV2)
+            payload["srtpParams"] = new JsonObject { ["v"] = SrtpVersion };
 
         _connection.Send(Msg.CallAnswer, payload);
         StartAudio();
@@ -374,6 +391,7 @@ public class CallService : IDisposable
         // Decrypt SRTP params from Double Ratchet envelope
         byte[]? srtpKey = null;
         byte[]? srtpSalt = null;
+        bool offerV2 = false;
 
         var srtpParams = msg["srtpParams"]?.AsObject();
 
@@ -448,6 +466,12 @@ public class CallService : IDisposable
                                 var doc = JsonDocument.Parse(plaintext);
                                 var keyB64 = doc.RootElement.GetProperty("srtpKey").GetString();
                                 var saltB64 = doc.RootElement.GetProperty("srtpSalt").GetString();
+                                if (doc.RootElement.TryGetProperty("v", out var vElem)
+                                    && vElem.ValueKind == JsonValueKind.Number
+                                    && vElem.GetInt32() >= SrtpVersion)
+                                {
+                                    offerV2 = true;
+                                }
                                 if (keyB64 is not null && saltB64 is not null)
                                 {
                                     srtpKey = Convert.FromBase64String(keyB64);
@@ -494,6 +518,8 @@ public class CallService : IDisposable
         _callMode = incomingMode;
         _srtpMasterKey = srtpKey;
         _srtpMasterSalt = srtpSalt;
+        _isInitiator = false;
+        _srtpV2 = offerV2;
 
         _state = CallState.Ringing;
 
@@ -511,6 +537,14 @@ public class CallService : IDisposable
     {
         var callId = msg["callId"]?.GetValue<string>();
         if (_state != CallState.Offering || callId != _callId) return;
+
+        // SRTP v2 only when the callee explicitly acked it — a legacy callee
+        // sends no srtpParams and both sides stay on the legacy path.
+        try
+        {
+            _srtpV2 = (msg["srtpParams"]?["v"]?.GetValue<int>() ?? 0) >= SrtpVersion;
+        }
+        catch { _srtpV2 = false; }
 
         _offerTimeout?.Stop();
         StartAudio();
@@ -568,11 +602,11 @@ public class CallService : IDisposable
 
     private void HandleBinaryFrame(byte[] data)
     {
-        if (_state != CallState.Connected || _srtpSession is null || _audioEngine is null)
+        if (_state != CallState.Connected || _srtpRecv is null || _audioEngine is null)
             return;
 
         // Decrypt SRTP → RTP, extract Opus payload, queue for playback
-        var rtpPacket = _srtpSession.Unprotect(data);
+        var rtpPacket = _srtpRecv.Unprotect(data);
         if (rtpPacket is null) return;
 
         // RTP payload starts after header
@@ -596,7 +630,49 @@ public class CallService : IDisposable
             return;
         }
 
-        _srtpSession = new SrtpSession(_srtpMasterKey, _srtpMasterSalt);
+        if (_srtpV2)
+        {
+            // v2: per-direction keys via HKDF. "offer" material protects the
+            // initiator's outgoing stream, "answer" the callee's. MAC covers
+            // the ROC (rocInAuth) so late-joining/rolled-over packets can't be
+            // replayed across ROC epochs.
+            byte[]? offerBytes = null;
+            byte[]? answerBytes = null;
+            try
+            {
+                offerBytes = Hkdf.DeriveKey(_srtpMasterKey, _srtpMasterSalt, "REDE-SRTPv2:offer", 30);
+                answerBytes = Hkdf.DeriveKey(_srtpMasterKey, _srtpMasterSalt, "REDE-SRTPv2:answer", 30);
+                var sendBytes = _isInitiator ? offerBytes : answerBytes;
+                var recvBytes = _isInitiator ? answerBytes : offerBytes;
+                var sendKey = sendBytes[..16];
+                var sendSalt = sendBytes[16..30];
+                var recvKey = recvBytes[..16];
+                var recvSalt = recvBytes[16..30];
+                try
+                {
+                    _srtpSend = new SrtpSession(sendKey, sendSalt, rocInAuth: true);
+                    _srtpRecv = new SrtpSession(recvKey, recvSalt, rocInAuth: true);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(sendKey);
+                    CryptographicOperations.ZeroMemory(sendSalt);
+                    CryptographicOperations.ZeroMemory(recvKey);
+                    CryptographicOperations.ZeroMemory(recvSalt);
+                }
+            }
+            finally
+            {
+                if (offerBytes is not null) CryptographicOperations.ZeroMemory(offerBytes);
+                if (answerBytes is not null) CryptographicOperations.ZeroMemory(answerBytes);
+            }
+        }
+        else
+        {
+            // Legacy: both directions share the master key (pre-v2 peers).
+            _srtpSend = new SrtpSession(_srtpMasterKey, _srtpMasterSalt);
+            _srtpRecv = new SrtpSession(_srtpMasterKey, _srtpMasterSalt);
+        }
         _audioEngine = new AudioEngine();
 
         // Apply saved audio settings from profile
@@ -630,11 +706,13 @@ public class CallService : IDisposable
 
     private ushort _rtpSeq;
     private uint _rtpTimestamp;
-    private uint _rtpSsrc = (uint)Random.Shared.Next();
+    // M2: Full 32-bit CSPRNG SSRC (Random.Shared.Next() never sets the top bit
+    // and is predictable).
+    private uint _rtpSsrc = BitConverter.ToUInt32(RandomNumberGenerator.GetBytes(4));
 
     private void OnLocalAudioFrame(byte[] opusFrame)
     {
-        if (_srtpSession is null) return;
+        if (_srtpSend is null) return;
 
         // Build RTP packet: 12-byte header + Opus payload
         var rtp = new byte[12 + opusFrame.Length];
@@ -655,7 +733,7 @@ public class CallService : IDisposable
         _rtpSeq++;
 
         // Encrypt with SRTP
-        var srtpPacket = _srtpSession.Protect(rtp);
+        var srtpPacket = _srtpSend.Protect(rtp);
 
         // Send as binary WebSocket frame
         _ = _connection.SendBinaryAsync(srtpPacket);
@@ -673,8 +751,10 @@ public class CallService : IDisposable
         _audioEngine?.Dispose();
         _audioEngine = null;
 
-        _srtpSession?.Dispose();
-        _srtpSession = null;
+        _srtpSend?.Dispose();
+        _srtpSend = null;
+        _srtpRecv?.Dispose();
+        _srtpRecv = null;
 
         if (_srtpMasterKey is not null) Array.Clear(_srtpMasterKey);
         if (_srtpMasterSalt is not null) Array.Clear(_srtpMasterSalt);
@@ -692,6 +772,8 @@ public class CallService : IDisposable
         _remoteUserId = null;
         _srtpMasterKey = null;
         _srtpMasterSalt = null;
+        _srtpV2 = false;
+        _isInitiator = false;
         _rtpSeq = 0;
         _rtpTimestamp = 0;
     }
@@ -719,7 +801,8 @@ public class CallService : IDisposable
         if (_state != CallState.Idle)
             HangUp();
         _audioEngine?.Dispose();
-        _srtpSession?.Dispose();
+        _srtpSend?.Dispose();
+        _srtpRecv?.Dispose();
         _offerTimeout?.Dispose();
     }
 }

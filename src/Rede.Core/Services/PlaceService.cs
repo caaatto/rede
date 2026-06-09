@@ -1841,6 +1841,41 @@ public class PlaceService : IDisposable
         }
         catch { return Task.CompletedTask; }
 
+        // H3: The ratcheted DM authenticates WHO sent this, not whether they may
+        // rewrite our local place state. A fresh placeholder (post-PLACE_INVITE,
+        // no metadata key yet) is accepted on TOFU from the inviter. For an
+        // established place the sender must be owner/admin per the CURRENT
+        // locally-trusted metadata, and owner-only changes (key rotation,
+        // ownership transfer, owner demotion) require the current owner.
+        var isPlaceholder = place.MetadataKey is null || place.MetadataKey.Length == 0;
+        if (!isPlaceholder)
+        {
+            if (senderId != place.CreatorId && !HasPermission(place, senderId, PlaceRole.Admin))
+            {
+                OnSystemMessage?.Invoke($"Rejected metadata update for \"{place.Name}\": sender {senderId} is not an admin.");
+                return Task.CompletedTask;
+            }
+
+            // Validate the incoming payload against a scratch instance before
+            // touching any local state.
+            var incoming = new Place();
+            if (!DecryptMetadata(encryptedMetadata, metadataKeyBytes, incoming))
+            {
+                OnSystemMessage?.Invoke($"Failed to decrypt place metadata from {senderId}");
+                return Task.CompletedTask;
+            }
+
+            var keyRotated = !CryptographicOperations.FixedTimeEquals(place.MetadataKey, metadataKeyBytes);
+            var creatorChanged = !string.IsNullOrEmpty(incoming.CreatorId) && incoming.CreatorId != place.CreatorId;
+            var ownerDemoted = place.Roles.TryGetValue(place.CreatorId, out var curOwnerRole)
+                && (!incoming.Roles.TryGetValue(place.CreatorId, out var newOwnerRole) || newOwnerRole < curOwnerRole);
+            if ((keyRotated || creatorChanged || ownerDemoted) && senderId != place.CreatorId)
+            {
+                OnSystemMessage?.Invoke($"Rejected metadata update for \"{place.Name}\" from {senderId}: owner-only change.");
+                return Task.CompletedTask;
+            }
+        }
+
         place.MetadataKey = metadataKeyBytes;
 
         if (DecryptMetadata(encryptedMetadata, metadataKeyBytes, place))

@@ -55,10 +55,22 @@ public class AuthService : IDisposable
         Profile = await _store.LoadProfileAsync(userId, passphrase);
         if (Profile is null) return false;
         MigrateTrayDefault(Profile);
+        ArmPinnedServerSigningKey();
 
         _conn.On(Msg.AuthChallenge, HandleAuthChallenge);
         SendAuth();
         return true;
+    }
+
+    /// <summary>
+    /// Arm inbound signature enforcement with the TOFU-pinned server signing key
+    /// BEFORE any traffic is sent. Without this, enforcement only kicks in after
+    /// AUTH_OK echoes the key back — leaving the whole auth handshake unverified.
+    /// </summary>
+    private void ArmPinnedServerSigningKey()
+    {
+        if (Profile?.ServerSigningKey is { Length: > 0 } pinned)
+            _conn.ServerSigningKey = pinned;
     }
 
     /// <summary>One-time upgrade: pre-v2.17 profiles had MinimizeToTray=false by default.
@@ -77,6 +89,7 @@ public class AuthService : IDisposable
         Profile = await _store.LoadProfileByHashAsync(hashHex, passphrase);
         if (Profile is null) return false;
         MigrateTrayDefault(Profile);
+        ArmPinnedServerSigningKey();
 
         _conn.On(Msg.AuthChallenge, HandleAuthChallenge);
         SendAuth();
@@ -228,11 +241,22 @@ public class AuthService : IDisposable
             else if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(Profile.ServerSigningKey, serverSigKeyBytes))
             {
                 OnSystemMessage?.Invoke("WARNING: Server signing key has CHANGED! Possible MITM attack.");
+                // Fail closed: keep enforcing with the pinned key. Never trust the
+                // unverified replacement, never leave enforcement disarmed.
+                _conn.ServerSigningKey = Profile.ServerSigningKey;
             }
             else
             {
                 _conn.ServerSigningKey = serverSigKeyBytes;
             }
+        }
+        else if (Profile.ServerSigningKey is { Length: > 0 })
+        {
+            // We have a pinned key but the server omitted (or malformed) its own.
+            // Keep enforcement armed with the pinned key — a MITM stripping the
+            // field must not be able to disable signature verification.
+            OnSystemMessage?.Invoke("WARNING: Server omitted its signing key — possible MITM. Continuing with pinned key.");
+            _conn.ServerSigningKey = Profile.ServerSigningKey;
         }
 
         // Store delivery token for sealed sender
@@ -402,12 +426,22 @@ public class AuthService : IDisposable
         if (bundle.PublicBundle.PqSignedPreKey is not null && bundle.PublicBundle.PqSignedPreKeySig is not null
             && bundle.PublicBundle.PqOneTimePreKeys is not null)
         {
+            // M1: pqOneTimePreKeys stays an array of plain base64 strings — the
+            // deployed server validates each entry as a raw ML-KEM-768 key.
+            // Per-key sigs travel in a parallel array (index-aligned); servers
+            // that don't know the field ignore it, newer ones can serve a
+            // pqOneTimePreKeySig alongside the pqOneTimePreKey.
             var pqOtpkArray = new JsonArray();
+            var pqOtpkSigArray = new JsonArray();
             foreach (var pqOtpk in bundle.PublicBundle.PqOneTimePreKeys)
+            {
                 pqOtpkArray.Add(JsonValue.Create(pqOtpk.Key));
+                pqOtpkSigArray.Add(JsonValue.Create(pqOtpk.Sig));
+            }
             uploadPayload["pqSignedPreKey"] = JsonValue.Create(bundle.PublicBundle.PqSignedPreKey);
             uploadPayload["pqSignedPreKeySig"] = JsonValue.Create(bundle.PublicBundle.PqSignedPreKeySig);
             uploadPayload["pqOneTimePreKeys"] = pqOtpkArray;
+            uploadPayload["pqOneTimePreKeySigs"] = pqOtpkSigArray;
         }
 
         _conn.Send(Msg.UploadPrekeys, uploadPayload);

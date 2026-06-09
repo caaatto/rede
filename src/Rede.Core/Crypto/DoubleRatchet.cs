@@ -238,6 +238,7 @@ public class DoubleRatchet
                     var decryptedSkipped = SecretBox.Open(ciphertext, nonce, skippedMk);
                     CryptoService.ZeroOut(skippedMk);
                     var result = MessagePadding.Unpad(decryptedSkipped);
+                    ZeroBackup(backup); // L3: don't leak the cloned chain/root keys
                     return result ?? System.Text.Encoding.UTF8.GetString(decryptedSkipped);
                 }
                 catch

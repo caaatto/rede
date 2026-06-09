@@ -40,7 +40,8 @@ public static class SrtpCrypto
     /// Input: complete RTP packet (header + payload).
     /// Output: RTP header + encrypted payload + 10-byte auth tag.
     /// </summary>
-    public static byte[] Protect(byte[] rtpPacket, byte[] cipherKey, byte[] authKey, byte[] sessionSalt, uint roc)
+    public static byte[] Protect(byte[] rtpPacket, byte[] cipherKey, byte[] authKey, byte[] sessionSalt, uint roc,
+        bool rocInAuth = false)
     {
         if (rtpPacket.Length < RtpHeaderMinLength)
             throw new ArgumentException("RTP packet too short");
@@ -63,8 +64,8 @@ public static class SrtpCrypto
         Buffer.BlockCopy(rtpPacket, 0, srtpPacket, 0, headerLen);
         Buffer.BlockCopy(encrypted, 0, srtpPacket, headerLen, payloadLen);
 
-        // Compute auth tag over header + encrypted payload
-        var tag = ComputeAuthTag(authKey, srtpPacket, 0, rtpPacket.Length);
+        // Compute auth tag over header + encrypted payload (v2: || ROC per RFC 3711 §4.2)
+        var tag = ComputeAuthTag(authKey, srtpPacket, 0, rtpPacket.Length, rocInAuth ? roc : null);
         Buffer.BlockCopy(tag, 0, srtpPacket, rtpPacket.Length, AuthTagLength);
 
         return srtpPacket;
@@ -75,15 +76,16 @@ public static class SrtpCrypto
     /// Input: SRTP packet (header + encrypted payload + 10-byte auth tag).
     /// Output: RTP packet (header + plaintext payload), or null if auth fails.
     /// </summary>
-    public static byte[]? Unprotect(byte[] srtpPacket, byte[] cipherKey, byte[] authKey, byte[] sessionSalt, uint roc)
+    public static byte[]? Unprotect(byte[] srtpPacket, byte[] cipherKey, byte[] authKey, byte[] sessionSalt, uint roc,
+        bool rocInAuth = false)
     {
         if (srtpPacket.Length < RtpHeaderMinLength + AuthTagLength)
             return null;
 
         int authStart = srtpPacket.Length - AuthTagLength;
 
-        // Verify auth tag
-        var expectedTag = ComputeAuthTag(authKey, srtpPacket, 0, authStart);
+        // Verify auth tag (v2: MAC input includes the ROC per RFC 3711 §4.2)
+        var expectedTag = ComputeAuthTag(authKey, srtpPacket, 0, authStart, rocInAuth ? roc : null);
         if (!CryptographicOperations.FixedTimeEquals(
             new ReadOnlySpan<byte>(srtpPacket, authStart, AuthTagLength),
             new ReadOnlySpan<byte>(expectedTag, 0, AuthTagLength)))
@@ -173,10 +175,23 @@ public static class SrtpCrypto
         return result;
     }
 
-    private static byte[] ComputeAuthTag(byte[] authKey, byte[] data, int offset, int length)
+    private static byte[] ComputeAuthTag(byte[] authKey, byte[] data, int offset, int length, uint? roc = null)
     {
         using var hmac = new HMACSHA1(authKey);
-        var hash = hmac.ComputeHash(data, offset, length);
+        byte[] hash;
+        if (roc is uint r)
+        {
+            // RFC 3711 §4.2: authenticated portion = M || ROC (4-byte big-endian).
+            // Legacy (v1) calls omit the ROC — keep that path byte-identical.
+            hmac.TransformBlock(data, offset, length, null, 0);
+            var rocBytes = new[] { (byte)(r >> 24), (byte)(r >> 16), (byte)(r >> 8), (byte)r };
+            hmac.TransformFinalBlock(rocBytes, 0, rocBytes.Length);
+            hash = hmac.Hash!;
+        }
+        else
+        {
+            hash = hmac.ComputeHash(data, offset, length);
+        }
         var tag = new byte[AuthTagLength];
         Buffer.BlockCopy(hash, 0, tag, 0, AuthTagLength);
         return tag;

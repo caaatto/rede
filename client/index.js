@@ -53,11 +53,14 @@ if (!userId) {
 }
 
 // --- Passphrase prompt ---
-function askPassphrase(prompt) {
+function askPassphrase(prompt, keepEnv = false) {
   // Auto-fill from environment variable if available (for automation)
   if (process.env.REDE_AUTO_PASSPHRASE) {
+    process.stderr.write('[WARNING] Using REDE_AUTO_PASSPHRASE env var — visible via /proc and ps. Use interactive prompt for security.\n');
     process.stderr.write(prompt + '***\n');
-    return Promise.resolve(process.env.REDE_AUTO_PASSPHRASE);
+    const pass = process.env.REDE_AUTO_PASSPHRASE;
+    if (!keepEnv) delete process.env.REDE_AUTO_PASSPHRASE;
+    return Promise.resolve(pass);
   }
 
   return new Promise((resolve) => {
@@ -93,7 +96,7 @@ async function main() {
   let passphrase;
 
   if (isNewUser) {
-    passphrase = await askPassphrase('Create passphrase (encrypts your keys): ');
+    passphrase = await askPassphrase('Create passphrase (encrypts your keys): ', true);
     if (passphrase.length < 12) {
       console.error('Passphrase must be at least 12 characters.');
       process.exit(1);
@@ -309,6 +312,8 @@ async function main() {
 
   // --- Queued messages for device discovery ---
   const pendingDeviceDiscovery = new Map(); // userId -> [raw msg, ...]
+  const MAX_PENDING_DISCOVERY_MSGS = 16;   // per-user queue cap
+  const MAX_PENDING_DISCOVERY_USERS = 32;  // distinct users with pending queues
 
   // --- Ratcheted receive helper (multi-device) ---
   function receiveRatcheted(msg) {
@@ -337,11 +342,25 @@ async function main() {
         // Unknown device — queue message and refresh device list from server
         if (fromDeviceId) {
           if (!pendingDeviceDiscovery.has(msg.from)) {
+            // Bound the number of distinct users with pending queues
+            if (pendingDeviceDiscovery.size >= MAX_PENDING_DISCOVERY_USERS) {
+              ui.showSystemMessage(`Device discovery queue full — message from ${escapeContent(msg.from)} dropped.`);
+              return null;
+            }
             pendingDeviceDiscovery.set(msg.from, []);
             // Trigger device list refresh
             conn.send(MSG.USER_LOOKUP, { lookupId: msg.from });
           }
-          pendingDeviceDiscovery.get(msg.from).push(msg);
+          const queue = pendingDeviceDiscovery.get(msg.from);
+          if (queue.length >= MAX_PENDING_DISCOVERY_MSGS) {
+            // Drop oldest to bound memory; log only on first overflow per queue
+            if (!queue.overflowed) {
+              queue.overflowed = true;
+              ui.showSystemMessage(`Device discovery queue full for ${escapeContent(msg.from)} — dropping oldest queued message(s).`);
+            }
+            queue.shift();
+          }
+          queue.push(msg);
           ui.showSystemMessage(`New device from ${escapeContent(msg.from)} — verifying...`);
           return null;
         }
@@ -350,9 +369,11 @@ async function main() {
       }
 
       const otpkUsed = msg.x3dh.usedOTPKId !== null && msg.x3dh.usedOTPKId !== undefined;
+      // Peek only — the OTPK is consumed after a successful decrypt below,
+      // so undecryptable messages cannot drain the one-time pre-key pool
       const otpkSecret = otpkUsed
         ? (() => {
-            const key = store.consumeOneTimePreKey(profile, msg.x3dh.usedOTPKPub, passphrase);
+            const key = store.peekOneTimePreKey(profile, msg.x3dh.usedOTPKPub);
             return key ? key.secretKey : null;
           })()
         : null;
@@ -390,6 +411,8 @@ async function main() {
 
           const plaintext = cryptoMod.ratchetDecrypt(ratchetState, msg.header, msg.encrypted, msg.nonce);
           if (plaintext !== null && plaintext !== undefined) {
+            // Decrypt succeeded — consume the OTPK only if it was actually used
+            if (otpk) store.consumeOneTimePreKey(profile, msg.x3dh.usedOTPKPub, passphrase);
             store.saveRatchetState(profile, msg.from, ratchetState, passphrase, fromDeviceId);
             return plaintext;
           }
@@ -716,6 +739,7 @@ async function main() {
       const contact = profile.contacts[msg.userId];
       if (contact && devices) {
         const oldDevices = contact.devices || {};
+        const validated = {};
         let changedDevices = [];
         for (const [dId, dInfo] of Object.entries(devices)) {
           if (typeof dInfo !== 'object' || !dInfo.publicKey || !dInfo.signingKey) continue;
@@ -725,6 +749,7 @@ async function main() {
             const sk = cryptoMod.decodeBase64(dInfo.signingKey);
             if (pk.length !== 32 || sk.length !== 32) continue;
           } catch { continue; }
+          validated[dId] = dInfo;
           const old = oldDevices[dId];
           if (old && (old.publicKey !== dInfo.publicKey || old.signingKey !== dInfo.signingKey)) {
             changedDevices.push(dId);
@@ -733,9 +758,9 @@ async function main() {
         if (changedDevices.length > 0) {
           ui.showSystemMessage(`[SECURITY] Device key change detected for ${escapeContent(displayName)}: ${changedDevices.join(', ')}. Verify out-of-band!`);
         }
-        contact.devices = devices;
+        contact.devices = validated;
         store.saveProfile(profile, passphrase);
-        ui.showSystemMessage(`Device list updated for ${escapeContent(displayName)} (${Object.keys(devices).length} device(s))`);
+        ui.showSystemMessage(`Device list updated for ${escapeContent(displayName)} (${Object.keys(validated).length} device(s))`);
       }
       // Retry queued messages
       for (const qMsg of queued) {
