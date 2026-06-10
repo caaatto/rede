@@ -112,14 +112,14 @@ public class BlobService : IDisposable
         var att = new AttachmentInfo
         {
             BlobId = blobId,
-            Key = key,
+            Key = (byte[])key.Clone(),
             Nonce = nonce,
             Name = fileName,
             MimeType = mimeType,
             Size = plainData.Length,
         };
 
-        // Zero the local key copy (AttachmentInfo now owns its own copy)
+        // Zero the local key copy (AttachmentInfo owns its own clone)
         CryptographicOperations.ZeroMemory(key);
 
         return att;

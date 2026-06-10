@@ -961,6 +961,9 @@ public partial class MainWindow : Window
         _contacts = new ContactService(_conn, _store);
         _groups = new GroupService(_conn, _store);
         _places = new PlaceService(_conn, _store);
+        // Sender-key / member-list distribution goes through the ratcheted DM channel
+        _groups.Chat = _chat;
+        _places.Chat = _chat;
         _blobs = new BlobService(_conn);
         _devices = new DeviceService(_conn, _store);
         _call = new CallService(_conn, _store);
@@ -1213,7 +1216,7 @@ public partial class MainWindow : Window
             _pendingDevices.TryAdd($"{targetUserId}:{deviceId}", (publicKey, signingKey));
         };
 
-        _chat.OnGroupKeyReceived += (groupId, name, key, sig, senderId) =>
+        _chat.OnGroupKeyReceived += (groupId, name, key, sig, senderId, members, membersSig) =>
         {
             // K4: Snapshot to local variables before async boundary
             var profile = _auth?.Profile;
@@ -1259,15 +1262,43 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // Take over the signed member list if present and valid; otherwise fall
+            // back to {inviter, self} so sender-key exchange works at minimum
+            var memberList = new List<string>();
+            if (members is not null && membersSig is not null)
+            {
+                var mPayload = $"GROUPMEMBERS:{groupId}:{string.Join(",", members.OrderBy(m => m, StringComparer.Ordinal))}";
+                if (Rede.Core.Crypto.CryptoService.VerifyBytes(
+                        System.Text.Encoding.UTF8.GetBytes(mPayload), membersSig, sender.SigningKey))
+                {
+                    memberList = new List<string>(members);
+                }
+            }
+            if (!memberList.Contains(senderId)) memberList.Add(senderId);
+            if (!memberList.Contains(profile.UserId)) memberList.Add(profile.UserId);
+
             Task.Run(async () =>
             {
-                await _store.AddGroupAsync(profile, groupId, safeName, keyBytes, null, passphrase);
+                await _store.AddGroupAsync(profile, groupId, safeName, keyBytes, memberList, passphrase);
                 Dispatcher.UIThread.Post(() =>
                 {
-                    _mainVm.AddSystemMessage($"Received group key for \"{safeName}\"");
+                    _mainVm.AddSystemMessage($"Received group key for \"{safeName}\" ({memberList.Count} member(s))");
                     RefreshGroups();
                 });
             });
+        };
+
+        _chat.OnGroupMembersReceived += (groupId, members, sig, senderId) =>
+        {
+            _groups?.AcceptGroupMembers(groupId, members, sig, senderId);
+        };
+
+        _chat.OnSenderKeyReceived += (contextId, chainKey, messageNumber, sig, senderId) =>
+        {
+            if (contextId.StartsWith("place:", StringComparison.Ordinal))
+                _places?.AcceptSenderKey(contextId, chainKey, messageNumber, sig, senderId);
+            else
+                _groups?.AcceptSenderKey(contextId, chainKey, messageNumber, sig, senderId);
         };
 
         // Contact events

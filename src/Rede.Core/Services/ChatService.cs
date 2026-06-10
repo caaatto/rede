@@ -41,7 +41,10 @@ public class ChatService : IDisposable
     //  DisplayText: user-visible body for local persistence,
     //  Attachments: AttachmentInfos to persist alongside DisplayText, may be null,
     //  Ttl: passthrough)
-    private readonly Dictionary<string, List<(string WireText, string DisplayText, List<AttachmentInfo>? Attachments, int Ttl)>> _pendingOutgoing = new();
+    // Persisted: non-null when the message was already sent+persisted via existing
+    // per-device sessions — the bundle path must then only establish the remaining
+    // sessions and reuse the SAME ChatMessage (no duplicate history entry).
+    private readonly Dictionary<string, List<(string WireText, string DisplayText, List<AttachmentInfo>? Attachments, int Ttl, ChatMessage? Persisted)>> _pendingOutgoing = new();
 
     // Tracks the profile fingerprint we last successfully queued to each contact
     // this session. EnsureProfileSentTo re-sends only when the fingerprint
@@ -83,7 +86,9 @@ public class ChatService : IDisposable
     public event Action<string, string, int>? OnMessageSent; // chatId, text, ttl
     public event Action<string, string>? OnOwnMessageIdAssigned; // contactId, msgId
     public event Action<string, string, string, Dictionary<string, List<string>>>? OnReactionUpdated; // chatId, msgId, emoji, reactions
-    public event Action<string, string, string, string, string>? OnGroupKeyReceived; // groupId, name, key, sig, senderId
+    public event Action<string, string, string, string, string, List<string>?, string?>? OnGroupKeyReceived; // groupId, name, key, sig, senderId, members?, membersSig?
+    public event Action<string, List<string>, string, string>? OnGroupMembersReceived; // groupId, members (signed by sender), sig, senderId
+    public event Action<string, string, int, string, string>? OnSenderKeyReceived; // contextId (groupId or place:placeId:channelId), chainKeyB64, messageNumber, sig, senderId
     public event Action<string, string, string, string>? OnPlaceKeyReceived; // placeId, metadataKey, encryptedMetadata, senderId
     public event Action<string, string?, string?, string?>? OnProfileReceived; // senderId, accentColor, avatarData, avatarMimeType
     public event Action<string, string, string, string>? OnNewDeviceDetected; // targetUserId, deviceId, publicKey, signingKey
@@ -315,9 +320,16 @@ public class ChatService : IDisposable
                 needBundle.Add(devId);
         }
 
-        // Legacy (no device ID) ratchet check
-        if (deviceIds.Count == 0 && _store.LoadRatchetState(Profile, targetId) is not null)
-            haveSessions.Add(null);
+        // Legacy (no device ID) ratchet check. If there are no known devices AND no
+        // legacy session, still fetch the bundle — otherwise the message would
+        // silently vanish (no send, no fetch, no feedback).
+        if (deviceIds.Count == 0)
+        {
+            if (_store.LoadRatchetState(Profile, targetId) is not null)
+                haveSessions.Add(null);
+            else
+                needBundle.Add(string.Empty);
+        }
 
         // Pre-create the persisted message (null for control messages so ACKs consume
         // their own slot without stamping anything). The same reference is pushed onto
@@ -361,7 +373,8 @@ public class ChatService : IDisposable
                 OnSystemMessage?.Invoke("Too many pending messages - wait for session to establish.");
                 return;
             }
-            _pendingOutgoing[targetId].Add((wireText, text, attachments, ttl));
+            _pendingOutgoing[targetId].Add((wireText, text, attachments, ttl,
+                sentAny && persistedMsg is not null ? persistedMsg : null));
             _conn.Send(Msg.FetchPrekeyBundle, ProtocolSerializer.Payload(
                 ("targetUserId", JsonValue.Create(targetId))
             ));
@@ -482,6 +495,10 @@ public class ChatService : IDisposable
         var plaintext = ReceiveRatcheted(msg, from);
         if (plaintext is null) return;
 
+        // Control messages need a verified signing key — ignore from unknown senders
+        var senderKnown = Profile.Contacts.ContainsKey(from);
+        if (!senderKnown && plaintext.Contains("\"__rede_ctrl\"")) return;
+
         // Check for control messages (group key distribution, reactions)
         if (TryHandleControlMessage(plaintext, from)) return;
 
@@ -502,7 +519,10 @@ public class ChatService : IDisposable
         };
         _store.AddChatMessage(Profile, from, chatMsg, Passphrase);
 
-        EnsureProfileSentTo(from);
+        if (senderKnown)
+            EnsureProfileSentTo(from);
+        else
+            OnSystemMessage?.Invoke($"New message from unknown user {from} (stored). Add the contact to reply - verify the fingerprint out-of-band!");
         OnMessageReceived?.Invoke(from, sanitized, from, ts, false, msgId, chatMsg);
     }
 
@@ -542,6 +562,10 @@ public class ChatService : IDisposable
         var plaintext = ReceiveRatcheted(innerObj, from);
         if (plaintext is null) return;
 
+        // Control messages need a verified signing key — ignore from unknown senders
+        var senderKnown = Profile.Contacts.ContainsKey(from);
+        if (!senderKnown && plaintext.Contains("\"__rede_ctrl\"")) return;
+
         // Check for control messages (group key distribution, reactions)
         if (TryHandleControlMessage(plaintext, from)) return;
 
@@ -564,7 +588,10 @@ public class ChatService : IDisposable
         };
         _store.AddChatMessage(Profile, from, chatMsg, Passphrase);
 
-        EnsureProfileSentTo(from);
+        if (senderKnown)
+            EnsureProfileSentTo(from);
+        else
+            OnSystemMessage?.Invoke($"New message from unknown user {from} (stored). Add the contact to reply - verify the fingerprint out-of-band!");
         OnMessageReceived?.Invoke(from, sanitized, from, ts, true, msgId, chatMsg);
     }
 
@@ -572,8 +599,11 @@ public class ChatService : IDisposable
     {
         if (Profile is null || Passphrase is null) return null;
 
-        if (!Profile.Contacts.TryGetValue(from, out var contact))
-            return null;
+        // Unknown sender: process the X3DH anyway (TOFU — the first message defines
+        // the identity; adding the contact + fingerprint verification happens later).
+        // Dropping the initial message would leave the session permanently broken,
+        // because the server has already deleted its pending copy.
+        Profile.Contacts.TryGetValue(from, out var contact);
 
         var fromDeviceId = ProtocolSerializer.GetString(msg, "fromDeviceId");
         var headerNode = msg["header"];
@@ -590,7 +620,7 @@ public class ChatService : IDisposable
         return null;
     }
 
-    private string? HandleX3dhMessage(JsonObject msg, string from, string? fromDeviceId, Contact contact)
+    private string? HandleX3dhMessage(JsonObject msg, string from, string? fromDeviceId, Contact? contact)
     {
         if (Profile is null || Passphrase is null) return null;
 
@@ -608,8 +638,10 @@ public class ChatService : IDisposable
         }
         catch { return null; }
 
-        // Verify identity key — constant-time compare against known devices
-        bool verified = contact.Devices.Values.Any(d =>
+        // Verify identity key — constant-time compare against known devices.
+        // Unknown sender (contact == null): TOFU, nothing to compare against yet.
+        bool verified = contact is null
+                        || contact.Devices.Values.Any(d =>
                             d.PublicKey.Length == 32 &&
                             System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(d.PublicKey, identityKey))
                         || (contact.PublicKey.Length == 32 &&
@@ -987,15 +1019,18 @@ public class ChatService : IDisposable
 
         // Pre-create the persisted message for this initial send (control messages
         // don't get persisted but still need per-send ACK slots in _pendingAck).
+        // If the message was already persisted via existing sessions, reuse that
+        // instance — a second ChatMessage would show up as a duplicate bubble.
         bool initIsControl = pending.WireText.Contains("\"__rede_ctrl\"");
-        ChatMessage? initPersistedMsg = initIsControl ? null : new ChatMessage
+        bool alreadyPersisted = pending.Persisted is not null;
+        ChatMessage? initPersistedMsg = pending.Persisted ?? (initIsControl ? null : new ChatMessage
         {
             From = Profile.UserId,
             Text = pending.DisplayText,
             Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             Ttl = pending.Ttl,
             Attachments = pending.Attachments,
-        };
+        });
 
         int successCount = 0;
         foreach (var bundle in deviceBundles)
@@ -1104,7 +1139,7 @@ public class ChatService : IDisposable
 
         if (successCount > 0)
         {
-            if (initPersistedMsg is not null)
+            if (initPersistedMsg is not null && !alreadyPersisted)
             {
                 _store.AddChatMessage(Profile, targetUserId, initPersistedMsg, Passphrase);
                 OnMessageSent?.Invoke(targetUserId, pending.DisplayText, pending.Ttl);
@@ -1178,7 +1213,34 @@ public class ChatService : IDisposable
                 var sig = root.GetProperty("sig").GetString();
                 if (groupId is not null && name is not null && key is not null && sig is not null)
                 {
-                    OnGroupKeyReceived?.Invoke(groupId, name, key, sig, from);
+                    var members = TryReadMembersList(root, "members");
+                    var membersSig = root.TryGetProperty("membersSig", out var msEl) ? msEl.GetString() : null;
+                    OnGroupKeyReceived?.Invoke(groupId, name, key, sig, from, members, membersSig);
+                    return true;
+                }
+            }
+
+            if (ctrl.GetString() == "groupmembers")
+            {
+                var groupId = root.GetProperty("groupId").GetString();
+                var members = TryReadMembersList(root, "members");
+                var sig = root.TryGetProperty("sig", out var gmSig) ? gmSig.GetString() : null;
+                if (groupId is not null && members is not null && sig is not null)
+                {
+                    OnGroupMembersReceived?.Invoke(groupId, members, sig, from);
+                    return true;
+                }
+            }
+
+            if (ctrl.GetString() == "senderkey")
+            {
+                var contextId = root.GetProperty("groupId").GetString();
+                var chainKey = root.TryGetProperty("chainKey", out var ckEl) ? ckEl.GetString() : null;
+                var messageNumber = root.TryGetProperty("messageNumber", out var mnEl) && mnEl.TryGetInt32(out var mnVal) ? mnVal : 0;
+                var sig = root.TryGetProperty("sig", out var skSig) ? skSig.GetString() : null;
+                if (contextId is not null && chainKey is not null && sig is not null)
+                {
+                    OnSenderKeyReceived?.Invoke(contextId, chainKey, messageNumber, sig, from);
                     return true;
                 }
             }
@@ -1222,6 +1284,22 @@ public class ChatService : IDisposable
         }
         catch { }
         return false;
+    }
+
+    /// <summary>Read a bounded string array from a control message (max 256 entries, 64 chars each).</summary>
+    private static List<string>? TryReadMembersList(JsonElement root, string propName)
+    {
+        if (!root.TryGetProperty(propName, out var arr) || arr.ValueKind != JsonValueKind.Array) return null;
+        if (arr.GetArrayLength() > 256) return null;
+        var result = new List<string>();
+        foreach (var el in arr.EnumerateArray())
+        {
+            if (el.ValueKind != JsonValueKind.String) return null;
+            var s = el.GetString();
+            if (string.IsNullOrEmpty(s) || s.Length > 64) return null;
+            result.Add(s);
+        }
+        return result;
     }
 
     /// <summary>Strip ANSI escapes and control characters. Mirrors: escapeContent() in index.js</summary>

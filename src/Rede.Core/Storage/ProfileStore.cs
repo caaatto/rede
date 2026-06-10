@@ -655,12 +655,28 @@ public class ProfileStore
 
     public async Task AddGroupAsync(Profile profile, string groupId, string name, byte[] groupKey, List<string>? members, byte[] passphrase)
     {
-        profile.Groups[groupId] = new Group
+        if (profile.Groups.TryGetValue(groupId, out var existing))
         {
-            Name = name,
-            Key = groupKey,
-            Members = members ?? new(),
-        };
+            // Merge — a server-invite placeholder and the signed groupkey DM can
+            // arrive in either order; never wipe the member list already learned
+            existing.Name = name;
+            existing.Key = groupKey;
+            if (members is not null)
+            {
+                existing.Members ??= new();
+                foreach (var m in members)
+                    if (!existing.Members.Contains(m)) existing.Members.Add(m);
+            }
+        }
+        else
+        {
+            profile.Groups[groupId] = new Group
+            {
+                Name = name,
+                Key = groupKey,
+                Members = members ?? new(),
+            };
+        }
         await SaveProfileAsync(profile, passphrase);
     }
 

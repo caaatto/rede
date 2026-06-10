@@ -147,7 +147,10 @@ async function main() {
   let currentTTL = 0;
   let currentChatTarget = null;
   let currentChatType = null;
-  let pendingOutgoing = null; // { target, text, ttl } — queued while awaiting pre-key bundle
+  // Queue (was a single slot — a second send before the bundle arrived used to
+  // silently overwrite the first, e.g. /ginvite's groupkey+senderkey pair)
+  const pendingOutgoingQueue = []; // [{ target, text, ttl }, ...] — queued while awaiting pre-key bundle
+  const MAX_PENDING_OUTGOING = 32;
 
   const connOpts = { useTor, useI2P };
   if (torProxy) connOpts.torProxy = torProxy;
@@ -302,8 +305,15 @@ async function main() {
 
     // Fetch pre-key bundles for devices without sessions
     if (needBundle.length > 0) {
-      pendingOutgoing = { target: targetId, text, ttl };
-      conn.send(MSG.FETCH_PREKEY_BUNDLE, { targetUserId: targetId });
+      if (pendingOutgoingQueue.length >= MAX_PENDING_OUTGOING) {
+        ui.showSystemMessage('Too many messages waiting for session setup — dropped.');
+        return;
+      }
+      const alreadyFetching = pendingOutgoingQueue.some((p) => p.target === targetId);
+      pendingOutgoingQueue.push({ target: targetId, text, ttl });
+      if (!alreadyFetching) {
+        conn.send(MSG.FETCH_PREKEY_BUNDLE, { targetUserId: targetId });
+      }
       if (haveSessions.length === 0) {
         ui.showSystemMessage('Establishing secure session...');
       }
@@ -316,14 +326,19 @@ async function main() {
   const MAX_PENDING_DISCOVERY_USERS = 32;  // distinct users with pending queues
 
   // --- Ratcheted receive helper (multi-device) ---
-  function receiveRatcheted(msg) {
+  // allowUnknown: process X3DH from senders that are not contacts yet (TOFU —
+  // the first message defines the identity, /add + fingerprint verify later).
+  // Without this the initial message was dropped, the server-side pending copy
+  // already deleted, and the session permanently broken in both directions.
+  function receiveRatcheted(msg, allowUnknown = false) {
     const contact = profile.contacts[msg.from];
-    if (!contact) return null;
+    if (!contact && !allowUnknown) return null;
 
     const fromDeviceId = msg.fromDeviceId || null;
 
     // Verify sender's identity key against known device keys
     function verifyIdentityKey(identityKey) {
+      if (!contact) return true; // unknown sender — TOFU, nothing to compare against
       if (contact.devices) {
         for (const dev of Object.values(contact.devices)) {
           if (dev.publicKey === identityKey) return true;
@@ -589,7 +604,21 @@ async function main() {
 
     const contact = profile.contacts[msg.from];
     if (!contact) {
-      ui.showSystemMessage(`Message from unknown user ${escapeContent(msg.from)}. Use /add ${escapeContent(msg.from)}`);
+      // Process anyway (TOFU) — dropping the X3DH initial message would leave the
+      // session permanently broken, since the server already deleted its copy
+      const unknownPlaintext = receiveRatcheted(msg, true);
+      if (unknownPlaintext === null || unknownPlaintext === undefined) {
+        ui.showSystemMessage(`Message from unknown user ${escapeContent(msg.from)} (not decryptable). Use /add ${escapeContent(msg.from)}`);
+        return;
+      }
+      // Ignore control messages from unknown senders (need a verified signing key)
+      let unknownCtrl = null;
+      try { unknownCtrl = JSON.parse(unknownPlaintext); } catch {}
+      if (unknownCtrl && unknownCtrl.__rede_ctrl) return;
+      store.addChatMessage(profile, msg.from, {
+        from: msg.from, text: unknownPlaintext, ts: Date.now(), ttl: msg.ttl || 0,
+      }, passphrase);
+      ui.showSystemMessage(`New message from unknown user ${escapeContent(msg.from)} (stored). Use /add ${escapeContent(msg.from)} to reply — verify the fingerprint out-of-band!`);
       return;
     }
 
@@ -643,9 +672,60 @@ async function main() {
           ui.showSystemMessage(`REJECTED group key from ${escapeContent(msg.from)} — invalid signature! Possible attack.`);
           return;
         }
-        store.addGroup(profile, ctrl.groupId, ctrl.name, ctrl.key, [], passphrase);
+        // Take over the member list if it is signed by the inviter; otherwise
+        // fall back to {inviter, self} so sender-key exchange works at minimum
+        let members = [];
+        if (Array.isArray(ctrl.members) && ctrl.members.length <= 256 && ctrl.membersSig &&
+            ctrl.members.every((m) => typeof m === 'string' && m.length > 0 && m.length <= 64)) {
+          const mPayload = `GROUPMEMBERS:${ctrl.groupId}:${ctrl.members.slice().sort().join(',')}`;
+          const mBytes = require('tweetnacl-util').decodeUTF8(mPayload);
+          if (cryptoMod.verifyBytes(mBytes, ctrl.membersSig, contact.signingKey)) {
+            members = ctrl.members.slice();
+          }
+        }
+        if (!members.includes(msg.from)) members.push(msg.from);
+        if (!members.includes(profile.userId)) members.push(profile.userId);
+        store.addGroup(profile, ctrl.groupId, ctrl.name, ctrl.key, members, passphrase);
         refreshContactList();
-        ui.showSystemMessage(`Joined group "${escapeContent(ctrl.name)}" (verified key from ${escapeContent(msg.from)})`);
+        ui.showSystemMessage(`Joined group "${escapeContent(ctrl.name)}" (verified key from ${escapeContent(msg.from)}, ${members.length} member(s))`);
+      } else if (ctrl.__rede_ctrl === 'groupmembers' && ctrl.groupId && Array.isArray(ctrl.members)) {
+        // Signed member-list update from an existing member (e.g. after an invite/kick)
+        const group = profile.groups[ctrl.groupId];
+        if (!group) return;
+        if (group.members && group.members.length > 0 && !group.members.includes(msg.from)) {
+          ui.showSystemMessage(`REJECTED member list for group from non-member ${escapeContent(msg.from)}`);
+          return;
+        }
+        if (!ctrl.sig || !contact.signingKey) return;
+        if (ctrl.members.length > 256 ||
+            !ctrl.members.every((m) => typeof m === 'string' && m.length > 0 && m.length <= 64)) return;
+        const mPayload = `GROUPMEMBERS:${ctrl.groupId}:${ctrl.members.slice().sort().join(',')}`;
+        const mBytes = require('tweetnacl-util').decodeUTF8(mPayload);
+        if (!cryptoMod.verifyBytes(mBytes, ctrl.sig, contact.signingKey)) {
+          ui.showSystemMessage(`REJECTED member list from ${escapeContent(msg.from)} — invalid signature!`);
+          return;
+        }
+        // Union-merge only — members are never removed via this path (kicks go through GROUP_KICK)
+        if (!group.members) group.members = [];
+        const added = [];
+        for (const m of ctrl.members) {
+          if (!group.members.includes(m)) { group.members.push(m); added.push(m); }
+        }
+        if (added.length > 0) {
+          store.saveProfile(profile, passphrase);
+          ui.showSystemMessage(`Group member list updated by ${escapeContent(msg.from)} (+${added.length})`);
+          // Redistribute our own sender key so the new members can decrypt us
+          const skState = store.loadSenderKeyState(profile, ctrl.groupId);
+          if (skState && skState.own) {
+            for (const m of added) {
+              if (m === profile.userId || !profile.contacts[m]) continue;
+              const skSigPayload = `SENDERKEY:${ctrl.groupId}:${skState.own.chainKey}:${skState.own.messageNumber}`;
+              const skSig = cryptoMod.signString(skSigPayload, profile.signingSecretKey);
+              const skMsg = JSON.stringify({ __rede_ctrl: 'senderkey', groupId: ctrl.groupId, chainKey: skState.own.chainKey, messageNumber: skState.own.messageNumber, sig: skSig });
+              sendRatcheted(m, skMsg, 120);
+            }
+          }
+        }
       }
       return;
     }
@@ -809,14 +889,21 @@ async function main() {
     }
   });
 
-  // Pre-key bundle received — complete X3DH and send pending message (multi-device)
+  // Pre-key bundle received — complete X3DH and send pending messages (multi-device)
   conn.on(MSG.PREKEY_BUNDLE, (msg) => {
-    if (!pendingOutgoing || pendingOutgoing.target !== msg.targetUserId) return;
+    // Collect ALL queued messages for this target (preserving order)
+    const queuedForTarget = [];
+    for (let i = pendingOutgoingQueue.length - 1; i >= 0; i--) {
+      if (pendingOutgoingQueue[i].target === msg.targetUserId) {
+        queuedForTarget.unshift(pendingOutgoingQueue.splice(i, 1)[0]);
+      }
+    }
+    if (queuedForTarget.length === 0) return;
+    const pendingOutgoing = queuedForTarget[0]; // first message rides along with the X3DH init
 
     const contact = profile.contacts[msg.targetUserId];
     if (!contact) {
       ui.showSystemMessage(`Cannot establish session — ${escapeContent(msg.targetUserId)} is not a contact.`);
-      pendingOutgoing = null;
       return;
     }
 
@@ -911,25 +998,31 @@ async function main() {
     }
 
     if (successCount > 0) {
-      const time = new Date().toLocaleTimeString();
-      const ttlInfo = pendingOutgoing.ttl > 0 ? ` [${pendingOutgoing.ttl}s]` : '';
-      store.addChatMessage(profile, msg.targetUserId, {
-        from: profile.userId, text: pendingOutgoing.text, ts: Date.now(), ttl: pendingOutgoing.ttl,
-      }, passphrase);
-      if (currentChatTarget === msg.targetUserId) {
-        ui.addChatLine(`${time} You: ${escapeContent(pendingOutgoing.text)}${ttlInfo}`);
+      // Control messages (groupkey/senderkey/groupmembers/...) must not show
+      // up in the chat history — only persist/display real user messages
+      const isCtrl = pendingOutgoing.text.includes('"__rede_ctrl"');
+      if (!isCtrl) {
+        const time = new Date().toLocaleTimeString();
+        const ttlInfo = pendingOutgoing.ttl > 0 ? ` [${pendingOutgoing.ttl}s]` : '';
+        store.addChatMessage(profile, msg.targetUserId, {
+          from: profile.userId, text: pendingOutgoing.text, ts: Date.now(), ttl: pendingOutgoing.ttl,
+        }, passphrase);
+        if (currentChatTarget === msg.targetUserId) {
+          ui.addChatLine(`${time} You: ${escapeContent(pendingOutgoing.text)}${ttlInfo}`);
+        }
       }
       ui.showSystemMessage(`Secure session established (${successCount} device(s)).`);
+      // Send the remaining queued messages over the now-established sessions
+      for (const extra of queuedForTarget.slice(1)) {
+        sendRatcheted(extra.target, extra.text, extra.ttl);
+      }
     } else {
       ui.showSystemMessage('Failed to establish session with any device.');
     }
-
-    pendingOutgoing = null;
   });
 
   conn.on(MSG.PREKEY_BUNDLE_FAIL, (msg) => {
     ui.showSystemMessage(`Could not fetch pre-key bundle: ${escapeContent(msg.error)}`);
-    pendingOutgoing = null;
   });
 
   conn.on(MSG.UPLOAD_PREKEYS_OK, (msg) => {
@@ -987,6 +1080,21 @@ async function main() {
   });
 
   conn.on(MSG.GROUP_KICK_OK, (msg) => {
+    // Keep the local member list in sync so sender-key checks stay correct
+    const kickedGroup = profile.groups[msg.groupId];
+    if (kickedGroup && kickedGroup.members) {
+      const idx = kickedGroup.members.indexOf(msg.targetUserId);
+      if (idx !== -1) {
+        kickedGroup.members.splice(idx, 1);
+        store.saveProfile(profile, passphrase);
+      }
+      // Drop the kicked member's sender key — they must not decrypt us either way after /rekey
+      const skState = store.loadSenderKeyState(profile, msg.groupId);
+      if (skState && skState.members && skState.members[msg.targetUserId]) {
+        delete skState.members[msg.targetUserId];
+        store.saveSenderKeyState(profile, msg.groupId, skState, passphrase);
+      }
+    }
     ui.showSystemMessage(`Removed ${escapeContent(msg.targetUserId)} from group ${escapeContent(msg.groupId)}. Use /rekey to rotate group key.`);
   });
 
@@ -1084,9 +1192,20 @@ async function main() {
         const contact = profile.contacts[inviteeId];
         if (contact) {
           const group = profile.groups[groupId];
-          // Send group key via ratcheted DM (legacy format for backward compat)
+          // Maintain the local member list BEFORE building the key message,
+          // so the invitee receives the complete (signed) list
+          if (!group.members) group.members = [];
+          if (!group.members.includes(profile.userId)) group.members.push(profile.userId);
+          const isNewMember = !group.members.includes(inviteeId);
+          if (isNewMember) group.members.push(inviteeId);
+          store.saveProfile(profile, passphrase);
+
+          const mPayload = `GROUPMEMBERS:${groupId}:${group.members.slice().sort().join(',')}`;
+          const membersSig = cryptoMod.signString(mPayload, profile.signingSecretKey);
+
+          // Send group key via ratcheted DM (members + membersSig are ignored by old clients)
           const sig = cryptoMod.signGroupKey(groupId, group.name, group.key, profile.signingSecretKey);
-          const keyMsg = JSON.stringify({ __rede_ctrl: 'groupkey', groupId, name: group.name, key: group.key, sig });
+          const keyMsg = JSON.stringify({ __rede_ctrl: 'groupkey', groupId, name: group.name, key: group.key, sig, members: group.members, membersSig });
           sendRatcheted(inviteeId, keyMsg, 60);
 
           // Also distribute our sender key if we have one
@@ -1096,6 +1215,17 @@ async function main() {
             const skSig = cryptoMod.signString(skSigPayload, profile.signingSecretKey);
             const skMsg = JSON.stringify({ __rede_ctrl: 'senderkey', groupId, chainKey: skState.own.chainKey, messageNumber: skState.own.messageNumber, sig: skSig });
             sendRatcheted(inviteeId, skMsg, 120);
+          }
+
+          // Tell the existing members about the new member so they accept
+          // the invitee's sender key and redistribute their own
+          if (isNewMember) {
+            const updMsg = JSON.stringify({ __rede_ctrl: 'groupmembers', groupId, members: group.members, sig: membersSig });
+            for (const memberId of group.members) {
+              if (memberId === profile.userId || memberId === inviteeId) continue;
+              if (!profile.contacts[memberId]) continue;
+              sendRatcheted(memberId, updMsg, 120);
+            }
           }
 
           ui.showSystemMessage(`Group key sent to ${escapeContent(inviteeId)} (ratcheted, auto-expires in 60s)`);
@@ -1238,7 +1368,7 @@ async function main() {
       const devIds = contact2 && contact2.devices ? Object.keys(contact2.devices) : [];
       const hasSession = devIds.some(d => store.loadRatchetState(profile, currentChatTarget, d))
         || store.loadRatchetState(profile, currentChatTarget);
-      if (hasSession && !pendingOutgoing) {
+      if (hasSession && !pendingOutgoingQueue.some((p) => p.target === currentChatTarget)) {
         // Message was sent immediately (had existing session)
         store.addChatMessage(profile, currentChatTarget, {
           from: profile.userId, text, ts: Date.now(), ttl: currentTTL,

@@ -43,6 +43,9 @@ public class PlaceService : IDisposable
     public Profile? Profile { get; set; }
     public byte[]? Passphrase { get; set; }
 
+    /// <summary>Ratcheted DM channel used for sender-key distribution. Wired in MainWindow.</summary>
+    public ChatService? Chat { get; set; }
+
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, string, string, DateTime, ChatMessage?>? OnChannelMessageReceived; // placeId, channelId, from, text, ts, fullMsg
     public event Action? OnPlacesChanged;
@@ -1241,38 +1244,7 @@ public class PlaceService : IDisposable
         // Build JSON envelope for structured message data
         var plaintext = MessageEnvelope.Encode(text, replyToMsgId, replyToPreview, replyToAuthor, attachments);
 
-        var skKey = SenderKeyKey(placeId, channelId);
-        var skStateJson = _store.LoadSenderKeyState(Profile, skKey);
-        SenderKeys.SenderKeyState skState;
-
-        if (skStateJson is not null)
-        {
-            var parsed = JsonSerializer.Deserialize<JsonElement>(skStateJson.Value);
-            var ownNode = parsed.GetProperty("own");
-            var ckB64 = ownNode.GetProperty("chainKey").GetString() ?? "";
-            skState = new SenderKeys.SenderKeyState
-            {
-                ChainKey = ckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(ckB64),
-                MessageNumber = ownNode.GetProperty("messageNumber").GetInt32(),
-            };
-        }
-        else
-        {
-            skState = SenderKeys.Generate();
-        }
-
-        var result = SenderKeys.Encrypt(skState, plaintext, Profile.SigningSecretKey, skKey);
-
-        var stateObj = new JsonObject
-        {
-            ["own"] = new JsonObject
-            {
-                ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
-                ["messageNumber"] = skState.MessageNumber,
-            }
-        };
-        var skElem = JsonSerializer.SerializeToElement(stateObj);
-        _store.SaveSenderKeyStateAsync(Profile, skKey, skElem, Passphrase);
+        var result = EncryptForChannel(placeId, channelId, place, plaintext);
 
         var payload = ProtocolSerializer.Payload(
             ("placeId", JsonValue.Create(placeId)),
@@ -1342,37 +1314,7 @@ public class PlaceService : IDisposable
         if (!Profile.Places.TryGetValue(placeId, out var place)) return;
         if (!place.Channels.ContainsKey(channelId)) return;
 
-        var skKey = SenderKeyKey(placeId, channelId);
-        var skStateJson = _store.LoadSenderKeyState(Profile, skKey);
-        SenderKeys.SenderKeyState skState;
-
-        if (skStateJson is not null)
-        {
-            var parsed = JsonSerializer.Deserialize<JsonElement>(skStateJson.Value);
-            var ownNode = parsed.GetProperty("own");
-            var ckB64 = ownNode.GetProperty("chainKey").GetString() ?? "";
-            skState = new SenderKeys.SenderKeyState
-            {
-                ChainKey = ckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(ckB64),
-                MessageNumber = ownNode.GetProperty("messageNumber").GetInt32(),
-            };
-        }
-        else
-        {
-            skState = SenderKeys.Generate();
-        }
-
-        var result = SenderKeys.Encrypt(skState, controlText, Profile.SigningSecretKey, skKey);
-
-        var stateObj = new JsonObject
-        {
-            ["own"] = new JsonObject
-            {
-                ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
-                ["messageNumber"] = skState.MessageNumber,
-            }
-        };
-        _store.SaveSenderKeyStateAsync(Profile, skKey, JsonSerializer.SerializeToElement(stateObj), Passphrase);
+        var result = EncryptForChannel(placeId, channelId, place, controlText);
 
         var payload = ProtocolSerializer.Payload(
             ("placeId", JsonValue.Create(placeId)),
@@ -1394,6 +1336,128 @@ public class PlaceService : IDisposable
             if (_pendingAck.Count < MaxPendingAck)
                 _pendingAck.Enqueue((ChatKey(placeId, channelId), null));
         }
+    }
+
+    /// <summary>
+    /// Load the sender-key state for a channel, distribute the current own key to
+    /// members that don't have it yet (pre-advance — they need the chain key at this
+    /// messageNumber), encrypt, and save the FULL state back (incl. received member
+    /// keys, which earlier versions wiped on every send).
+    /// </summary>
+    private SenderKeys.EncryptResult EncryptForChannel(string placeId, string channelId, Place place, string plaintext)
+    {
+        var skKey = SenderKeyKey(placeId, channelId);
+        var skStateJson = _store.LoadSenderKeyState(Profile!, skKey);
+        var stateRoot = skStateJson is not null
+            ? JsonSerializer.Deserialize<JsonObject>(skStateJson.Value) ?? new JsonObject()
+            : new JsonObject();
+
+        SenderKeys.SenderKeyState skState;
+        if (stateRoot["own"] is JsonObject ownNode)
+        {
+            var ckB64 = ownNode["chainKey"]?.GetValue<string>() ?? "";
+            skState = new SenderKeys.SenderKeyState
+            {
+                ChainKey = ckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(ckB64),
+                MessageNumber = ownNode["messageNumber"]?.GetValue<int>() ?? 0,
+            };
+        }
+        else
+        {
+            skState = SenderKeys.Generate();
+        }
+
+        DistributeOwnSenderKey(skKey, place.Members, stateRoot,
+            Convert.ToBase64String(skState.ChainKey), skState.MessageNumber);
+
+        var result = SenderKeys.Encrypt(skState, plaintext, Profile!.SigningSecretKey, skKey);
+
+        stateRoot["own"] = new JsonObject
+        {
+            ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
+            ["messageNumber"] = skState.MessageNumber,
+        };
+        _store.SaveSenderKeyStateAsync(Profile, skKey, JsonSerializer.SerializeToElement(stateRoot), Passphrase!);
+        return result;
+    }
+
+    /// <summary>Send our current sender key to members missing from distributedTo. Mutates stateRoot.</summary>
+    private void DistributeOwnSenderKey(string skKey, List<string> members, JsonObject stateRoot, string chainKeyB64, int messageNumber)
+    {
+        if (Chat is null || Profile is null) return;
+
+        var distributed = stateRoot["distributedTo"] as JsonArray ?? new JsonArray();
+        var have = new HashSet<string>();
+        foreach (var n in distributed)
+            if (n?.GetValue<string>() is string s) have.Add(s);
+
+        foreach (var memberId in members)
+        {
+            if (memberId == Profile.UserId || have.Contains(memberId)) continue;
+            if (!Profile.Contacts.ContainsKey(memberId)) continue;
+            var payload = $"SENDERKEY:{skKey}:{chainKeyB64}:{messageNumber}";
+            var sig = CryptoService.SignBytesB64(System.Text.Encoding.UTF8.GetBytes(payload), Profile.SigningSecretKey);
+            var ctrlMsg = JsonSerializer.Serialize(new
+            {
+                __rede_ctrl = "senderkey",
+                groupId = skKey,
+                chainKey = chainKeyB64,
+                messageNumber,
+                sig,
+            });
+            Chat.SendMessage(memberId, ctrlMsg, 0);
+            distributed.Add(JsonValue.Create(memberId));
+            have.Add(memberId);
+        }
+        stateRoot["distributedTo"] = distributed;
+    }
+
+    /// <summary>
+    /// Accept a place-channel sender key received via ratcheted DM
+    /// (__rede_ctrl = "senderkey" with groupId = "place:{placeId}:{channelId}").
+    /// </summary>
+    public void AcceptSenderKey(string skKey, string chainKeyB64, int messageNumber, string sigB64, string from)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!skKey.StartsWith("place:", StringComparison.Ordinal)) return;
+        var parts = skKey.Split(':', 3);
+        if (parts.Length != 3) return;
+        var placeId = parts[1];
+        var channelId = parts[2];
+
+        if (!Profile.Places.TryGetValue(placeId, out var place)) return;
+        if (!place.Channels.ContainsKey(channelId)) return;
+        if (!place.Members.Contains(from))
+        {
+            OnSystemMessage?.Invoke($"[SECURITY] Sender key from non-member {from} for place channel - rejected.");
+            return;
+        }
+        if (!Profile.Contacts.TryGetValue(from, out var contact) || contact.SigningKey is null) return;
+
+        if (messageNumber < 0 || messageNumber >= SenderKeys.MaxMessageNumber) return;
+        byte[] ck;
+        try { ck = Convert.FromBase64String(chainKeyB64); } catch { return; }
+        if (ck.Length != 32) return;
+
+        var payload = $"SENDERKEY:{skKey}:{chainKeyB64}:{messageNumber}";
+        if (!CryptoService.VerifyBytes(System.Text.Encoding.UTF8.GetBytes(payload), sigB64, contact.SigningKey))
+        {
+            OnSystemMessage?.Invoke($"[SECURITY] Invalid sender key signature from {from} - rejected.");
+            return;
+        }
+
+        var skStateJson = _store.LoadSenderKeyState(Profile, skKey);
+        var stateRoot = skStateJson is not null
+            ? JsonSerializer.Deserialize<JsonObject>(skStateJson.Value) ?? new JsonObject()
+            : new JsonObject();
+        var membersNode = stateRoot["members"] as JsonObject ?? new JsonObject();
+        membersNode[from] = new JsonObject
+        {
+            ["chainKey"] = chainKeyB64,
+            ["messageNumber"] = messageNumber,
+        };
+        stateRoot["members"] = membersNode;
+        _store.SaveSenderKeyStateAsync(Profile, skKey, JsonSerializer.SerializeToElement(stateRoot), Passphrase);
     }
 
     private void HandleControlMessage(string ctrl, JsonObject obj, string from, string chatKey)
@@ -1651,6 +1715,12 @@ public class PlaceService : IDisposable
         if (placeId is null || channelId is null || from is null) return;
         if (from == Profile.UserId)
         {
+            // Echo of a message sent by ANOTHER of our own devices — not ours to
+            // dequeue (would steal a FIFO slot and misalign every following msgId).
+            var fromDeviceId = ProtocolSerializer.GetString(msg, "fromDeviceId");
+            if (fromDeviceId is not null && Profile.DeviceId is not null && fromDeviceId != Profile.DeviceId)
+                return;
+
             // Server echoes own PLACE_MESSAGE back with a server-assigned msgId in send order.
             // Dequeue exactly one slot per echo. Sentinel entries (Msg=null) from control
             // messages get consumed silently; regular messages get their MsgId stamped once.

@@ -40,6 +40,9 @@ public class GroupService : IDisposable
     public Profile? Profile { get; set; }
     public byte[]? Passphrase { get; set; }
 
+    /// <summary>Ratcheted DM channel used for sender-key / member-list distribution. Wired in MainWindow.</summary>
+    public ChatService? Chat { get; set; }
+
     public event Action<string>? OnSystemMessage;
     public event Action<string, string, string, DateTime, ChatMessage?>? OnGroupMessageReceived; // groupId, from, text, ts, fullMsg
     public event Action? OnGroupsChanged;
@@ -90,8 +93,19 @@ public class GroupService : IDisposable
         ));
 
         // Send group key to invitee via ratcheted DM
-        if (chatService is not null && Profile.Contacts.ContainsKey(userId))
+        var chat = chatService ?? Chat;
+        if (chat is not null && Profile.Contacts.ContainsKey(userId))
         {
+            // Maintain the local member list BEFORE building the key message,
+            // so the invitee receives the complete (signed) list
+            group.Members ??= new List<string>();
+            if (!group.Members.Contains(Profile.UserId)) group.Members.Add(Profile.UserId);
+            var isNewMember = !group.Members.Contains(userId);
+            if (isNewMember) group.Members.Add(userId);
+            _store.SaveProfileDebounced(Profile, Passphrase);
+
+            var membersSig = SignMembersList(groupId, group.Members);
+
             var sig = CryptoService.SignGroupKey(groupId, group.Name, group.Key, Profile.SigningSecretKey);
             var keyMsg = JsonSerializer.Serialize(new
             {
@@ -100,8 +114,33 @@ public class GroupService : IDisposable
                 name = group.Name,
                 key = group.Key,
                 sig,
+                members = group.Members,
+                membersSig,
             });
-            chatService.SendMessage(userId, keyMsg, 0);
+            chat.SendMessage(userId, keyMsg, 0);
+
+            // Distribute our own sender key so the invitee can decrypt our group messages
+            SendOwnSenderKeyTo(groupId, new[] { userId });
+
+            // Tell the existing members about the new member so they accept the
+            // invitee's sender key and redistribute their own
+            if (isNewMember)
+            {
+                var updMsg = JsonSerializer.Serialize(new
+                {
+                    __rede_ctrl = "groupmembers",
+                    groupId,
+                    members = group.Members,
+                    sig = membersSig,
+                });
+                foreach (var memberId in group.Members)
+                {
+                    if (memberId == Profile.UserId || memberId == userId) continue;
+                    if (!Profile.Contacts.ContainsKey(memberId)) continue;
+                    chat.SendMessage(memberId, updMsg, 0);
+                }
+            }
+
             OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" - group key sent.");
         }
         else
@@ -109,6 +148,17 @@ public class GroupService : IDisposable
             OnSystemMessage?.Invoke($"Invited {userId} to \"{group.Name}\" (key must be sent manually - add them as contact first).");
         }
     }
+
+    /// <summary>Signature over the sorted member list — same wire format as the v1 JS client:
+    /// GROUPMEMBERS:{groupId}:{sortedMembers.join(',')}</summary>
+    private string SignMembersList(string groupId, IEnumerable<string> members)
+    {
+        var payload = MembersSigPayload(groupId, members);
+        return CryptoService.SignBytesB64(System.Text.Encoding.UTF8.GetBytes(payload), Profile!.SigningSecretKey);
+    }
+
+    private static string MembersSigPayload(string groupId, IEnumerable<string> members)
+        => $"GROUPMEMBERS:{groupId}:{string.Join(",", members.OrderBy(m => m, StringComparer.Ordinal))}";
 
     public void KickFromGroup(string groupId, string userId)
     {
@@ -186,19 +236,22 @@ public class GroupService : IDisposable
             ? MessageEnvelope.Encode(text, attachments: attachments)
             : text;
 
-        // Get or create sender key state
+        // Get or create sender key state. The full state JSON (incl. received member
+        // keys and the distributedTo tracking) must be preserved — earlier versions
+        // wrote back only "own" and wiped every member key on each send.
         var skStateJson = _store.LoadSenderKeyState(Profile, groupId);
-        SenderKeys.SenderKeyState skState;
+        var stateRoot = skStateJson is not null
+            ? JsonSerializer.Deserialize<JsonObject>(skStateJson.Value) ?? new JsonObject()
+            : new JsonObject();
 
-        if (skStateJson is not null)
+        SenderKeys.SenderKeyState skState;
+        if (stateRoot["own"] is JsonObject ownNode)
         {
-            var parsed = JsonSerializer.Deserialize<JsonElement>(skStateJson.Value);
-            var ownNode = parsed.GetProperty("own");
-            var ckB64 = ownNode.GetProperty("chainKey").GetString() ?? "";
+            var ckB64 = ownNode["chainKey"]?.GetValue<string>() ?? "";
             skState = new SenderKeys.SenderKeyState
             {
                 ChainKey = ckB64.Length == 0 ? Array.Empty<byte>() : Convert.FromBase64String(ckB64),
-                MessageNumber = ownNode.GetProperty("messageNumber").GetInt32(),
+                MessageNumber = ownNode["messageNumber"]?.GetValue<int>() ?? 0,
             };
         }
         else
@@ -206,18 +259,20 @@ public class GroupService : IDisposable
             skState = SenderKeys.Generate();
         }
 
+        // Distribute the CURRENT own key (pre-advance) to members who don't have it
+        // yet — they need the chain key at this messageNumber to decrypt this message
+        DistributeOwnSenderKey(groupId, group.Members, stateRoot,
+            Convert.ToBase64String(skState.ChainKey), skState.MessageNumber);
+
         var result = SenderKeys.Encrypt(skState, wireText, Profile.SigningSecretKey, groupId);
 
         // Save updated state (debounced — no scrypt, no Task.Run needed)
-        var stateObj = new JsonObject
+        stateRoot["own"] = new JsonObject
         {
-            ["own"] = new JsonObject
-            {
-                ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
-                ["messageNumber"] = skState.MessageNumber,
-            }
+            ["chainKey"] = Convert.ToBase64String(skState.ChainKey),
+            ["messageNumber"] = skState.MessageNumber,
         };
-        var elem = JsonSerializer.SerializeToElement(stateObj);
+        var elem = JsonSerializer.SerializeToElement(stateRoot);
         _store.SaveSenderKeyStateAsync(Profile, groupId, elem, Passphrase);
 
         var payload = ProtocolSerializer.Payload(
@@ -272,6 +327,168 @@ public class GroupService : IDisposable
         ApplyReaction(groupId, msgId, emoji, Profile.UserId, add);
     }
 
+    // --- Sender-key distribution & member-list updates (wire-compatible with v1 JS client) ---
+
+    /// <summary>
+    /// Send our current sender key (chainKey at the given messageNumber) to all listed
+    /// members that are not yet recorded in stateRoot.distributedTo. Mutates stateRoot.
+    /// </summary>
+    private void DistributeOwnSenderKey(string contextId, List<string>? members, JsonObject stateRoot, string chainKeyB64, int messageNumber)
+    {
+        if (Chat is null || Profile is null || members is null) return;
+
+        var distributed = stateRoot["distributedTo"] as JsonArray ?? new JsonArray();
+        var have = new HashSet<string>();
+        foreach (var n in distributed)
+            if (n?.GetValue<string>() is string s) have.Add(s);
+
+        foreach (var memberId in members)
+        {
+            if (memberId == Profile.UserId || have.Contains(memberId)) continue;
+            if (!Profile.Contacts.ContainsKey(memberId)) continue;
+            SendSenderKeyCtrl(contextId, memberId, chainKeyB64, messageNumber);
+            distributed.Add(JsonValue.Create(memberId));
+            have.Add(memberId);
+        }
+        stateRoot["distributedTo"] = distributed;
+    }
+
+    private void SendSenderKeyCtrl(string contextId, string memberId, string chainKeyB64, int messageNumber)
+    {
+        if (Chat is null || Profile is null) return;
+        var payload = $"SENDERKEY:{contextId}:{chainKeyB64}:{messageNumber}";
+        var sig = CryptoService.SignBytesB64(System.Text.Encoding.UTF8.GetBytes(payload), Profile.SigningSecretKey);
+        var ctrlMsg = JsonSerializer.Serialize(new
+        {
+            __rede_ctrl = "senderkey",
+            groupId = contextId,
+            chainKey = chainKeyB64,
+            messageNumber,
+            sig,
+        });
+        Chat.SendMessage(memberId, ctrlMsg, 0);
+    }
+
+    /// <summary>Send our current sender key to specific members (e.g. a fresh invitee), bypassing the distributedTo check.</summary>
+    private void SendOwnSenderKeyTo(string groupId, IEnumerable<string> memberIds)
+    {
+        if (Profile is null || Passphrase is null || Chat is null) return;
+        var skStateJson = _store.LoadSenderKeyState(Profile, groupId);
+        if (skStateJson is null) return;
+        var stateRoot = JsonSerializer.Deserialize<JsonObject>(skStateJson.Value);
+        if (stateRoot?["own"] is not JsonObject own) return;
+        var chainKey = own["chainKey"]?.GetValue<string>();
+        var messageNumber = own["messageNumber"]?.GetValue<int>() ?? 0;
+        if (chainKey is null) return;
+
+        var distributed = stateRoot["distributedTo"] as JsonArray ?? new JsonArray();
+        var have = new HashSet<string>();
+        foreach (var n in distributed)
+            if (n?.GetValue<string>() is string s) have.Add(s);
+
+        bool changed = false;
+        foreach (var memberId in memberIds)
+        {
+            if (memberId == Profile.UserId || !Profile.Contacts.ContainsKey(memberId)) continue;
+            SendSenderKeyCtrl(groupId, memberId, chainKey, messageNumber);
+            if (!have.Contains(memberId)) { distributed.Add(JsonValue.Create(memberId)); have.Add(memberId); changed = true; }
+        }
+        if (changed)
+        {
+            stateRoot["distributedTo"] = distributed;
+            _store.SaveSenderKeyStateAsync(Profile, groupId, JsonSerializer.SerializeToElement(stateRoot), Passphrase);
+        }
+    }
+
+    /// <summary>
+    /// Accept a sender key received via ratcheted DM (__rede_ctrl = "senderkey").
+    /// Verifies group membership and the Ed25519 signature before storing.
+    /// </summary>
+    public void AcceptSenderKey(string contextId, string chainKeyB64, int messageNumber, string sigB64, string from)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Groups.TryGetValue(contextId, out var group)) return;
+
+        if (group.Members is null || group.Members.Count == 0 || !group.Members.Contains(from))
+        {
+            OnSystemMessage?.Invoke($"[SECURITY] Sender key from non-member {from} for group - rejected.");
+            return;
+        }
+        if (!Profile.Contacts.TryGetValue(from, out var contact) || contact.SigningKey is null) return;
+
+        if (messageNumber < 0 || messageNumber >= SenderKeys.MaxMessageNumber) return;
+        byte[] ck;
+        try { ck = Convert.FromBase64String(chainKeyB64); } catch { return; }
+        if (ck.Length != 32) return;
+
+        var payload = $"SENDERKEY:{contextId}:{chainKeyB64}:{messageNumber}";
+        if (!CryptoService.VerifyBytes(System.Text.Encoding.UTF8.GetBytes(payload), sigB64, contact.SigningKey))
+        {
+            OnSystemMessage?.Invoke($"[SECURITY] Invalid sender key signature from {from} - rejected.");
+            return;
+        }
+
+        StoreMemberSenderKey(contextId, from, chainKeyB64, messageNumber);
+        OnSystemMessage?.Invoke($"Received sender key for group from {from}");
+    }
+
+    /// <summary>
+    /// Accept a signed member-list update (__rede_ctrl = "groupmembers"). Union-merge only —
+    /// members are never removed via this path (kicks go through GROUP_KICK).
+    /// </summary>
+    public void AcceptGroupMembers(string groupId, List<string> members, string sigB64, string from)
+    {
+        if (Profile is null || Passphrase is null) return;
+        if (!Profile.Groups.TryGetValue(groupId, out var group)) return;
+
+        if (group.Members is not null && group.Members.Count > 0 && !group.Members.Contains(from))
+        {
+            OnSystemMessage?.Invoke($"[SECURITY] Member list update from non-member {from} - rejected.");
+            return;
+        }
+        if (!Profile.Contacts.TryGetValue(from, out var contact) || contact.SigningKey is null) return;
+        if (members.Count > 256) return;
+
+        var payload = MembersSigPayload(groupId, members);
+        if (!CryptoService.VerifyBytes(System.Text.Encoding.UTF8.GetBytes(payload), sigB64, contact.SigningKey))
+        {
+            OnSystemMessage?.Invoke($"[SECURITY] Invalid member list signature from {from} - rejected.");
+            return;
+        }
+
+        group.Members ??= new List<string>();
+        var added = new List<string>();
+        foreach (var m in members)
+        {
+            if (!group.Members.Contains(m)) { group.Members.Add(m); added.Add(m); }
+        }
+        if (added.Count == 0) return;
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        OnSystemMessage?.Invoke($"Group member list updated by {from} (+{added.Count})");
+        OnGroupsChanged?.Invoke();
+
+        // Redistribute our own sender key so the new members can decrypt us
+        SendOwnSenderKeyTo(groupId, added);
+    }
+
+    internal void StoreMemberSenderKey(string contextKey, string from, string chainKeyB64, int messageNumber)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var skStateJson = _store.LoadSenderKeyState(Profile, contextKey);
+        var stateRoot = skStateJson is not null
+            ? JsonSerializer.Deserialize<JsonObject>(skStateJson.Value) ?? new JsonObject()
+            : new JsonObject();
+        var membersNode = stateRoot["members"] as JsonObject ?? new JsonObject();
+        membersNode[from] = new JsonObject
+        {
+            ["chainKey"] = chainKeyB64,
+            ["messageNumber"] = messageNumber,
+        };
+        stateRoot["members"] = membersNode;
+        _store.SaveSenderKeyStateAsync(Profile, contextKey, JsonSerializer.SerializeToElement(stateRoot), Passphrase);
+    }
+
     // --- Handlers ---
 
     private async void HandleGroupCreateOk(JsonObject msg)
@@ -300,10 +517,17 @@ public class GroupService : IDisposable
         if (name.Length > 64) name = name[..64];
         // H2: Never accept group key from server — always generate locally.
         // Real key comes via signed ratcheted DM from the group creator.
-        var key = CryptoService.GenerateSymmetricKey();
-
         if (groupId is null) return;
 
+        // The signed groupkey DM may have arrived first — never overwrite an
+        // existing group (would wipe the real key and the member list)
+        if (Profile.Groups.ContainsKey(groupId))
+        {
+            OnSystemMessage?.Invoke($"You were invited to group '{name}'");
+            return;
+        }
+
+        var key = CryptoService.GenerateSymmetricKey();
         await _store.AddGroupAsync(Profile, groupId, name, key, null, Passphrase);
         OnSystemMessage?.Invoke($"You were invited to group '{name}'");
         OnGroupsChanged?.Invoke();
@@ -324,6 +548,32 @@ public class GroupService : IDisposable
             _store.SaveProfileDebounced(Profile, Passphrase);
         }
 
+        // Drop the kicked member's sender key and forget that ours was distributed
+        // to them — after a /rekey they must not decrypt us again
+        var skStateJson = _store.LoadSenderKeyState(Profile, groupId);
+        if (skStateJson is not null)
+        {
+            var stateRoot = JsonSerializer.Deserialize<JsonObject>(skStateJson.Value);
+            if (stateRoot is not null)
+            {
+                bool changed = false;
+                if (stateRoot["members"] is JsonObject membersNode && membersNode.ContainsKey(userId))
+                {
+                    membersNode.Remove(userId);
+                    changed = true;
+                }
+                if (stateRoot["distributedTo"] is JsonArray distArr)
+                {
+                    for (int i = distArr.Count - 1; i >= 0; i--)
+                    {
+                        if (distArr[i]?.GetValue<string>() == userId) { distArr.RemoveAt(i); changed = true; }
+                    }
+                }
+                if (changed)
+                    _store.SaveSenderKeyStateAsync(Profile, groupId, JsonSerializer.SerializeToElement(stateRoot), Passphrase);
+            }
+        }
+
         OnSystemMessage?.Invoke($"Removed {userId} from group {groupId}");
     }
 
@@ -336,6 +586,14 @@ public class GroupService : IDisposable
         if (groupId is null || from is null) return;
         if (from == Profile.UserId)
         {
+            // Echo of a message sent by ANOTHER of our own devices — not ours to
+            // dequeue (would steal a FIFO slot and misalign every following msgId).
+            // Displaying it is not supported yet: sender keys are never distributed
+            // to own sibling devices (multi-device gap, same as v1).
+            var fromDeviceId = ProtocolSerializer.GetString(msg, "fromDeviceId");
+            if (fromDeviceId is not null && Profile.DeviceId is not null && fromDeviceId != Profile.DeviceId)
+                return;
+
             // Server echoes own GROUP_MESSAGE back with a server-assigned msgId in send order.
             // Dequeue exactly one slot per echo. Sentinel entries (Msg=null) from control
             // messages get consumed silently; regular messages get their MsgId stamped once.

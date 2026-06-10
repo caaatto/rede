@@ -271,6 +271,41 @@ async function connectAndAuth(profile, passphrase) {
   });
 }
 
+// --- Ratcheted control-message helpers (multi-device, session-only, best effort) ---
+function sendRatchetedCtrl(conn, profile, passphrase, targetId, text, ttl) {
+  const contact = profile.contacts[targetId];
+  if (!contact) return false;
+  const devices = contact.devices || {};
+  const deviceIds = Object.keys(devices);
+  let sent = false;
+  for (const devId of deviceIds) {
+    const rState = store.loadRatchetState(profile, targetId, devId);
+    if (!rState) continue;
+    const enc = cryptoMod.ratchetEncrypt(rState, text);
+    store.saveRatchetState(profile, targetId, rState, passphrase, devId);
+    conn.send(MSG.MESSAGE, { to: targetId, toDeviceId: devId, encrypted: enc.ciphertext, nonce: enc.nonce, header: enc.header, ttl });
+    sent = true;
+  }
+  if (deviceIds.length === 0) {
+    const rState = store.loadRatchetState(profile, targetId);
+    if (rState) {
+      const enc = cryptoMod.ratchetEncrypt(rState, text);
+      store.saveRatchetState(profile, targetId, rState, passphrase);
+      conn.send(MSG.MESSAGE, { to: targetId, encrypted: enc.ciphertext, nonce: enc.nonce, header: enc.header, ttl });
+      sent = true;
+    }
+  }
+  return sent;
+}
+
+// Send our own sender key for a group to one member via ratcheted DM
+function sendSenderKeyTo(conn, profile, passphrase, memberId, groupId, ownKey) {
+  const skSigPayload = `SENDERKEY:${groupId}:${ownKey.chainKey}:${ownKey.messageNumber}`;
+  const skSig = cryptoMod.signString(skSigPayload, profile.signingSecretKey);
+  const keyMsg = JSON.stringify({ __rede_ctrl: 'senderkey', groupId, chainKey: ownKey.chainKey, messageNumber: ownKey.messageNumber, sig: skSig });
+  return sendRatchetedCtrl(conn, profile, passphrase, memberId, keyMsg, 120);
+}
+
 // --- Commands ---
 async function cmdRegister() {
   if (!opts.invite) {
@@ -417,9 +452,12 @@ async function cmdSend() {
 
     let ackCount = 0;
     let expectedAcks = 0;
-    conn.on(MSG.MESSAGE_ACK, (msg) => {
+    let ackDone = false;
+    // Server answers SEALED_MESSAGE with SEALED_MESSAGE_ACK — both count
+    function onSendAck(msg) {
       ackCount++;
-      if (ackCount >= expectedAcks) {
+      if (!ackDone && ackCount >= expectedAcks) {
+        ackDone = true;
         const status = msg.queued ? '(queued - recipient offline)' : '(delivered)';
         console.log(`Sent to ${opts.to} ${status}`);
         store.addChatMessage(profile, opts.to, {
@@ -427,7 +465,9 @@ async function cmdSend() {
         }, passphrase);
         conn.disconnect();
       }
-    });
+    }
+    conn.on(MSG.MESSAGE_ACK, onSendAck);
+    conn.on(MSG.SEALED_MESSAGE_ACK, onSendAck);
 
     const devices = contact.devices || {};
     const deviceIds = Object.keys(devices);
@@ -577,21 +617,15 @@ async function cmdSend() {
       if (!skState) skState = { own: null, members: {} };
       skState.own = newKey;
       store.saveSenderKeyState(profile, opts.group, skState, passphrase);
-      // Note: sender key distribution via CLI would need ratcheted DMs to each member
-      // For now, distribute to known contacts
+      // Distribute the new sender key to all members (per-device sessions)
+      let distributed = 0;
       for (const memberId of (group.members || [])) {
         if (memberId === profile.userId) continue;
         if (!profile.contacts[memberId]) continue;
-        // Best-effort distribution (will use ratchet if available, legacy otherwise)
-        const skSigPayload = `SENDERKEY:${opts.group}:${newKey.chainKey}:${newKey.messageNumber}`;
-        const skSig = cryptoMod.signString(skSigPayload, profile.signingSecretKey);
-        const keyMsg = JSON.stringify({ __rede_ctrl: 'senderkey', groupId: opts.group, chainKey: newKey.chainKey, messageNumber: newKey.messageNumber, sig: skSig });
-        const rState = store.loadRatchetState(profile, memberId);
-        if (rState) {
-          const enc = cryptoMod.ratchetEncrypt(rState, keyMsg);
-          store.saveRatchetState(profile, memberId, rState, passphrase);
-          conn.send(MSG.MESSAGE, { to: memberId, encrypted: enc.ciphertext, nonce: enc.nonce, header: enc.header, ttl: 120 });
-        }
+        if (sendSenderKeyTo(conn, profile, passphrase, memberId, opts.group, newKey)) distributed++;
+      }
+      if (distributed === 0 && (group.members || []).length > 1) {
+        console.log('[Warning] Sender key reached no member (no established sessions) — recipients cannot decrypt yet.');
       }
     }
 
@@ -762,9 +796,20 @@ async function cmdGinvite() {
 
   conn.send(MSG.GROUP_INVITE, { groupId: opts.group, inviteeId: opts.to });
 
-  // Send group key via ratcheted DM (signed)
+  // Maintain the local member list BEFORE building the key message,
+  // so the invitee receives the complete (signed) list
+  if (!group.members) group.members = [];
+  if (!group.members.includes(profile.userId)) group.members.push(profile.userId);
+  const isNewMember = !group.members.includes(opts.to);
+  if (isNewMember) group.members.push(opts.to);
+  store.saveProfile(profile, passphrase);
+
+  const mPayload = `GROUPMEMBERS:${opts.group}:${group.members.slice().sort().join(',')}`;
+  const membersSig = cryptoMod.signString(mPayload, profile.signingSecretKey);
+
+  // Send group key via ratcheted DM (signed; members/membersSig ignored by old clients)
   const sig = cryptoMod.signGroupKey(opts.group, group.name, group.key, profile.signingSecretKey);
-  const keyMsg = JSON.stringify({ __rede_ctrl: 'groupkey', groupId: opts.group, name: group.name, key: group.key, sig });
+  const keyMsg = JSON.stringify({ __rede_ctrl: 'groupkey', groupId: opts.group, name: group.name, key: group.key, sig, members: group.members, membersSig });
 
   // Send to all devices with existing sessions
   const devices = contact.devices || {};
@@ -852,8 +897,9 @@ async function cmdGinvite() {
           });
         }
       }
+      postInvite();
       console.log(`Invited ${opts.to} to "${group.name}" (key sent to devices)`);
-      setTimeout(() => conn.disconnect(), 500);
+      setTimeout(() => conn.disconnect(), 800);
     });
     conn.on(MSG.PREKEY_BUNDLE_FAIL, () => {
       console.error('Could not fetch pre-key bundle for invitee.');
@@ -863,8 +909,26 @@ async function cmdGinvite() {
     return; // Don't disconnect yet
   }
 
+  postInvite();
   console.log(`Invited ${opts.to} to "${group.name}" (ratcheted key sent, expires 60s)`);
   setTimeout(() => conn.disconnect(), 1000);
+
+  // Distribute our own sender key to the invitee and announce the new member
+  // to the existing members (signed member-list update)
+  function postInvite() {
+    const skState = store.loadSenderKeyState(profile, opts.group);
+    if (skState && skState.own) {
+      sendSenderKeyTo(conn, profile, passphrase, opts.to, opts.group, skState.own);
+    }
+    if (isNewMember) {
+      const updMsg = JSON.stringify({ __rede_ctrl: 'groupmembers', groupId: opts.group, members: group.members, sig: membersSig });
+      for (const memberId of group.members) {
+        if (memberId === profile.userId || memberId === opts.to) continue;
+        if (!profile.contacts[memberId]) continue;
+        sendRatchetedCtrl(conn, profile, passphrase, memberId, updMsg, 120);
+      }
+    }
+  }
 }
 
 async function cmdKey() {
@@ -892,17 +956,17 @@ async function cmdListen() {
     // Client-side nonce deduplication
     if (msg.nonce && !cryptoMod.checkClientNonce(msg.nonce)) return;
 
+    // Unknown sender: still process the X3DH/session (TOFU — first message defines
+    // the identity, add + fingerprint verify later). Dropping it would leave the
+    // session permanently broken, since the server already deleted its copy.
     const contact = profile.contacts[msg.from];
-    if (!contact) {
-      console.log(`[${new Date().toLocaleTimeString()}] <unknown:${escapeContent(msg.from)}> (use: add -t ${escapeContent(msg.from)})`);
-      return;
-    }
 
     const fromDeviceId = msg.fromDeviceId || null;
     let plaintext = null;
 
     // Verify identity key against known device keys
     function verifyIdentityKey(identityKey) {
+      if (!contact) return true; // unknown sender — TOFU, nothing to compare against
       if (contact.devices) {
         for (const dev of Object.values(contact.devices)) {
           if (dev.publicKey === identityKey) return true;
@@ -1016,6 +1080,7 @@ async function cmdListen() {
     let ctrl = null;
     try { ctrl = JSON.parse(plaintext); } catch {}
     if (ctrl && ctrl.__rede_ctrl) {
+      if (!contact) return; // control messages need a verified signing key — ignore from unknown senders
       if (ctrl.__rede_ctrl === 'senderkey' && ctrl.groupId && ctrl.chainKey) {
         // Verify sender is a known member of the target group
         const group = profile.groups[ctrl.groupId];
@@ -1055,8 +1120,56 @@ async function cmdListen() {
           console.log(`[Security] REJECTED group key from ${msg.from} — invalid signature!`);
           return;
         }
-        store.addGroup(profile, ctrl.groupId, ctrl.name, ctrl.key, [], passphrase);
-        console.log(`[System] Joined group "${escapeContent(ctrl.name)}" (verified key)`);
+        // Take over the member list if it is signed by the inviter; otherwise
+        // fall back to {inviter, self} so sender-key exchange works at minimum
+        let members = [];
+        if (Array.isArray(ctrl.members) && ctrl.members.length <= 256 && ctrl.membersSig &&
+            ctrl.members.every((m) => typeof m === 'string' && m.length > 0 && m.length <= 64)) {
+          const mPayload = `GROUPMEMBERS:${ctrl.groupId}:${ctrl.members.slice().sort().join(',')}`;
+          const mBytes = require('tweetnacl-util').decodeUTF8(mPayload);
+          if (cryptoMod.verifyBytes(mBytes, ctrl.membersSig, contact.signingKey)) {
+            members = ctrl.members.slice();
+          }
+        }
+        if (!members.includes(msg.from)) members.push(msg.from);
+        if (!members.includes(profile.userId)) members.push(profile.userId);
+        store.addGroup(profile, ctrl.groupId, ctrl.name, ctrl.key, members, passphrase);
+        console.log(`[System] Joined group "${escapeContent(ctrl.name)}" (verified key, ${members.length} member(s))`);
+      } else if (ctrl.__rede_ctrl === 'groupmembers' && ctrl.groupId && Array.isArray(ctrl.members)) {
+        // Signed member-list update from an existing member (e.g. after an invite)
+        const group = profile.groups[ctrl.groupId];
+        if (!group) return;
+        if (group.members && group.members.length > 0 && !group.members.includes(msg.from)) {
+          console.log(`[Security] REJECTED member list for group from non-member ${escapeContent(msg.from)}`);
+          return;
+        }
+        if (!ctrl.sig || !contact.signingKey) return;
+        if (ctrl.members.length > 256 ||
+            !ctrl.members.every((m) => typeof m === 'string' && m.length > 0 && m.length <= 64)) return;
+        const mPayload = `GROUPMEMBERS:${ctrl.groupId}:${ctrl.members.slice().sort().join(',')}`;
+        const mBytes = require('tweetnacl-util').decodeUTF8(mPayload);
+        if (!cryptoMod.verifyBytes(mBytes, ctrl.sig, contact.signingKey)) {
+          console.log(`[Security] REJECTED member list from ${escapeContent(msg.from)} — invalid signature!`);
+          return;
+        }
+        // Union-merge only — members are never removed via this path (kicks go through GROUP_KICK)
+        if (!group.members) group.members = [];
+        const added = [];
+        for (const m of ctrl.members) {
+          if (!group.members.includes(m)) { group.members.push(m); added.push(m); }
+        }
+        if (added.length > 0) {
+          store.saveProfile(profile, passphrase);
+          console.log(`[System] Group member list updated by ${escapeContent(msg.from)} (+${added.length})`);
+          // Redistribute our own sender key so the new members can decrypt us
+          const skState = store.loadSenderKeyState(profile, ctrl.groupId);
+          if (skState && skState.own) {
+            for (const m of added) {
+              if (m === profile.userId || !profile.contacts[m]) continue;
+              sendSenderKeyTo(conn, profile, passphrase, m, ctrl.groupId, skState.own);
+            }
+          }
+        }
       }
       return;
     }
@@ -1065,7 +1178,8 @@ async function cmdListen() {
       return; // Reject legacy format for security
     }
     const ttl = msg.ttl > 0 ? ` [${msg.ttl}s]` : '';
-    console.log(`[${new Date().toLocaleTimeString()}] ${escapeContent(contact.alias || msg.from)}: ${escapeContent(plaintext)}${ttl}`);
+    const senderLabel = contact ? (contact.alias || msg.from) : `${msg.from} (unknown - use: add -t ${msg.from})`;
+    console.log(`[${new Date().toLocaleTimeString()}] ${escapeContent(senderLabel)}: ${escapeContent(plaintext)}${ttl}`);
     store.addChatMessage(profile, msg.from, {
       from: msg.from, text: plaintext, ts: Date.now(), ttl: msg.ttl || 0,
     }, passphrase);
