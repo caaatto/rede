@@ -741,12 +741,16 @@
                                                IsVisible="{Binding IsSystem}" />
 
                                     <!-- Incoming message (left) -->
-                                    <StackPanel Orientation="Horizontal" Spacing="10"
-                                                HorizontalAlignment="Left"
-                                                Margin="0,0,80,0"
-                                                IsVisible="{Binding IsIncoming}">
+                                    <!-- Grid (Auto avatar, * content) so the content width is bounded
+                                         by the viewport. A horizontal StackPanel measures its children
+                                         with infinite width, which defeated TextWrapping on long messages
+                                         (they overflowed to the right and got clipped). -->
+                                    <Grid ColumnDefinitions="Auto,*"
+                                          Margin="0,0,80,0"
+                                          IsVisible="{Binding IsIncoming}">
                                         <!-- Sender avatar (only on first message of a group) -->
-                                        <Border Width="40" Height="40" CornerRadius="20"
+                                        <Border Grid.Column="0"
+                                                Width="40" Height="40" CornerRadius="20"
                                                 Background="{Binding SenderAccentBrush}"
                                                 ClipToBounds="True"
                                                 VerticalAlignment="Top" Margin="0,20,0,0"
@@ -765,9 +769,12 @@
                                             </Panel>
                                         </Border>
                                         <!-- Spacer so grouped bubbles stay aligned with the first one -->
-                                        <Border Width="40" Height="0"
+                                        <Border Grid.Column="0" Width="40" Height="0"
                                                 IsVisible="{Binding !ShowHeader}" />
-                                        <StackPanel Spacing="4">
+                                        <StackPanel Grid.Column="1" Spacing="4"
+                                                    Margin="10,0,0,0"
+                                                    HorizontalAlignment="Left"
+                                                    MaxWidth="560">
                                             <StackPanel Orientation="Horizontal" Spacing="8"
                                                         IsVisible="{Binding ShowHeader}">
                                                 <TextBlock Text="{Binding From}"
@@ -921,12 +928,13 @@
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
                                         </StackPanel>
-                                    </StackPanel>
+                                    </Grid>
 
                                     <!-- Own message (right) -->
                                     <StackPanel Spacing="4"
                                                 HorizontalAlignment="Right"
                                                 Margin="80,0,0,0"
+                                                MaxWidth="560"
                                                 IsVisible="{Binding IsOwn}">
                                         <!-- Reply quote (own) -->
                                         <Border Background="{DynamicResource RedeBorderBrush}"
