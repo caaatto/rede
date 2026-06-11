@@ -279,6 +279,7 @@ public partial class MainView : UserControl
 
     public event Action? OnRetryConnection;
     public event Action<string>? OnCallContact;
+    public event Action<string>? OnCallGroup;
     public event Action? OnSettingsRequested;
 
     private void RetryConnection_Click(object? sender, RoutedEventArgs e)
@@ -296,6 +297,14 @@ public partial class MainView : UserControl
         if (DataContext is MainViewModel vm && vm.SelectedConversation is ContactItemViewModel contact)
         {
             OnCallContact?.Invoke(contact.UserId);
+        }
+    }
+
+    private void CallGroup_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm && vm.SelectedConversation is GroupItemViewModel group)
+        {
+            OnCallGroup?.Invoke(group.GroupId);
         }
     }
 

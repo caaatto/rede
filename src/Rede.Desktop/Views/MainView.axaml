@@ -515,7 +515,7 @@
                     Background="{DynamicResource RedeSurfaceBrush}"
                     BorderBrush="{DynamicResource RedeBorderSubtleBrush}"
                     BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
                     <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="2"
                                 VerticalAlignment="Center">
                         <TextBlock Text="{Binding ChatTitle}"
@@ -562,6 +562,16 @@
                             ToolTip.Tip="Start voice call"
                             IsVisible="{Binding IsContactSelected}"
                             Click="CallContact_Click">
+                        <Image Source="{StaticResource IconMicrophone}" Width="18" Height="18" />
+                    </Button>
+                    <!-- Group voice call — visible only when a group is selected. -->
+                    <Button Grid.Column="4"
+                            Classes="ghost"
+                            Padding="8,4"
+                            CornerRadius="4"
+                            ToolTip.Tip="Start group voice call"
+                            IsVisible="{Binding IsGroupSelected}"
+                            Click="CallGroup_Click">
                         <Image Source="{StaticResource IconMicrophone}" Width="18" Height="18" />
                     </Button>
                 </Grid>

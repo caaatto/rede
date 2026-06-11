@@ -137,6 +137,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private int _ttlSeconds;
     [ObservableProperty] private bool _isContactSelected;
     [ObservableProperty] private bool _isPlaceSelected;
+    // True only when a group (not a DM, not a place channel) is selected — drives
+    // the group-call button in the chat header.
+    [ObservableProperty] private bool _isGroupSelected;
     [ObservableProperty] private string _channelTopic = "";
     [ObservableProperty] private bool _isMemberListVisible;
     [ObservableProperty] private ObservableCollection<PlaceMemberViewModel> _memberList = new();
@@ -355,6 +358,7 @@ public partial class MainViewModel : ViewModelBase
         SelectedConversation = item;
         SyncSidebarSelection(item);
         IsPlaceSelected = false;
+        IsGroupSelected = false;
         ChannelTopic = "";
         if (item is ContactItemViewModel contact)
         {
@@ -366,6 +370,7 @@ public partial class MainViewModel : ViewModelBase
         {
             ChatTitle = $"# {group.Name}";
             IsContactSelected = false;
+            IsGroupSelected = true;
             LoadChatHistory(group.GroupId);
         }
         else if (item is ChannelItemViewModel channel)
@@ -398,6 +403,7 @@ public partial class MainViewModel : ViewModelBase
         ChatTitle = "";
         IsContactSelected = false;
         IsPlaceSelected = false;
+        IsGroupSelected = false;
         ChannelTopic = "";
         IsMemberListVisible = false;
         Messages.Clear();

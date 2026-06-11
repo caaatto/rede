@@ -473,6 +473,8 @@ public partial class MainWindow : Window
             if (_call is not null)
                 _callVm.StartOutgoingCall(userId);
         };
+        // Group-call header button — reuses the scope-aware starter (same path as /call).
+        mainView.OnCallGroup += (_) => StartGroupCallForCurrentScope();
         mainView.OnSettingsRequested += () => ShowSettings();
 
         // Mount CallView overlay
