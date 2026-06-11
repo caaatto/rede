@@ -212,11 +212,13 @@ $xml.LoadXml('<toast><visual><binding template=""ToastGeneric""><text>{EscapeXml
         {
             return new[]
             {
-                ("pw-play", new[] { soundPath }),                  // PipeWire
-                ("paplay",  new[] { soundPath }),                  // PulseAudio
-                ("aplay",   new[] { "-q", soundPath }),            // ALSA (alsa-utils)
-                ("ffplay",  new[] { "-nodisp", "-autoexit", "-loglevel", "quiet", soundPath }),
-                ("play",    new[] { "-q", soundPath }),            // SoX
+                ("pw-play",           new[] { soundPath }),                  // PipeWire
+                ("paplay",            new[] { soundPath }),                  // PulseAudio
+                ("canberra-gtk-play", new[] { "-f", soundPath }),           // libcanberra (GNOME)
+                ("aplay",             new[] { "-q", soundPath }),           // ALSA (alsa-utils)
+                ("ffplay",            new[] { "-nodisp", "-autoexit", "-loglevel", "quiet", soundPath }),
+                ("mpv",               new[] { "--no-video", "--really-quiet", soundPath }),
+                ("play",              new[] { "-q", soundPath }),           // SoX
             };
         }
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

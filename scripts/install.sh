@@ -137,12 +137,16 @@ install_deps() {
       [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
       run_root apt-get update -qq || true
       run_root apt-get install -y --no-install-recommends "${pkgs[@]}"
+      # Notification/ring sound player (aplay via ALSA, paplay via Pulse/pipewire-pulse).
+      # Best-effort — never fail the core install over the optional sound.
+      run_root apt-get install -y --no-install-recommends alsa-utils pulseaudio-utils || true
       ;;
     dnf)
       pkgs=( libicu openssl-libs krb5-libs zlib libstdc++ libgcc
              fontconfig freetype liberation-fonts
              libX11 libICE libSM libXext libXrender libXi libXrandr libXcursor mesa-libGL
-             alsa-lib jack-audio-connection-kit libfido2 )
+             alsa-lib jack-audio-connection-kit libfido2
+             alsa-utils pulseaudio-utils )   # notification/ring sound player (aplay/paplay)
       [ "$WITH_TOR" = 1 ] && pkgs+=(tor)
       [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
       # --skip-broken/--skip-unavailable: tolerate name drift across Fedora/RHEL
@@ -153,7 +157,8 @@ install_deps() {
       pkgs=( icu openssl krb5 zlib gcc-libs
              fontconfig freetype2 ttf-liberation
              libx11 libice libsm libxext libxrender libxi libxrandr libxcursor libglvnd
-             alsa-lib jack2 libfido2 )
+             alsa-lib jack2 libfido2
+             alsa-utils libpulse )   # notification/ring sound player (aplay/paplay)
       [ "$WITH_TOR" = 1 ] && pkgs+=(tor)
       [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
       run_root pacman -Sy --needed --noconfirm "${pkgs[@]}" || true
@@ -162,7 +167,8 @@ install_deps() {
       pkgs=( libicu libopenssl3 krb5 libz1 libstdc++6
              fontconfig freetype2 liberation-fonts
              libX11-6 libICE6 libSM6 libXext6 libXrender1 libXi6 libXrandr2 libXcursor1 Mesa-libGL1
-             libasound2 libjack0 libfido2 )
+             libasound2 libjack0 libfido2
+             alsa-utils pulseaudio-utils )   # notification/ring sound player (aplay/paplay)
       [ "$WITH_TOR" = 1 ] && pkgs+=(tor)
       [ "$WITH_I2P" = 1 ] && pkgs+=(i2pd)
       run_root zypper --non-interactive install --no-recommends "${pkgs[@]}" || true
