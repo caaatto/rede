@@ -11,6 +11,7 @@ namespace Rede.Desktop.ViewModels;
 public partial class CallViewModel : ViewModelBase
 {
     private CallService? _callService;
+    private NotificationService? _notifications;
     private Timer? _durationTimer;
 
     [ObservableProperty] private bool _isVisible;
@@ -23,9 +24,10 @@ public partial class CallViewModel : ViewModelBase
     [ObservableProperty] private IImage? _modeIcon;
     [ObservableProperty] private string _modeTooltip = "";
 
-    public void Init(CallService callService)
+    public void Init(CallService callService, NotificationService? notifications = null)
     {
         _callService = callService;
+        _notifications = notifications;
         _callService.OnIncomingCall += HandleIncomingCall;
         _callService.OnCallConnected += HandleCallConnected;
         _callService.OnCallEnded += HandleCallEnded;
@@ -59,10 +61,13 @@ public partial class CallViewModel : ViewModelBase
             IsConnected = false;
             IsVisible = true;
         });
+        // Ring until the call is answered, declined, or ends/times out.
+        _notifications?.StartRingtone();
     }
 
     private void HandleCallConnected()
     {
+        _notifications?.StopRingtone();
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             StatusText = "Connected";
@@ -74,6 +79,7 @@ public partial class CallViewModel : ViewModelBase
 
     private void HandleCallEnded(string reason)
     {
+        _notifications?.StopRingtone();
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             StopDurationTimer();
@@ -99,12 +105,14 @@ public partial class CallViewModel : ViewModelBase
     [RelayCommand]
     private void AcceptCall()
     {
+        _notifications?.StopRingtone();
         _callService?.AcceptCall();
     }
 
     [RelayCommand]
     private void RejectCall()
     {
+        _notifications?.StopRingtone();
         _callService?.RejectCall();
     }
 

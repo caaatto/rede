@@ -15,6 +15,10 @@ public class NotificationService
     private bool _soundEnabled = true;
     private string _ownStatus = "online";
     private string? _soundPath;
+    private string? _ringtonePath;
+    private readonly object _ringLock = new();
+    private CancellationTokenSource? _ringCts;
+    private Process? _ringProcess;
 
     public bool Enabled
     {
@@ -55,6 +59,12 @@ public class NotificationService
     public void SetSoundPath(string path)
     {
         _soundPath = File.Exists(path) ? path : null;
+    }
+
+    /// <summary>Path to the looping ringtone played while an incoming call is ringing.</summary>
+    public void SetRingtonePath(string path)
+    {
+        _ringtonePath = File.Exists(path) ? path : null;
     }
 
     /// <summary>
@@ -190,63 +200,157 @@ $xml.LoadXml('<toast><visual><binding template=""ToastGeneric""><text>{EscapeXml
         return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 
+    // Ordered list of candidate CLI players for a WAV path. The first one that
+    // actually launches wins; if it isn't installed Process.Start throws and we
+    // fall through to the next. Previously Linux only tried `paplay` with no
+    // fallback — on a system without PulseAudio/PipeWire utils the sound silently
+    // failed (the installer ships the ALSA *library* for the call engine, not a
+    // command-line player).
+    private static (string File, string[] Args)[]? BuildPlayerCandidates(string soundPath)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return new[]
+            {
+                ("pw-play", new[] { soundPath }),                  // PipeWire
+                ("paplay",  new[] { soundPath }),                  // PulseAudio
+                ("aplay",   new[] { "-q", soundPath }),            // ALSA (alsa-utils)
+                ("ffplay",  new[] { "-nodisp", "-autoexit", "-loglevel", "quiet", soundPath }),
+                ("play",    new[] { "-q", soundPath }),            // SoX
+            };
+        }
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return new[]
+            {
+                ("powershell", new[] { "-NoProfile", "-NonInteractive", "-Command",
+                    $"(New-Object System.Media.SoundPlayer '{soundPath.Replace("'", "''")}').PlaySync()" }),
+            };
+        }
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return new[] { ("afplay", new[] { soundPath }) };
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Play one WAV synchronously through the first working backend. Returns true
+    /// if a player ran to a clean exit (0). When a process is started, onStarted
+    /// is invoked with it so a caller can kill it (used to stop the ringtone mid-play).
+    /// </summary>
+    private static bool PlayOnceBlocking(string soundPath, Action<Process?>? onStarted = null)
+    {
+        var candidates = BuildPlayerCandidates(soundPath);
+        if (candidates is null) return false;
+        foreach (var (file, args) in candidates)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = file,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                foreach (var a in args) psi.ArgumentList.Add(a);
+
+                using var p = Process.Start(psi);
+                if (p is null) continue;
+                onStarted?.Invoke(p);
+                p.WaitForExit();
+                // Exit 0 = played. Non-zero (e.g. aplay with no device) → try next.
+                if (p.ExitCode == 0) return true;
+            }
+            catch { /* player not installed — try the next candidate */ }
+        }
+        return false;
+    }
+
     private void PlaySound()
     {
         if (!_soundEnabled || _soundPath is null) return;
-        try
-        {
-            ProcessStartInfo psi;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                // Try paplay (PulseAudio/PipeWire) first, fall back to aplay (ALSA)
-                psi = new ProcessStartInfo
-                {
-                    FileName = "paplay",
-                    ArgumentList = { _soundPath },
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                };
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                psi = new ProcessStartInfo
-                {
-                    FileName = "powershell",
-                    ArgumentList = { "-NoProfile", "-NonInteractive", "-Command",
-                        $"(New-Object System.Media.SoundPlayer '{_soundPath.Replace("'", "''")}').PlaySync()" },
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                };
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                psi = new ProcessStartInfo
-                {
-                    FileName = "afplay",
-                    ArgumentList = { _soundPath },
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                };
-            }
-            else return;
+        var soundPath = _soundPath;
+        // Fire-and-forget — don't block the message handler.
+        Task.Run(() => PlayOnceBlocking(soundPath));
+    }
 
-            // Fire-and-forget — don't block the message handler
-            Task.Run(() =>
-            {
-                try
-                {
-                    using var p = Process.Start(psi);
-                    p?.WaitForExit(5000);
-                }
-                catch { }
-            });
+    /// <summary>
+    /// Start looping the ringtone (incoming call). Idempotent — a second call
+    /// while already ringing is a no-op. Gated behind SoundEnabled so muting
+    /// notification sound also silences the ring. Stop with <see cref="StopRingtone"/>.
+    /// </summary>
+    public void StartRingtone()
+    {
+        if (!_soundEnabled || _ringtonePath is null) return;
+        var ringPath = _ringtonePath;
+        CancellationTokenSource cts;
+        CancellationToken token;
+        lock (_ringLock)
+        {
+            if (_ringCts is not null) return; // already ringing
+            cts = new CancellationTokenSource();
+            _ringCts = cts;
+            token = cts.Token;
         }
-        catch { }
+
+        Task.Run(() =>
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    // Kill the current ring playback immediately when StopRingtone cancels.
+                    using var reg = token.Register(() =>
+                    {
+                        lock (_ringLock)
+                        {
+                            try { _ringProcess?.Kill(entireProcessTree: true); } catch { }
+                        }
+                    });
+                    var played = PlayOnceBlocking(ringPath, p =>
+                    {
+                        lock (_ringLock) _ringProcess = p;
+                    });
+                    lock (_ringLock) _ringProcess = null;
+                    // No working player on this system — don't busy-loop forever.
+                    if (!played && !token.IsCancellationRequested) break;
+                    // Gap between rings so the loop sounds like a phone cadence even
+                    // if the ringtone file has no built-in trailing silence.
+                    try { token.WaitHandle.WaitOne(1500); } catch { }
+                }
+            }
+            catch { }
+            finally
+            {
+                // Clear our own CTS so a later call can ring again — but only if
+                // StopRingtone hasn't already swapped in a fresh one.
+                lock (_ringLock)
+                {
+                    if (ReferenceEquals(_ringCts, cts)) _ringCts = null;
+                }
+                cts.Dispose();
+            }
+        }, token);
+    }
+
+    /// <summary>Stop the ringtone loop and kill any in-flight playback.</summary>
+    public void StopRingtone()
+    {
+        CancellationTokenSource? cts;
+        lock (_ringLock)
+        {
+            cts = _ringCts;
+            _ringCts = null;
+            try { _ringProcess?.Kill(entireProcessTree: true); } catch { }
+            _ringProcess = null;
+        }
+        if (cts is not null)
+        {
+            try { cts.Cancel(); } catch { }
+            cts.Dispose();
+        }
     }
 }

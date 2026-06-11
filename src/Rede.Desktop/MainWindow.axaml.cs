@@ -254,22 +254,31 @@ public partial class MainWindow : Window
     }
 
     private static string? _notificationSoundPath;
+    private static string? _ringtonePath;
 
     private void ExtractNotificationSound()
     {
-        if (_notificationSoundPath is not null) { _notifications.SetSoundPath(_notificationSoundPath); return; }
+        _notificationSoundPath = ExtractEmbeddedWav("notification.wav", "rede-notification.wav", _notificationSoundPath);
+        if (_notificationSoundPath is not null) _notifications.SetSoundPath(_notificationSoundPath);
+
+        _ringtonePath = ExtractEmbeddedWav("ringtone.wav", "rede-ringtone.wav", _ringtonePath);
+        if (_ringtonePath is not null) _notifications.SetRingtonePath(_ringtonePath);
+    }
+
+    private static string? ExtractEmbeddedWav(string resourceName, string tmpName, string? cached)
+    {
+        if (cached is not null) return cached;
         try
         {
             var asm = typeof(MainWindow).Assembly;
-            using var stream = asm.GetManifestResourceStream("notification.wav");
-            if (stream is null) return;
-            var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rede-notification.wav");
+            using var stream = asm.GetManifestResourceStream(resourceName);
+            if (stream is null) return null;
+            var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), tmpName);
             using (var fs = new System.IO.FileStream(tmp, System.IO.FileMode.Create, System.IO.FileAccess.Write))
                 stream.CopyTo(fs);
-            _notificationSoundPath = tmp;
-            _notifications.SetSoundPath(tmp);
+            return tmp;
         }
-        catch { }
+        catch { return null; }
     }
 
     private async void CheckForUpdatesAsync()
@@ -969,7 +978,7 @@ public partial class MainWindow : Window
         _blobs = new BlobService(_conn);
         _devices = new DeviceService(_conn, _store);
         _call = new CallService(_conn, _store);
-        _callVm.Init(_call);
+        _callVm.Init(_call, _notifications);
         _groupCall = new GroupCallService(_conn);
         WireGroupCallEvents();
 
