@@ -89,6 +89,12 @@ function askPassphrase(prompt, keepEnv = false) {
 }
 
 async function main() {
+  // DEPRECATION: the v1 terminal client was retired on 2026-06-11. The Avalonia v2
+  // desktop client (Rede.Core) is the only supported client. v1<->v2 messaging is not
+  // supported (classical-only X3DH vs v2 PQXDH). Kept for reference; use v2 instead.
+  console.error('\x1b[33m[DEPRECATED] The Rede v1 terminal client is retired (2026-06-11). ' +
+    'Use the v2 desktop client. v1<->v2 messaging is unsupported.\x1b[0m');
+
   // Determine if this is a login (id#xxxx), registration (display name + invite), or device link
   const isRegistration = !!inviteCode;
   const isDeviceLink = !!linkCode;

@@ -17,6 +17,12 @@ function escapeContent(text) {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ''); // Control chars (keep \n \r \t)
 }
 
+// DEPRECATION: the v1 terminal client was retired on 2026-06-11. The Avalonia v2
+// desktop client (Rede.Core) is the only supported client. v1<->v2 messaging is not
+// supported (classical-only X3DH vs v2 PQXDH). Kept for reference; use v2 instead.
+console.error('\x1b[33m[DEPRECATED] The Rede v1 CLI is retired (2026-06-11). ' +
+  'Use the v2 desktop client. v1<->v2 messaging is unsupported.\x1b[0m');
+
 // --- Parse CLI args ---
 const args = process.argv.slice(2);
 const crypto = require('crypto');
