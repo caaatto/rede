@@ -1277,12 +1277,22 @@ public partial class MainWindow : Window
             if (!memberList.Contains(senderId)) memberList.Add(senderId);
             if (!memberList.Contains(profile.UserId)) memberList.Add(profile.UserId);
 
+            // Key rotation for an existing group: reset our own sender chain too, so
+            // it is regenerated and redistributed only to the CURRENT member list
+            var isRotation = profile.Groups.TryGetValue(groupId, out var existingGrp)
+                             && existingGrp.Key is { Length: > 0 }
+                             && !existingGrp.Key.SequenceEqual(keyBytes);
+
             Task.Run(async () =>
             {
                 await _store.AddGroupAsync(profile, groupId, safeName, keyBytes, memberList, passphrase);
+                if (isRotation)
+                    _groups?.ResetOwnSenderKey(groupId);
                 Dispatcher.UIThread.Post(() =>
                 {
-                    _mainVm.AddSystemMessage($"Received group key for \"{safeName}\" ({memberList.Count} member(s))");
+                    _mainVm.AddSystemMessage(isRotation
+                        ? $"Group key rotated for \"{safeName}\" - sender chain reset."
+                        : $"Received group key for \"{safeName}\" ({memberList.Count} member(s))");
                     RefreshGroups();
                 });
             });
@@ -2033,6 +2043,14 @@ public partial class MainWindow : Window
                         : Rede.Core.Storage.PlaceRole.Member;
                     _places?.SetRole(prPlaceId2, args[1], roleVal, _chat);
                 }
+                else
+                    _mainVm.AddSystemMessage("Place not found.");
+                break;
+
+            case "ptransfer" when args.Length >= 2:
+                var ptXferPlaceId = FindPlaceId(args[0]);
+                if (ptXferPlaceId is not null)
+                    _places?.TransferOwnership(ptXferPlaceId, args[1], _chat);
                 else
                     _mainVm.AddSystemMessage("Place not found.");
                 break;

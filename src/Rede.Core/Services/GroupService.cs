@@ -162,9 +162,11 @@ public class GroupService : IDisposable
 
     public void KickFromGroup(string groupId, string userId)
     {
+        // Server expects `targetUserId` (sending `userId` was silently rejected
+        // with "Invalid user ID" — kick never worked from the desktop client)
         _conn.Send(Msg.GroupKick, ProtocolSerializer.Payload(
             ("groupId", JsonValue.Create(groupId)),
-            ("userId", JsonValue.Create(userId))
+            ("targetUserId", JsonValue.Create(userId))
         ));
     }
 
@@ -193,9 +195,16 @@ public class GroupService : IDisposable
         group.Key = newKey;
         _store.SaveProfileDebounced(Profile, Passphrase);
 
+        // Reset our own sender chain — the chain key is what kicked members actually
+        // hold; a fresh one is generated and distributed only to the CURRENT member
+        // list on the next group message
+        ResetOwnSenderKey(groupId);
+
         int sent = 0;
-        if (group.Members is not null && chatService is not null)
+        var chat = chatService ?? Chat;
+        if (group.Members is not null && chat is not null)
         {
+            var membersSig = SignMembersList(groupId, group.Members);
             foreach (var memberId in group.Members)
             {
                 if (memberId == Profile.UserId) continue;
@@ -209,9 +218,11 @@ public class GroupService : IDisposable
                     name = group.Name,
                     key = newKey,
                     sig,
+                    members = group.Members,
+                    membersSig,
                 });
                 // M9: Group key distribution must not expire — offline members need it
-                chatService.SendMessage(memberId, keyMsg, 0);
+                chat.SendMessage(memberId, keyMsg, 0);
                 sent++;
             }
         }
@@ -310,8 +321,14 @@ public class GroupService : IDisposable
 
         lock (_pendingAckLock)
         {
-            if (_pendingAck.Count < MaxPendingAck)
-                _pendingAck.Enqueue((groupId, persistedMsg));
+            // Cap: drop the OLDEST slot (its ACK is most likely lost) — dropping the
+            // new one would misalign every following msgId until the next reconnect
+            if (_pendingAck.Count >= MaxPendingAck)
+            {
+                _pendingAck.Dequeue();
+                OnSystemMessage?.Invoke("ACK queue full - dropped oldest pending entry.");
+            }
+            _pendingAck.Enqueue((groupId, persistedMsg));
         }
     }
 
@@ -472,6 +489,23 @@ public class GroupService : IDisposable
         SendOwnSenderKeyTo(groupId, added);
     }
 
+    /// <summary>
+    /// Drop our own sender chain (and its distribution tracking) — the next group
+    /// message generates a fresh chain and distributes it only to the CURRENT
+    /// member list. Used on group-key rotation (rekey / kick follow-up).
+    /// </summary>
+    public void ResetOwnSenderKey(string contextKey)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var skStateJson = _store.LoadSenderKeyState(Profile, contextKey);
+        if (skStateJson is null) return;
+        var stateRoot = JsonSerializer.Deserialize<JsonObject>(skStateJson.Value);
+        if (stateRoot is null || stateRoot["own"] is null) return;
+        stateRoot.Remove("own");
+        stateRoot.Remove("distributedTo");
+        _store.SaveSenderKeyStateAsync(Profile, contextKey, JsonSerializer.SerializeToElement(stateRoot), Passphrase);
+    }
+
     internal void StoreMemberSenderKey(string contextKey, string from, string chainKeyB64, int messageNumber)
     {
         if (Profile is null || Passphrase is null) return;
@@ -538,7 +572,9 @@ public class GroupService : IDisposable
         if (Profile is null || Passphrase is null) return;
 
         var groupId = ProtocolSerializer.GetString(msg, "groupId");
-        var userId = ProtocolSerializer.GetString(msg, "userId");
+        // Server confirms with `targetUserId` (older builds sent `userId`)
+        var userId = ProtocolSerializer.GetString(msg, "targetUserId")
+                     ?? ProtocolSerializer.GetString(msg, "userId");
         if (groupId is null || userId is null) return;
 
         // M8: Update local member list on kick

@@ -545,6 +545,13 @@ public class AttachmentInfo
 
     [JsonPropertyName("size")]
     public long Size { get; set; }
+
+    // FU1: number of ciphertext chunks the blob was split into for upload.
+    // 0/1 = single blob (legacy, stored under BlobId directly). >1 = chunked,
+    // stored under "{BlobId}.{i}" for i in [0, ChunkCount). The whole-file
+    // ciphertext is one SecretBox; chunks are reassembled before Open.
+    [JsonPropertyName("chunks")]
+    public int ChunkCount { get; set; }
 }
 
 public class KeyPairData

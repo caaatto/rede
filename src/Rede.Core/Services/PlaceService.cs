@@ -72,6 +72,7 @@ public class PlaceService : IDisposable
         _conn.On(Msg.PlaceChannelRemoveOk, HandlePlaceChannelRemoveOk);
         _conn.On(Msg.PlaceMessage, HandlePlaceMessage);
         _conn.On(Msg.PlaceRoleSetOk, HandlePlaceRoleSetOk);
+        _conn.On(Msg.PlaceTransferOk, HandlePlaceTransferOk);
         _conn.On(Msg.PlaceBanOk, HandlePlaceBanOk);
         _conn.On(Msg.PlaceUnbanOk, HandlePlaceUnbanOk);
     }
@@ -958,6 +959,70 @@ public class PlaceService : IDisposable
         OnSystemMessage?.Invoke($"Set {targetUserId} to {roleName} in \"{place.Name}\".");
     }
 
+    /// <summary>
+    /// FU5: Transfer place ownership to another member. The server updates its
+    /// creator_id (so owner-gated server checks follow the new owner) and the new
+    /// CreatorId rides in the E2EE metadata update — peers accept the CreatorId
+    /// change only from the current owner (round-14 H3).
+    /// </summary>
+    public void TransferOwnership(string placeId, string newOwnerId, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return;
+
+        if (!Profile.Places.TryGetValue(placeId, out var place))
+        {
+            OnSystemMessage?.Invoke("Place not found.");
+            return;
+        }
+        if (place.CreatorId != Profile.UserId)
+        {
+            OnSystemMessage?.Invoke("Only the place owner can transfer ownership.");
+            return;
+        }
+        if (newOwnerId == Profile.UserId)
+        {
+            OnSystemMessage?.Invoke("You are already the owner.");
+            return;
+        }
+        if (!place.Members.Contains(newOwnerId))
+        {
+            OnSystemMessage?.Invoke("The new owner must be a member of the place.");
+            return;
+        }
+
+        // Server enforcement first (updates creator_id, demotes us to admin)
+        _conn.Send(Msg.PlaceTransfer, ProtocolSerializer.Payload(
+            ("placeId", JsonValue.Create(placeId)),
+            ("newOwnerId", JsonValue.Create(newOwnerId))
+        ));
+
+        // Update local E2EE metadata: new owner, old owner stays as admin
+        place.CreatorId = newOwnerId;
+        place.Roles[newOwnerId] = PlaceRole.Owner;
+        place.Roles[Profile.UserId] = PlaceRole.Admin;
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService);
+
+        OnSystemMessage?.Invoke($"Transferred ownership of \"{place.Name}\" to {newOwnerId}.");
+        OnPlacesChanged?.Invoke();
+    }
+
+    private void HandlePlaceTransferOk(JsonObject msg)
+    {
+        if (Profile is null || Passphrase is null) return;
+        var placeId = ProtocolSerializer.GetString(msg, "placeId");
+        var newOwnerId = ProtocolSerializer.GetString(msg, "newOwnerId");
+        if (placeId is null || newOwnerId is null) return;
+
+        // When WE are the new owner, the authoritative CreatorId change arrives via
+        // the metadata update (placekey) from the old owner. This server OK is a
+        // confirmation/notification; only surface it.
+        OnSystemMessage?.Invoke(newOwnerId == Profile.UserId
+            ? $"You are now the owner of place {placeId}."
+            : $"Ownership of place {placeId} transferred to {newOwnerId}.");
+        OnPlacesChanged?.Invoke();
+    }
+
     // --- Ban / Unban ---
     // Bans are stored both server-side (for enforcement) and E2EE metadata (for display).
 
@@ -1010,7 +1075,10 @@ public class PlaceService : IDisposable
         place.Roles.Remove(targetUserId);
         _store.SaveProfileDebounced(Profile, Passphrase);
 
-        DistributeMetadata(placeId, place, chatService);
+        // FU2: owner rotates the metadata key so the banned member loses SFrame
+        // derivation + metadata access; non-owners just redistribute as before
+        if (!RotateMetadataKeyAfterRemoval(placeId, place, chatService))
+            DistributeMetadata(placeId, place, chatService);
         OnSystemMessage?.Invoke($"Banned {targetUserId} from \"{place.Name}\".");
         OnPlacesChanged?.Invoke();
     }
@@ -1194,9 +1262,48 @@ public class PlaceService : IDisposable
         OnSystemMessage?.Invoke($"Metadata key rotated for \"{place.Name}\".");
     }
 
+    /// <summary>
+    /// FU2: After a kick/ban, rotate the place metadata key and reset our own
+    /// per-channel sender chains, then redistribute to the CURRENT member list.
+    /// Only the owner may do this — receivers accept a metadata-key rotation only
+    /// from the current owner (round-14 H3), so an admin's rotation would be
+    /// rejected anyway. Until this runs, a removed member keeps the old metadata
+    /// key and can still derive group-call SFrame keys and read metadata.
+    /// Returns true when a rotation happened (caller then skips a plain redistribute).
+    /// </summary>
+    private bool RotateMetadataKeyAfterRemoval(string placeId, Place place, ChatService? chatService)
+    {
+        if (Profile is null || Passphrase is null) return false;
+        if (place.CreatorId != Profile.UserId) return false; // only owner rotation is accepted
+
+        place.MetadataKey = CryptoService.GenerateSymmetricKey();
+
+        // Reset our own sender chains for every channel — regenerated and
+        // distributed only to the remaining members on the next channel message,
+        // so the removed member can't read our future text either
+        foreach (var channelId in place.Channels.Keys)
+        {
+            var skKey = SenderKeyKey(placeId, channelId);
+            var skStateJson = _store.LoadSenderKeyState(Profile, skKey);
+            if (skStateJson is null) continue;
+            var stateRoot = JsonSerializer.Deserialize<JsonObject>(skStateJson.Value);
+            if (stateRoot is null || stateRoot["own"] is null) continue;
+            stateRoot.Remove("own");
+            stateRoot.Remove("distributedTo");
+            _store.SaveSenderKeyStateAsync(Profile, skKey, JsonSerializer.SerializeToElement(stateRoot), Passphrase);
+        }
+
+        _store.SaveProfileDebounced(Profile, Passphrase);
+        DistributeMetadata(placeId, place, chatService ?? Chat);
+        OnSystemMessage?.Invoke($"Metadata key rotated for \"{place.Name}\" — removed member can no longer derive call/metadata keys.");
+        return true;
+    }
+
     private void DistributeMetadata(string placeId, Place place, ChatService? chatService)
     {
-        if (Profile is null || chatService is null) return;
+        if (Profile is null) return;
+        chatService ??= Chat;
+        if (chatService is null) return;
 
         var encMeta = EncryptMetadata(place, place.MetadataKey);
         foreach (var memberId in place.Members)
@@ -1272,8 +1379,14 @@ public class PlaceService : IDisposable
         _store.AddChatMessage(Profile, chatKey, persistedMsg, Passphrase);
         lock (_pendingAckLock)
         {
-            if (_pendingAck.Count < MaxPendingAck)
-                _pendingAck.Enqueue((chatKey, persistedMsg));
+            // Cap: drop the OLDEST slot (its ACK is most likely lost) — dropping the
+            // new one would misalign every following msgId until the next reconnect
+            if (_pendingAck.Count >= MaxPendingAck)
+            {
+                _pendingAck.Dequeue();
+                OnSystemMessage?.Invoke("ACK queue full - dropped oldest pending entry.");
+            }
+            _pendingAck.Enqueue((chatKey, persistedMsg));
         }
         OnChannelMessageSent?.Invoke(chatKey, text, ttl);
     }
@@ -1333,8 +1446,14 @@ public class PlaceService : IDisposable
         // echo must consume its own ACK slot instead of stamping the next regular message.
         lock (_pendingAckLock)
         {
-            if (_pendingAck.Count < MaxPendingAck)
-                _pendingAck.Enqueue((ChatKey(placeId, channelId), null));
+            // Cap: drop the OLDEST slot (its ACK is most likely lost) — dropping the
+            // new one would misalign every following msgId until the next reconnect
+            if (_pendingAck.Count >= MaxPendingAck)
+            {
+                _pendingAck.Dequeue();
+                OnSystemMessage?.Invoke("ACK queue full - dropped oldest pending entry.");
+            }
+            _pendingAck.Enqueue((ChatKey(placeId, channelId), null));
         }
     }
 
@@ -1664,6 +1783,10 @@ public class PlaceService : IDisposable
             place.Members.Remove(targetUserId);
             place.Roles.Remove(targetUserId);
             _store.SaveProfileDebounced(Profile, Passphrase);
+
+            // FU2: owner rotates the metadata key (+ resets channel sender chains)
+            // so the kicked member loses SFrame derivation, metadata and future text
+            RotateMetadataKeyAfterRemoval(placeId, place, Chat);
         }
 
         OnSystemMessage?.Invoke($"Removed {targetUserId} from place {placeId}");

@@ -60,6 +60,9 @@ Commands:
   add        Add a contact
   group-new  Create a group
   ginvite    Invite user to group
+  kick       Remove user from group (creator only, -g + -t)
+  rekey      Rotate group key + own sender chain (-g)
+  confirm    Accept a contact's key change after verification (-t)
   key        Show your public key & fingerprint
   listen     Listen for incoming messages (stays open)
   gen-link   Generate a device link code (from existing device)
@@ -418,6 +421,11 @@ async function cmdSend() {
     console.error('Error: message text is required');
     process.exit(1);
   }
+  // Largest padding bucket is 16384 — reject early instead of throwing mid-send
+  if (Buffer.byteLength(opts.message, 'utf8') > 16000) {
+    console.error('Error: message too long (max ~16 KB).');
+    process.exit(1);
+  }
 
   const passphrase = await askPassphrase('Passphrase: ');
   const profile = store.loadProfile(opts.user, passphrase);
@@ -478,11 +486,18 @@ async function cmdSend() {
     for (const devId of deviceIds) {
       const ratchetState = store.loadRatchetState(profile, opts.to, devId);
       if (ratchetState) {
+        const stateBackup = JSON.parse(JSON.stringify(ratchetState));
         const result = cryptoMod.ratchetEncrypt(ratchetState, opts.message);
-        store.saveRatchetState(profile, opts.to, ratchetState, passphrase, devId);
         const msgPayload = { encrypted: result.ciphertext, nonce: result.nonce, header: result.header };
-        if (!trySealedSend(opts.to, devId, msgPayload, opts.ttl || 0)) {
-          conn.send(MSG.MESSAGE, { to: opts.to, toDeviceId: devId, ...msgPayload, ttl: opts.ttl || 0 });
+        let sent = trySealedSend(opts.to, devId, msgPayload, opts.ttl || 0);
+        if (!sent) {
+          sent = conn.send(MSG.MESSAGE, { to: opts.to, toDeviceId: devId, ...msgPayload, ttl: opts.ttl || 0 });
+        }
+        // Roll back the ratchet advance if the send never left the socket (TUI parity)
+        store.saveRatchetState(profile, opts.to, sent === false ? stateBackup : ratchetState, passphrase, devId);
+        if (sent === false) {
+          console.error('Message not sent — connection lost. Ratchet state preserved.');
+          continue;
         }
         expectedAcks++;
         sentImmediate = true;
@@ -495,14 +510,20 @@ async function cmdSend() {
     if (deviceIds.length === 0) {
       const ratchetState = store.loadRatchetState(profile, opts.to);
       if (ratchetState) {
+        const stateBackup = JSON.parse(JSON.stringify(ratchetState));
         const result = cryptoMod.ratchetEncrypt(ratchetState, opts.message);
-        store.saveRatchetState(profile, opts.to, ratchetState, passphrase);
         const msgPayload = { encrypted: result.ciphertext, nonce: result.nonce, header: result.header };
-        if (!trySealedSend(opts.to, null, msgPayload, opts.ttl || 0)) {
-          conn.send(MSG.MESSAGE, { to: opts.to, ...msgPayload, ttl: opts.ttl || 0 });
+        let sent = trySealedSend(opts.to, null, msgPayload, opts.ttl || 0);
+        if (!sent) {
+          sent = conn.send(MSG.MESSAGE, { to: opts.to, ...msgPayload, ttl: opts.ttl || 0 });
         }
-        expectedAcks++;
-        sentImmediate = true;
+        store.saveRatchetState(profile, opts.to, sent === false ? stateBackup : ratchetState, passphrase);
+        if (sent === false) {
+          console.error('Message not sent — connection lost. Ratchet state preserved.');
+        } else {
+          expectedAcks++;
+          sentImmediate = true;
+        }
       } else {
         needBundle.push(null);
       }
@@ -771,6 +792,13 @@ async function cmdGroupNew() {
     console.log(`Group created: "${msg.name}"`);
     console.log(`Group ID: ${msg.groupId}`);
     conn.disconnect();
+  });
+
+  // A server reject (e.g. group creation rate limit 5/h) must exit, not hang
+  conn.on(MSG.ERROR, (msg) => {
+    console.error(`Server error: ${msg.error}`);
+    conn.disconnect();
+    process.exit(1);
   });
 
   conn.send(MSG.GROUP_CREATE, { name });
@@ -1133,8 +1161,22 @@ async function cmdListen() {
         }
         if (!members.includes(msg.from)) members.push(msg.from);
         if (!members.includes(profile.userId)) members.push(profile.userId);
+        // Key rotation for an existing group: reset our own sender chain too, so it
+        // is regenerated and redistributed only to the CURRENT member list
+        const existingGroup = profile.groups[ctrl.groupId];
+        const isRotation = !!(existingGroup && existingGroup.key && existingGroup.key !== ctrl.key);
         store.addGroup(profile, ctrl.groupId, ctrl.name, ctrl.key, members, passphrase);
-        console.log(`[System] Joined group "${escapeContent(ctrl.name)}" (verified key, ${members.length} member(s))`);
+        if (isRotation) {
+          const rotState = store.loadSenderKeyState(profile, ctrl.groupId);
+          if (rotState && rotState.own) {
+            rotState.own = null;
+            delete rotState.distributedTo;
+            store.saveSenderKeyState(profile, ctrl.groupId, rotState, passphrase);
+          }
+        }
+        console.log(isRotation
+          ? `[System] Group key rotated for "${escapeContent(ctrl.name)}" — sender chain reset.`
+          : `[System] Joined group "${escapeContent(ctrl.name)}" (verified key, ${members.length} member(s))`);
       } else if (ctrl.__rede_ctrl === 'groupmembers' && ctrl.groupId && Array.isArray(ctrl.members)) {
         // Signed member-list update from an existing member (e.g. after an invite)
         const group = profile.groups[ctrl.groupId];
@@ -1239,6 +1281,24 @@ async function cmdListen() {
   conn.on(MSG.MESSAGE, handleDM);
   conn.on(MSG.SEALED_MESSAGE, handleSealed);
   conn.on(MSG.GROUP_MESSAGE, handleGM);
+  // H6 parity with TUI: store own sibling-device keys announced by the server
+  conn.on(MSG.DEVICE_ADDED, (msg) => {
+    console.log(`[System] New device linked: ${escapeContent(msg.deviceId || '?')}`);
+    if (msg.deviceId && msg.publicKey && msg.signingKey) {
+      try {
+        const pk = cryptoMod.decodeBase64(msg.publicKey);
+        const sk = cryptoMod.decodeBase64(msg.signingKey);
+        if (pk.length === 32 && sk.length === 32) {
+          if (!profile.ownDevices) profile.ownDevices = {};
+          profile.ownDevices[msg.deviceId] = { publicKey: msg.publicKey, signingKey: msg.signingKey };
+          store.saveProfile(profile, passphrase);
+          console.log(`[System] Device ${escapeContent(msg.deviceId)} keys stored.`);
+        }
+      } catch {
+        console.log('[SECURITY] Invalid device keys in DEVICE_ADDED — ignored.');
+      }
+    }
+  });
   conn.on(MSG.PENDING_MESSAGES, (msg) => {
     if (msg.messages) {
       for (const pm of msg.messages) {
@@ -1377,7 +1437,156 @@ async function cmdGenLink() {
     conn.disconnect();
   });
 
+  // A server reject must exit, not hang
+  conn.on(MSG.ERROR, (msg) => {
+    console.error(`Server error: ${msg.error}`);
+    conn.disconnect();
+    process.exit(1);
+  });
+
   conn.send(MSG.DEVICE_LINK_CREATE, { codeHash });
+}
+
+// Kick a member from a group (creator only). Mirrors TUI /kick.
+async function cmdKick() {
+  if (!opts.group || !opts.to) {
+    console.error('Error: --group and --to are required');
+    process.exit(1);
+  }
+  const passphrase = await askPassphrase('Passphrase: ');
+  const profile = store.loadProfile(opts.user, passphrase);
+  if (!profile) { console.error('Wrong passphrase or no profile.'); process.exit(1); }
+  const group = profile.groups[opts.group];
+  if (!group) { console.error('Group not found.'); process.exit(1); }
+
+  const conn = await connectAndAuth(profile, passphrase);
+
+  conn.on(MSG.GROUP_KICK_OK, (msg) => {
+    if (group.members) {
+      const idx = group.members.indexOf(msg.targetUserId);
+      if (idx !== -1) { group.members.splice(idx, 1); store.saveProfile(profile, passphrase); }
+    }
+    const skState = store.loadSenderKeyState(profile, msg.groupId);
+    if (skState && skState.members && skState.members[msg.targetUserId]) {
+      delete skState.members[msg.targetUserId];
+      store.saveSenderKeyState(profile, msg.groupId, skState, passphrase);
+    }
+    console.log(`Removed ${escapeContent(msg.targetUserId)} from group ${escapeContent(msg.groupId)}.`);
+    console.log(`Run: node client/cli.js rekey -u ${profile.userId} -g ${msg.groupId}  (rotate the group key)`);
+    conn.disconnect();
+  });
+  conn.on(MSG.ERROR, (msg) => {
+    console.error(`Server error: ${msg.error}`);
+    conn.disconnect();
+    process.exit(1);
+  });
+
+  conn.send(MSG.GROUP_KICK, { groupId: opts.group, targetUserId: opts.to });
+}
+
+// Rotate the group key + own sender chain and redistribute. Mirrors TUI /rekey.
+async function cmdRekey() {
+  if (!opts.group) {
+    console.error('Error: --group is required');
+    process.exit(1);
+  }
+  const passphrase = await askPassphrase('Passphrase: ');
+  const profile = store.loadProfile(opts.user, passphrase);
+  if (!profile) { console.error('Wrong passphrase or no profile.'); process.exit(1); }
+  const group = profile.groups[opts.group];
+  if (!group) { console.error('Group not found.'); process.exit(1); }
+
+  const conn = await connectAndAuth(profile, passphrase);
+
+  const newKey = cryptoMod.generateGroupKey();
+  group.key = newKey;
+  store.saveProfile(profile, passphrase);
+
+  // Reset our own sender chain — regenerated and redistributed only to the
+  // CURRENT member list on the next group message
+  const skState = store.loadSenderKeyState(profile, opts.group);
+  if (skState && skState.own) {
+    skState.own = null;
+    delete skState.distributedTo;
+    store.saveSenderKeyState(profile, opts.group, skState, passphrase);
+  }
+
+  const mPayload = `GROUPMEMBERS:${opts.group}:${(group.members || []).slice().sort().join(',')}`;
+  const membersSig = cryptoMod.signString(mPayload, profile.signingSecretKey);
+  let sent = 0;
+  for (const memberId of (group.members || [])) {
+    if (memberId === profile.userId) continue;
+    if (!profile.contacts[memberId]) continue;
+    const sig = cryptoMod.signGroupKey(opts.group, group.name, newKey, profile.signingSecretKey);
+    const keyMsg = JSON.stringify({ __rede_ctrl: 'groupkey', groupId: opts.group, name: group.name, key: newKey, sig, members: group.members, membersSig });
+    if (sendRatchetedCtrl(conn, profile, passphrase, memberId, keyMsg, 120)) sent++;
+  }
+  console.log(`Group key rotated for "${escapeContent(group.name)}". New key sent to ${sent} member(s).`);
+  setTimeout(() => conn.disconnect(), 800);
+}
+
+// Accept a contact's key change after out-of-band verification.
+// The CLI has no persistent pending-key-change state, so this re-fetches the
+// contact's CURRENT keys from the server and adopts them after showing the
+// new fingerprint — old ratchet sessions are dropped (re-established on next send).
+async function cmdConfirm() {
+  if (!opts.to) {
+    console.error('Error: --to is required');
+    process.exit(1);
+  }
+  const passphrase = await askPassphrase('Passphrase: ');
+  const profile = store.loadProfile(opts.user, passphrase);
+  if (!profile) { console.error('Wrong passphrase or no profile.'); process.exit(1); }
+  const contact = profile.contacts[opts.to];
+  if (!contact) { console.error('Contact not found. Use: add'); process.exit(1); }
+
+  const conn = await connectAndAuth(profile, passphrase);
+
+  conn.on(MSG.USER_LOOKUP_OK, (msg) => {
+    if (msg.userId !== opts.to) return;
+    if (!msg.publicKey || !msg.signingKey) {
+      console.error('Lookup returned no keys.');
+      conn.disconnect();
+      process.exit(1);
+    }
+    // Validate key formats (32-byte base64)
+    const validated = {};
+    try {
+      if (cryptoMod.decodeBase64(msg.publicKey).length !== 32 ||
+          cryptoMod.decodeBase64(msg.signingKey).length !== 32) throw new Error('bad');
+      for (const [dId, dInfo] of Object.entries(msg.devices || {})) {
+        if (!dInfo || !dInfo.publicKey || !dInfo.signingKey) continue;
+        if (cryptoMod.decodeBase64(dInfo.publicKey).length === 32 &&
+            cryptoMod.decodeBase64(dInfo.signingKey).length === 32) validated[dId] = dInfo;
+      }
+    } catch {
+      console.error('[SECURITY] Invalid key format in lookup — aborted.');
+      conn.disconnect();
+      process.exit(1);
+    }
+    const changed = contact.publicKey !== msg.publicKey;
+    contact.publicKey = msg.publicKey;
+    contact.signingKey = msg.signingKey;
+    contact.devices = validated;
+    // Drop old ratchet states — sessions re-establish against the new keys
+    if (profile.ratchetStates) {
+      for (const k of Object.keys(profile.ratchetStates)) {
+        if (k === opts.to || k.startsWith(opts.to + ':')) delete profile.ratchetStates[k];
+      }
+    }
+    store.saveProfile(profile, passphrase);
+    console.log(changed ? `Key updated for ${escapeContent(opts.to)}.` : `Keys unchanged for ${escapeContent(opts.to)}.`);
+    console.log(`New fingerprint: ${cryptoMod.fingerprint(msg.publicKey)}`);
+    console.log('Verify this fingerprint out-of-band!');
+    conn.disconnect();
+  });
+  conn.on(MSG.USER_LOOKUP_FAIL, (msg) => {
+    console.error(`Lookup failed: ${msg.error || 'unknown'}`);
+    conn.disconnect();
+    process.exit(1);
+  });
+
+  conn.send(MSG.USER_LOOKUP, { lookupId: opts.to });
 }
 
 // --- Main ---
@@ -1392,6 +1601,9 @@ const commands = {
   add: cmdAdd,
   'group-new': cmdGroupNew,
   ginvite: cmdGinvite,
+  kick: cmdKick,
+  rekey: cmdRekey,
+  confirm: cmdConfirm,
   key: cmdKey,
   listen: cmdListen,
 };

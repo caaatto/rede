@@ -39,6 +39,7 @@ public static class MessageEnvelope
                     ["name"] = att.Name,
                     ["mime"] = att.MimeType,
                     ["size"] = att.Size,
+                    ["chunks"] = att.ChunkCount,
                 });
             }
             obj["att"] = attArr;
@@ -88,6 +89,7 @@ public static class MessageEnvelope
                             Name = attObj["name"]?.GetValue<string>() ?? "",
                             MimeType = attObj["mime"]?.GetValue<string>(),
                             Size = attObj["size"]?.GetValue<long>() ?? 0,
+                            ChunkCount = attObj["chunks"]?.GetValue<int>() ?? 0,
                         });
                     }
                 }

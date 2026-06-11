@@ -59,6 +59,12 @@ const PAD_BUCKETS = [256, 1024, 4096, 16384];
 
 function padMessage(plaintext) {
   const msgBytes = typeof plaintext === 'string' ? Buffer.from(plaintext, 'utf8') : plaintext;
+  // Largest bucket is 16384 minus the 2-byte length prefix. Without this check,
+  // 16383-65535 bytes were silently truncated (garbage on the receiver) and
+  // >65535 threw a RangeError from writeUInt16BE deep in the send path.
+  if (msgBytes.length > 16382) {
+    throw new Error(`Message too large (${msgBytes.length} bytes, max 16382).`);
+  }
   const needed = 2 + msgBytes.length; // 2-byte length prefix + content
   let bucket = PAD_BUCKETS[PAD_BUCKETS.length - 1];
   for (const b of PAD_BUCKETS) {

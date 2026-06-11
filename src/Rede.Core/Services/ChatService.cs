@@ -435,8 +435,14 @@ public class ChatService : IDisposable
         // Cap protects against unbounded growth if ACKs never arrive (broken transport).
         lock (_pendingAckLock)
         {
-            if (_pendingAck.Count < MaxPendingAck)
-                _pendingAck.Enqueue((targetId, persistedMsg, wasSealed));
+            // Cap: drop the OLDEST slot (its ACK is most likely lost) — dropping the
+            // new one would misalign every following msgId until the next reconnect
+            if (_pendingAck.Count >= MaxPendingAck)
+            {
+                _pendingAck.Dequeue();
+                OnSystemMessage?.Invoke("ACK queue full - dropped oldest pending entry.");
+            }
+            _pendingAck.Enqueue((targetId, persistedMsg, wasSealed));
         }
         return true;
     }
@@ -1130,8 +1136,12 @@ public class ChatService : IDisposable
                 // subsequent (other devices) are consumed as no-ops.
                 lock (_pendingAckLock)
                 {
-                    if (_pendingAck.Count < MaxPendingAck)
-                        _pendingAck.Enqueue((targetUserId, initPersistedMsg, false));
+                    if (_pendingAck.Count >= MaxPendingAck)
+                    {
+                        _pendingAck.Dequeue();
+                        OnSystemMessage?.Invoke("ACK queue full - dropped oldest pending entry.");
+                    }
+                    _pendingAck.Enqueue((targetUserId, initPersistedMsg, false));
                 }
                 successCount++;
             }

@@ -499,17 +499,37 @@ async function main() {
   // --- Message handlers ---
   conn.on(MSG.REGISTER_OK, (msg) => {
     // Update profile with server-assigned ID
+    const oldUserId = profile.userId;
     profile.userId = msg.userId;
     profile.displayName = msg.displayName;
     if (msg.deviceId) profile.deviceId = msg.deviceId;
 
-    // TOFU pin server signing key
+    // TOFU pin server signing key (validate 32-byte base64 — M1 parity with AUTH_OK)
     if (msg.serverSigningKey) {
-      profile.serverSigningKey = msg.serverSigningKey;
-      conn.serverSigningKey = msg.serverSigningKey;
+      let validKey = false;
+      try { validKey = cryptoMod.decodeBase64(msg.serverSigningKey).length === 32; } catch {}
+      if (validKey) {
+        profile.serverSigningKey = msg.serverSigningKey;
+        conn.serverSigningKey = msg.serverSigningKey;
+      } else {
+        ui.showSystemMessage('[Security] Invalid serverSigningKey format — ignoring');
+      }
     }
 
     store.saveProfile(profile, passphrase);
+
+    // Remove the temp profile file saved under the pre-register ID — same key
+    // material under an orphaned filename otherwise lingers on disk
+    if (oldUserId && oldUserId !== msg.userId) {
+      try {
+        const path = require('path');
+        const oldHash = crypto.createHash('sha256').update(oldUserId).digest('hex');
+        const redeDir = path.join(require('os').homedir(), '.rede');
+        const fs = require('fs');
+        try { fs.unlinkSync(path.join(redeDir, oldHash + '.enc')); } catch {}
+        try { fs.unlinkSync(path.join(redeDir, oldHash.slice(0, 16) + '.enc')); } catch {}
+      } catch {}
+    }
 
     ui.setStatus(`${msg.displayName} (${msg.userId}) | E2EE + PFS${useI2P ? ' | I2P' : useTor ? ' | Tor' : ''}`);
     ui.showSystemMessage('Registration successful!');
@@ -685,9 +705,23 @@ async function main() {
         }
         if (!members.includes(msg.from)) members.push(msg.from);
         if (!members.includes(profile.userId)) members.push(profile.userId);
+        // Key rotation for an existing group: reset our own sender chain too, so it
+        // is regenerated and redistributed only to the CURRENT member list
+        const existingGroup = profile.groups[ctrl.groupId];
+        const isRotation = !!(existingGroup && existingGroup.key && existingGroup.key !== ctrl.key);
         store.addGroup(profile, ctrl.groupId, ctrl.name, ctrl.key, members, passphrase);
+        if (isRotation) {
+          const rotState = store.loadSenderKeyState(profile, ctrl.groupId);
+          if (rotState && rotState.own) {
+            rotState.own = null;
+            delete rotState.distributedTo;
+            store.saveSenderKeyState(profile, ctrl.groupId, rotState, passphrase);
+          }
+        }
         refreshContactList();
-        ui.showSystemMessage(`Joined group "${escapeContent(ctrl.name)}" (verified key from ${escapeContent(msg.from)}, ${members.length} member(s))`);
+        ui.showSystemMessage(isRotation
+          ? `Group key rotated for "${escapeContent(ctrl.name)}" by ${escapeContent(msg.from)} — sender chain reset.`
+          : `Joined group "${escapeContent(ctrl.name)}" (verified key from ${escapeContent(msg.from)}, ${members.length} member(s))`);
       } else if (ctrl.__rede_ctrl === 'groupmembers' && ctrl.groupId && Array.isArray(ctrl.members)) {
         // Signed member-list update from an existing member (e.g. after an invite/kick)
         const group = profile.groups[ctrl.groupId];
@@ -1288,14 +1322,25 @@ async function main() {
         const newKey = cryptoMod.generateGroupKey();
         group.key = newKey;
         store.saveProfile(profile, passphrase);
+        // Reset our own sender key too — the chain key is what kicked members
+        // actually hold; a fresh chain is generated and distributed only to the
+        // CURRENT member list on the next group message
+        const rkState = store.loadSenderKeyState(profile, groupId);
+        if (rkState && rkState.own) {
+          rkState.own = null;
+          delete rkState.distributedTo;
+          store.saveSenderKeyState(profile, groupId, rkState, passphrase);
+        }
         // Distribute new key to all known contacts in the group via ratcheted DM
+        const rkPayload = `GROUPMEMBERS:${groupId}:${(group.members || []).slice().sort().join(',')}`;
+        const rkMembersSig = cryptoMod.signString(rkPayload, profile.signingSecretKey);
         let sent = 0;
         for (const memberId of (group.members || [])) {
           if (memberId === profile.userId) continue;
           const contact = profile.contacts[memberId];
           if (!contact) continue;
           const sig = cryptoMod.signGroupKey(groupId, group.name, newKey, profile.signingSecretKey);
-          const keyMsg = JSON.stringify({ __rede_ctrl: 'groupkey', groupId, name: group.name, key: newKey, sig });
+          const keyMsg = JSON.stringify({ __rede_ctrl: 'groupkey', groupId, name: group.name, key: newKey, sig, members: group.members, membersSig: rkMembersSig });
           sendRatcheted(memberId, keyMsg, 120);
           sent++;
         }
@@ -1349,6 +1394,11 @@ async function main() {
   ui.onMessage = (text) => {
     if (!currentChatTarget) {
       ui.showSystemMessage('Select a contact or group first (Tab + Enter)');
+      return;
+    }
+    // Largest padding bucket is 16384 — reject early instead of throwing mid-send
+    if (Buffer.byteLength(text, 'utf8') > 16000) {
+      ui.showSystemMessage('Message too long (max ~16 KB). Not sent.');
       return;
     }
 

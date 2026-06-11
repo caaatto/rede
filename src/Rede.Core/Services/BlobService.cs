@@ -18,7 +18,14 @@ namespace Rede.Core.Services;
 /// </summary>
 public class BlobService : IDisposable
 {
-    public const int MaxBlobSize = 700_000; // ~700 KB — see frame-cap note above
+    // FU1: attachments are chunked, so the cap is no longer bound by the WS frame.
+    public const int MaxBlobSize = 8 * 1024 * 1024; // 8 MB plaintext
+
+    // Per-chunk ciphertext size. base64 expands ×4/3, so 480 KB cipher → ~640 KB
+    // on the wire, safely under the 700 KB budget within the 1 MB frame cap.
+    private const int ChunkCipherSize = 480_000;
+
+    private static string ChunkBlobId(string blobId, int index) => $"{blobId}.{index}";
 
     private static readonly string BlobBaseDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".rede", "blobs");
@@ -69,7 +76,7 @@ public class BlobService : IDisposable
     {
         if (plainData.Length > MaxBlobSize)
         {
-            OnSystemMessage?.Invoke($"Attachment too large ({plainData.Length / 1024} KB, max 700 KB).");
+            OnSystemMessage?.Invoke($"Attachment too large ({plainData.Length / 1024 / 1024} MB, max 8 MB).");
             return null;
         }
 
@@ -81,30 +88,36 @@ public class BlobService : IDisposable
         // Generate blob ID
         var blobId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 
-        // Upload as base64 (simple approach — avoids binary WS frame complexity for now)
-        var tcs = new TaskCompletionSource<bool>();
-        _uploadPending[blobId] = tcs;
-
-        _conn.Send(Msg.BlobUpload, ProtocolSerializer.Payload(
-            ("blobId", JsonValue.Create(blobId)),
-            ("size", JsonValue.Create(cipherData.Length)),
-            ("data", JsonValue.Create(Convert.ToBase64String(cipherData)))
-        ));
-
-        // Wait for server confirmation (timeout 30s)
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        cts.Token.Register(() => tcs.TrySetResult(false));
-
-        var success = await tcs.Task;
-        _uploadPending.TryRemove(blobId, out _);
-
-        if (!success)
+        // FU1: split the ciphertext into frame-sized chunks. A single-chunk blob
+        // uploads under the bare blobId (legacy wire shape); a multi-chunk blob
+        // uploads each piece under "{blobId}.{i}" and records ChunkCount.
+        int chunkCount = (cipherData.Length + ChunkCipherSize - 1) / ChunkCipherSize;
+        if (chunkCount <= 1)
         {
-            OnSystemMessage?.Invoke("Upload failed.");
-            return null;
+            if (!await UploadOneBlobAsync(blobId, cipherData))
+            {
+                OnSystemMessage?.Invoke("Upload failed.");
+                return null;
+            }
+            chunkCount = 1;
+        }
+        else
+        {
+            for (int i = 0; i < chunkCount; i++)
+            {
+                int off = i * ChunkCipherSize;
+                int len = Math.Min(ChunkCipherSize, cipherData.Length - off);
+                var chunk = new byte[len];
+                Buffer.BlockCopy(cipherData, off, chunk, 0, len);
+                if (!await UploadOneBlobAsync(ChunkBlobId(blobId, i), chunk))
+                {
+                    OnSystemMessage?.Invoke($"Upload failed (chunk {i + 1}/{chunkCount}).");
+                    return null;
+                }
+            }
         }
 
-        // Cache the plaintext locally + persist the ciphertext to disk so the
+        // Cache the plaintext locally + persist the whole ciphertext to disk so the
         // image survives restarts even if the server has dropped the blob.
         CacheBlob(CacheKey(blobId, key, nonce), plainData);
         TryWriteCipherToDisk(blobId, cipherData);
@@ -117,12 +130,32 @@ public class BlobService : IDisposable
             Name = fileName,
             MimeType = mimeType,
             Size = plainData.Length,
+            ChunkCount = chunkCount,
         };
 
         // Zero the local key copy (AttachmentInfo owns its own clone)
         CryptographicOperations.ZeroMemory(key);
 
         return att;
+    }
+
+    /// <summary>Upload one ciphertext blob (single blob or one chunk) and await BLOB_UPLOAD_OK.</summary>
+    private async Task<bool> UploadOneBlobAsync(string blobId, byte[] cipherChunk)
+    {
+        var tcs = new TaskCompletionSource<bool>();
+        _uploadPending[blobId] = tcs;
+
+        _conn.Send(Msg.BlobUpload, ProtocolSerializer.Payload(
+            ("blobId", JsonValue.Create(blobId)),
+            ("size", JsonValue.Create(cipherChunk.Length)),
+            ("data", JsonValue.Create(Convert.ToBase64String(cipherChunk)))
+        ));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        cts.Token.Register(() => tcs.TrySetResult(false));
+        var ok = await tcs.Task;
+        _uploadPending.TryRemove(blobId, out _);
+        return ok;
     }
 
     /// <summary>
@@ -152,18 +185,27 @@ public class BlobService : IDisposable
             catch { /* corrupted on disk or wrong key — fall through to network */ }
         }
 
-        var tcs = new TaskCompletionSource<byte[]?>();
-        _fetchPending[att.BlobId] = tcs;
-
-        _conn.Send(Msg.BlobFetch, ProtocolSerializer.Payload(
-            ("blobId", JsonValue.Create(att.BlobId))
-        ));
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        cts.Token.Register(() => tcs.TrySetResult(null));
-
-        var cipherData = await tcs.Task;
-        _fetchPending.TryRemove(att.BlobId, out _);
+        // FU1: reassemble chunked ciphertext (legacy single-blob path when ChunkCount ≤ 1)
+        byte[]? cipherData;
+        if (att.ChunkCount > 1)
+        {
+            using var ms = new MemoryStream();
+            for (int i = 0; i < att.ChunkCount; i++)
+            {
+                var chunk = await FetchOneBlobAsync(ChunkBlobId(att.BlobId, i));
+                if (chunk is null)
+                {
+                    OnSystemMessage?.Invoke($"Attachment fetch failed (chunk {i + 1}/{att.ChunkCount}).");
+                    return null;
+                }
+                ms.Write(chunk, 0, chunk.Length);
+            }
+            cipherData = ms.ToArray();
+        }
+        else
+        {
+            cipherData = await FetchOneBlobAsync(att.BlobId);
+        }
 
         if (cipherData is null) return null;
 
@@ -182,6 +224,23 @@ public class BlobService : IDisposable
             OnSystemMessage?.Invoke("Failed to decrypt attachment.");
             return null;
         }
+    }
+
+    /// <summary>Fetch one ciphertext blob (single blob or one chunk) and await BLOB_DATA.</summary>
+    private async Task<byte[]?> FetchOneBlobAsync(string blobId)
+    {
+        var tcs = new TaskCompletionSource<byte[]?>();
+        _fetchPending[blobId] = tcs;
+
+        _conn.Send(Msg.BlobFetch, ProtocolSerializer.Payload(
+            ("blobId", JsonValue.Create(blobId))
+        ));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        cts.Token.Register(() => tcs.TrySetResult(null));
+        var data = await tcs.Task;
+        _fetchPending.TryRemove(blobId, out _);
+        return data;
     }
 
     private void CacheBlob(string cacheKey, byte[] data)

@@ -83,6 +83,8 @@ public static class Msg
     public const string PlaceMessage = "place_message";
     public const string PlaceRoleSet = "place_role_set";
     public const string PlaceRoleSetOk = "place_role_set_ok";
+    public const string PlaceTransfer = "place_transfer";
+    public const string PlaceTransferOk = "place_transfer_ok";
     public const string PlaceBan = "place_ban";
     public const string PlaceBanOk = "place_ban_ok";
     public const string PlaceUnban = "place_unban";

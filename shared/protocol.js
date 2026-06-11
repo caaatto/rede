@@ -95,6 +95,8 @@ const MSG = {
   PLACE_MESSAGE: 'place_message',
   PLACE_ROLE_SET: 'place_role_set',
   PLACE_ROLE_SET_OK: 'place_role_set_ok',
+  PLACE_TRANSFER: 'place_transfer',
+  PLACE_TRANSFER_OK: 'place_transfer_ok',
   PLACE_BAN: 'place_ban',
   PLACE_BAN_OK: 'place_ban_ok',
   PLACE_UNBAN: 'place_unban',
