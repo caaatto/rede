@@ -25,6 +25,14 @@ public class BlobService : IDisposable
     // on the wire, safely under the 700 KB budget within the 1 MB frame cap.
     private const int ChunkCipherSize = 480_000;
 
+    // Upper bound on chunks the receiver will fetch/reassemble. ChunkCount comes
+    // from the (attacker-controlled) message envelope, so an unbounded value would
+    // let a sender trigger millions of BLOB_FETCH round-trips and unbounded memory
+    // growth. A legitimate max-size blob is ~(8 MB + 16)/480 KB ≈ 18 chunks.
+    private const int MaxChunkCount = 24;
+    // Hard ceiling on reassembled ciphertext before SecretBox.Open (MAC + slack).
+    private const int MaxCipherReassembleSize = MaxBlobSize + 4096;
+
     private static string ChunkBlobId(string blobId, int index) => $"{blobId}.{index}";
 
     private static readonly string BlobBaseDir = Path.Combine(
@@ -189,6 +197,14 @@ public class BlobService : IDisposable
         byte[]? cipherData;
         if (att.ChunkCount > 1)
         {
+            // ChunkCount is attacker-controlled (from the message envelope) — reject
+            // anything beyond what a legitimate max-size blob needs before issuing
+            // a single fetch, so a malicious sender can't trigger a fetch flood / OOM.
+            if (att.ChunkCount > MaxChunkCount)
+            {
+                OnSystemMessage?.Invoke($"Attachment rejected (claims {att.ChunkCount} chunks, max {MaxChunkCount}).");
+                return null;
+            }
             using var ms = new MemoryStream();
             for (int i = 0; i < att.ChunkCount; i++)
             {
@@ -196,6 +212,11 @@ public class BlobService : IDisposable
                 if (chunk is null)
                 {
                     OnSystemMessage?.Invoke($"Attachment fetch failed (chunk {i + 1}/{att.ChunkCount}).");
+                    return null;
+                }
+                if (ms.Length + chunk.Length > MaxCipherReassembleSize)
+                {
+                    OnSystemMessage?.Invoke("Attachment rejected (reassembled size exceeds limit).");
                     return null;
                 }
                 ms.Write(chunk, 0, chunk.Length);
