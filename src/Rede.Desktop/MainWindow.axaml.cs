@@ -72,6 +72,18 @@ public partial class MainWindow : Window
         _fido = new Rede.Core.Crypto.Fido2.Fido2UnlockService(_fidoAuth, _store);
         InitializeComponent();
         AdjustStartupSize();
+
+        // Windows: WinRT toasts from an unpackaged exe are silently dropped (no
+        // Start-menu shortcut carries our AppUserModelID), so render our own
+        // toast window and flash the taskbar button instead — Discord-style.
+        if (OperatingSystem.IsWindows())
+        {
+            _notifications.InAppToastHandler = (title, body) => Dispatcher.UIThread.Post(() =>
+            {
+                Controls.ToastWindow.ShowToast(this, title, body);
+                FlashTaskbar();
+            });
+        }
         Loaded += (_, _) =>
         {
             _windowHandle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
@@ -189,6 +201,38 @@ public partial class MainWindow : Window
 
         Width = Math.Clamp(Math.Min(idealW, availW * screenFraction), minW, idealW);
         Height = Math.Clamp(Math.Min(idealH, availH * screenFraction), minH, idealH);
+    }
+
+    // Taskbar flash (Windows): FLASHW_ALL | FLASHW_TIMERNOFG — the taskbar button
+    // keeps blinking until the window comes to the foreground, like Discord.
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct FLASHWINFO
+    {
+        public uint cbSize;
+        public IntPtr hwnd;
+        public uint dwFlags;
+        public uint uCount;
+        public uint dwTimeout;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+    private void FlashTaskbar()
+    {
+        if (!OperatingSystem.IsWindows() || IsActive) return;
+        if (_windowHandle == IntPtr.Zero)
+            _windowHandle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (_windowHandle == IntPtr.Zero) return;
+        var info = new FLASHWINFO
+        {
+            cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<FLASHWINFO>(),
+            hwnd = _windowHandle,
+            dwFlags = 0x3 | 0xC, // FLASHW_ALL | FLASHW_TIMERNOFG
+            uCount = uint.MaxValue,
+            dwTimeout = 0,
+        };
+        try { FlashWindowEx(ref info); } catch { }
     }
 
     /// <summary>
@@ -1147,8 +1191,10 @@ public partial class MainWindow : Window
             }
             MarkContactUnread(from);
 
-            // Desktop notification if not viewing this conversation
-            if (_mainVm.SelectedConversation is not ContactItemViewModel selN || selN.UserId != from)
+            // Desktop notification if not viewing this conversation — "viewing"
+            // requires window focus, so an unfocused/minimized window always
+            // notifies (and flashes the taskbar on Windows).
+            if (!IsActive || _mainVm.SelectedConversation is not ContactItemViewModel selN || selN.UserId != from)
             {
                 var displayName = _auth?.Profile?.Contacts.TryGetValue(from, out var c) == true
                     ? c.DisplayName ?? from : from;
@@ -1358,8 +1404,8 @@ public partial class MainWindow : Window
             }
             MarkGroupUnread(groupId);
 
-            // Desktop notification if not viewing this group
-            if (_mainVm.SelectedConversation is not GroupItemViewModel selGn || selGn.GroupId != groupId)
+            // Desktop notification if not viewing this group (or window unfocused)
+            if (!IsActive || _mainVm.SelectedConversation is not GroupItemViewModel selGn || selGn.GroupId != groupId)
             {
                 var groupName = _auth?.Profile?.Groups.TryGetValue(groupId, out var g) == true
                     ? g.Name : groupId;
@@ -1411,8 +1457,8 @@ public partial class MainWindow : Window
                 LoadAttachmentsForMessage(_mainVm.Messages[^1], chatMsg.Attachments);
             MarkChannelUnread(placeId, channelId);
 
-            // Desktop notification if not viewing this channel
-            if (_mainVm.SelectedConversation is not ChannelItemViewModel selCh
+            // Desktop notification if not viewing this channel (or window unfocused)
+            if (!IsActive || _mainVm.SelectedConversation is not ChannelItemViewModel selCh
                 || selCh.PlaceId != placeId || selCh.ChannelId != channelId)
             {
                 var placeName = _auth?.Profile?.Places.TryGetValue(placeId, out var pl) == true

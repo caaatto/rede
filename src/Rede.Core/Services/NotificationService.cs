@@ -5,7 +5,8 @@ namespace Rede.Core.Services;
 
 /// <summary>
 /// Cross-platform desktop notification service.
-/// Linux: notify-send (libnotify), Windows: PowerShell toast, macOS: osascript.
+/// Linux: notify-send (libnotify), Windows: in-app toast via InAppToastHandler
+/// (PowerShell WinRT toast as fallback), macOS: osascript.
 /// Privacy-first: default mode shows no sender/content in notifications.
 /// </summary>
 public class NotificationService
@@ -42,6 +43,15 @@ public class NotificationService
         get => _soundEnabled;
         set => _soundEnabled = value;
     }
+
+    /// <summary>
+    /// Optional in-app toast renderer (title, body). When set it replaces the OS
+    /// notification path on Windows: Windows silently drops WinRT toasts from
+    /// unpackaged exes whose AppUserModelID has no Start-menu shortcut, so the
+    /// desktop client renders its own topmost toast window instead. Linux/macOS
+    /// keep their native paths (notify-send / osascript).
+    /// </summary>
+    public Action<string, string>? InAppToastHandler { get; set; }
 
     /// <summary>
     /// Set the user's current status. Notifications are suppressed when DND.
@@ -110,14 +120,19 @@ public class NotificationService
         }
     }
 
-    private static void Show(string title, string body)
+    private void Show(string title, string body)
     {
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 ShowLinuxNotification(title, body);
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                ShowWindowsNotification(title, body);
+            {
+                if (InAppToastHandler is { } toast)
+                    toast(title, body);
+                else
+                    ShowWindowsNotification(title, body);
+            }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 ShowMacNotification(title, body);
         }
