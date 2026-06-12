@@ -85,34 +85,15 @@ public class ToastWindow : Window
         content.Children.Add(_titleText);
         content.Children.Add(_bodyText);
 
-        // Accent bar left + dark card, matching the app's dark cinematic theme.
+        // Plain dark card matching the app's dark cinematic theme.
         var card = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#16161f")),
             BorderBrush = new SolidColorBrush(Color.Parse("#2a2a3a")),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(0),
-            Child = new Grid
-            {
-                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-                Children =
-                {
-                    new Border
-                    {
-                        Width = 3,
-                        Background = new SolidColorBrush(Color.Parse("#8b5cf6")),
-                        CornerRadius = new CornerRadius(10, 0, 0, 10),
-                        [Grid.ColumnProperty] = 0,
-                    },
-                    new Border
-                    {
-                        Padding = new Thickness(14, 12),
-                        Child = content,
-                        [Grid.ColumnProperty] = 1,
-                    },
-                },
-            },
+            Padding = new Thickness(14, 12),
+            Child = content,
         };
         Content = card;
         Cursor = new Cursor(StandardCursorType.Hand);
@@ -122,16 +103,23 @@ public class ToastWindow : Window
         _timer.Start();
 
         PointerPressed += OnToastClicked;
+        // SizeToContent=Height: the final height isn't known yet when Opened
+        // fires, so reposition on every size change too — anchoring the card to
+        // the bottom-right of the working area (i.e. just above the taskbar).
         Opened += (_, _) => PositionBottomRight();
+        SizeChanged += (_, _) => PositionBottomRight();
     }
 
     private void PositionBottomRight()
     {
         var screen = Screens.Primary ?? (Screens.ScreenCount > 0 ? Screens.All[0] : null);
         if (screen is null) return;
+        var w = Bounds.Width;
+        var h = Bounds.Height;
+        if (double.IsNaN(w) || w <= 0 || double.IsNaN(h) || h <= 0) return;
         var wa = screen.WorkingArea;
-        var widthPx = (int)Math.Ceiling(Bounds.Width * screen.Scaling);
-        var heightPx = (int)Math.Ceiling(Bounds.Height * screen.Scaling);
+        var widthPx = (int)Math.Ceiling(w * screen.Scaling);
+        var heightPx = (int)Math.Ceiling(h * screen.Scaling);
         Position = new PixelPoint(
             wa.X + wa.Width - widthPx - ScreenMarginPx,
             wa.Y + wa.Height - heightPx - ScreenMarginPx);
